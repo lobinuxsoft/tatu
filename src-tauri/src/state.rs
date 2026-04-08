@@ -1,10 +1,11 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
 use crate::shortcuts::NonSteamGame;
+use crate::achievements::GameAchievements;
 use crate::steam::Game;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -19,6 +20,8 @@ pub struct AppState {
     pub steam_api_key: String,
     #[serde(default)]
     pub steam_id: String,
+    #[serde(default)]
+    pub achievement_cache: HashMap<u64, GameAchievements>,
 }
 
 impl AppState {
