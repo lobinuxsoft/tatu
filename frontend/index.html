@@ -81,6 +81,7 @@
   .spinner { display: inline-block; width: 24px; height: 24px; border: 3px solid #30363d; border-top-color: #58a6ff; border-radius: 50%; animation: spin 0.8s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
   .empty-state { text-align: center; padding: 3rem; color: #6e7681; }
+  .config-warning { text-align: center; padding: 2rem; background: #1c1208; border: 1px solid #9e6a03; border-radius: 8px; margin-bottom: 1rem; color: #d29922; font-size: 0.9rem; }
   footer { text-align: center; margin-top: 1.5rem; padding-top: 0.8rem; border-top: 1px solid #21262d; color: #484f58; font-size: 0.75rem; }
   @media (max-width: 600px) { td, th { padding: 0.3rem; font-size: 0.8rem; } .letter-big { font-size: 1.5rem; width: 36px; } .letter-nav a { width: 26px; height: 26px; font-size: 0.68rem; } }
 </style>
@@ -95,6 +96,7 @@
   <div class="tabs">
     <div class="tab active" data-tab="steam">Steam <span class="tab-count" id="tabSteamCount"></span></div>
     <div class="tab" data-tab="nonsteam">Non-Steam <span class="tab-count" id="tabNonsteamCount"></span></div>
+    <div class="tab" data-tab="settings" style="margin-left:auto; color:#6e7681;">Settings</div>
   </div>
 
   <!-- STEAM TAB -->
@@ -142,6 +144,44 @@
     </div>
     <div class="progress-wrap"><div class="progress-bar" id="nspBar"></div><div class="progress-text" id="nspText">0%</div></div>
     <div id="nsContent"><div class="empty-state">Dale a "Leer shortcuts.vdf" para cargar tus juegos Non-Steam.</div></div>
+  </div>
+
+  <!-- SETTINGS TAB -->
+  <div class="tab-panel" id="panel-settings">
+    <div style="max-width:500px; margin: 0 auto;">
+      <h2 style="color:#58a6ff; font-size:1.2rem; margin-bottom:1rem;">Configuración de Steam</h2>
+
+      <div style="margin-bottom:1.2rem;">
+        <label style="display:block; font-size:0.8rem; color:#8b949e; margin-bottom:0.3rem;">Steam API Key</label>
+        <div style="display:flex; gap:0.4rem;">
+          <input type="password" id="cfgApiKey" class="search" style="flex:1; font-family:monospace;" placeholder="Tu API key de Steam...">
+          <button class="sync-btn" id="toggleKeyBtn" style="white-space:nowrap;">Mostrar</button>
+        </div>
+        <p style="font-size:0.7rem; color:#484f58; margin-top:0.3rem;">
+          Generala en <a href="https://steamcommunity.com/dev/apikey" onclick="event.preventDefault(); window.__TAURI__.opener.openUrl('https://steamcommunity.com/dev/apikey');" style="color:#58a6ff; cursor:pointer;">steamcommunity.com/dev/apikey</a>
+        </p>
+      </div>
+
+      <div style="margin-bottom:1.2rem;">
+        <label style="display:block; font-size:0.8rem; color:#8b949e; margin-bottom:0.3rem;">Steam ID (numerico)</label>
+        <div style="display:flex; gap:0.4rem;">
+          <input type="text" id="cfgSteamId" class="search" placeholder="76561198xxxxxxxxx" style="flex:1; font-family:monospace;">
+          <button class="sync-btn" id="detectSteamIdBtn" style="white-space:nowrap;">Detectar</button>
+        </div>
+        <p style="font-size:0.7rem; color:#484f58; margin-top:0.3rem;">
+          Tu ID numerico de 17 digitos. Se detecta automaticamente si tenes Steam instalado.
+        </p>
+      </div>
+
+      <div style="display:flex; gap:0.5rem; align-items:center;">
+        <button class="sync-btn" id="saveSettingsBtn" style="background:#238636; border-color:#2ea043; color:#fff; padding:0.5rem 1.2rem; font-size:0.85rem;">Guardar</button>
+        <span id="settingsMsg" style="font-size:0.8rem; color:#2ea043;"></span>
+      </div>
+
+      <div style="margin-top:2rem; padding-top:1rem; border-top:1px solid #21262d;">
+        <p style="font-size:0.75rem; color:#484f58;">Los datos se guardan en <code style="color:#8b949e;">~/.config/backlog-tracker/state.json</code></p>
+      </div>
+    </div>
   </div>
 
   <footer>Estado guardado en ~/.config/backlog-tracker/</footer>
@@ -292,6 +332,66 @@ async function doSyncNonSteam() {
   finally { btn.disabled = false; btn.textContent = "Leer shortcuts.vdf"; }
 }
 
+// --- Settings ---
+let hasConfig = false;
+
+function loadSettingsUI(apiKey, steamId) {
+  document.getElementById("cfgApiKey").value = apiKey || "";
+  document.getElementById("cfgSteamId").value = steamId || "";
+  hasConfig = !!(apiKey && steamId);
+}
+
+function checkConfigWarning() {
+  const existing = document.getElementById("configWarning");
+  if (existing) existing.remove();
+  if (!hasConfig) {
+    const warn = document.createElement("div");
+    warn.id = "configWarning";
+    warn.className = "config-warning";
+    warn.innerHTML = 'Configurá tu Steam API Key y Steam ID en la pestaña <strong>Settings</strong> para poder sincronizar.';
+    document.getElementById("panel-steam").prepend(warn);
+  }
+}
+
+document.getElementById("toggleKeyBtn").addEventListener("click", () => {
+  const inp = document.getElementById("cfgApiKey");
+  const btn = document.getElementById("toggleKeyBtn");
+  if (inp.type === "password") { inp.type = "text"; btn.textContent = "Ocultar"; }
+  else { inp.type = "password"; btn.textContent = "Mostrar"; }
+});
+
+document.getElementById("detectSteamIdBtn").addEventListener("click", async () => {
+  const btn = document.getElementById("detectSteamIdBtn");
+  btn.disabled = true; btn.textContent = "Detectando...";
+  try {
+    const id = await invoke("detect_steam_id");
+    if (id) {
+      document.getElementById("cfgSteamId").value = id;
+      btn.textContent = "Detectado";
+    } else {
+      btn.textContent = "No encontrado";
+    }
+  } catch (e) { btn.textContent = "Error"; }
+  setTimeout(() => { btn.disabled = false; btn.textContent = "Detectar"; }, 3000);
+});
+
+document.getElementById("saveSettingsBtn").addEventListener("click", async () => {
+  const key = document.getElementById("cfgApiKey").value.trim();
+  const id = document.getElementById("cfgSteamId").value.trim();
+  const msg = document.getElementById("settingsMsg");
+  try {
+    await invoke("save_settings", { steamApiKey: key, steamId: id });
+    hasConfig = !!(key && id);
+    checkConfigWarning();
+    msg.style.color = "#2ea043";
+    msg.textContent = "Guardado";
+    setTimeout(() => { msg.textContent = ""; }, 3000);
+  } catch (e) {
+    msg.style.color = "#f85149";
+    msg.textContent = "Error: " + e;
+  }
+});
+
 // --- Init ---
 async function init() {
   await listen("detail_progress", (ev) => {
@@ -308,15 +408,33 @@ async function init() {
     const data = await invoke("get_state");
     G = data.games || []; completed = new Set(data.completed || []);
     NS = data.non_steam || []; completedNS = new Set(data.completed_nonsteam || []);
+    loadSettingsUI(data.steam_api_key, data.steam_id);
+    // Auto-detect Steam ID if not configured.
+    if (!data.steam_id) {
+      try {
+        const detectedId = await invoke("detect_steam_id");
+        if (detectedId) {
+          document.getElementById("cfgSteamId").value = detectedId;
+        }
+      } catch (_) {}
+    }
+    checkConfigWarning();
     document.getElementById("subtitle").textContent = G.length + " juegos Steam + " + NS.length + " Non-Steam";
-    if (G.length > 0) renderSteam(); else await doSync();
+    if (G.length > 0) renderSteam();
+    else if (hasConfig) await doSync();
     renderNonSteam();
   } catch (e) { document.getElementById("content").innerHTML = '<div class="loading" style="color:#f85149">Error: ' + e + '</div>'; }
 }
 
 // --- Events ---
-document.getElementById("syncBtn").addEventListener("click", doSync);
-document.getElementById("detailBtn").addEventListener("click", doFetchDetails);
+document.getElementById("syncBtn").addEventListener("click", () => {
+  if (!hasConfig) { document.getElementById("syncInfo").textContent = "Configurá API Key y Steam ID en Settings primero."; return; }
+  doSync();
+});
+document.getElementById("detailBtn").addEventListener("click", () => {
+  if (!hasConfig) { document.getElementById("syncInfo").textContent = "Configurá API Key y Steam ID en Settings primero."; return; }
+  doFetchDetails();
+});
 document.getElementById("nsSyncBtn").addEventListener("click", doSyncNonSteam);
 document.getElementById("catRow").addEventListener("click", e => { const b = e.target.closest(".tbtn"); if (!b) return; tog[b.dataset.t] = !tog[b.dataset.t]; renderSteam(); });
 document.getElementById("statusRow").addEventListener("click", e => { const b = e.target.closest(".sbtn"); if (!b) return; document.querySelectorAll(".sbtn").forEach(x => x.classList.remove("active")); b.classList.add("active"); sf = b.dataset.s; renderSteam(); });

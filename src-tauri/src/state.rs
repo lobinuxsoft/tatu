@@ -15,6 +15,10 @@ pub struct AppState {
     pub last_sync: Option<String>,
     #[serde(default)]
     pub non_steam: Vec<NonSteamGame>,
+    #[serde(default)]
+    pub steam_api_key: String,
+    #[serde(default)]
+    pub steam_id: String,
 }
 
 impl AppState {
