@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::shortcuts::NonSteamGame;
 use crate::achievements::GameAchievements;
+use crate::inventory::GameCards;
 use crate::steam::Game;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -22,6 +23,8 @@ pub struct AppState {
     pub steam_id: String,
     #[serde(default)]
     pub achievement_cache: HashMap<u64, GameAchievements>,
+    #[serde(default)]
+    pub cards_cache: HashMap<u64, GameCards>,
 }
 
 impl AppState {
