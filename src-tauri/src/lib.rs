@@ -1,3 +1,4 @@
+mod achievements;
 mod shortcuts;
 mod state;
 mod steam;
@@ -14,6 +15,15 @@ type SharedState = Mutex<AppState>;
 #[tauri::command]
 fn get_state(state: State<'_, SharedState>) -> Result<serde_json::Value, String> {
     let s = state.lock().map_err(|e| e.to_string())?;
+    // Build achievement progress summary from cache.
+    let ach_progress: std::collections::HashMap<u64, (usize, usize)> = s.achievement_cache.iter()
+        .map(|(&app_id, cached)| {
+            let unlocked = cached.achievements.iter().filter(|a| a.achieved).count();
+            let total = cached.achievements.len();
+            (app_id, (unlocked, total))
+        })
+        .collect();
+
     Ok(serde_json::json!({
         "games": s.games,
         "completed": s.completed,
@@ -22,6 +32,7 @@ fn get_state(state: State<'_, SharedState>) -> Result<serde_json::Value, String>
         "non_steam": s.non_steam,
         "steam_api_key": s.steam_api_key,
         "steam_id": s.steam_id,
+        "ach_progress": ach_progress,
     }))
 }
 
@@ -98,6 +109,65 @@ fn fetch_details(app: tauri::AppHandle, state: State<'_, SharedState>) -> Result
 }
 
 #[tauri::command]
+fn get_game_details(app_id: u64, state: State<'_, SharedState>) -> Result<serde_json::Value, String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    let game = s.games.iter_mut()
+        .find(|g| g.id == app_id)
+        .ok_or("Game not found")?;
+
+    // Fetch from Store API if not loaded yet.
+    if game.genres.is_empty() {
+        steam::fetch_single_detail(game);
+    }
+
+    let json = serde_json::to_value(&*game).map_err(|e| e.to_string())?;
+    s.save();
+    Ok(json)
+}
+
+#[tauri::command]
+fn get_game_achievements(app_id: u64, state: State<'_, SharedState>) -> Result<serde_json::Value, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    let api_key = s.steam_api_key.clone();
+    let steam_id = s.steam_id.clone();
+
+    let game_ach_count = s.games.iter()
+        .find(|g| g.id == app_id)
+        .map(|g| g.achievements)
+        .unwrap_or(0);
+
+    // Check cache.
+    if let Some(cached) = s.achievement_cache.get(&app_id) {
+        if cached.achievements.len() as u32 == game_ach_count {
+            let cached_clone = cached.clone();
+            drop(s);
+
+            // Lightweight freshness check.
+            match achievements::fetch_max_unlock_time(&api_key, &steam_id, app_id) {
+                Ok(max_time) if max_time == cached_clone.last_max_unlock_time => {
+                    return serde_json::to_value(&cached_clone).map_err(|e| e.to_string());
+                }
+                _ => {} // Cache stale or check failed, full fetch below.
+            }
+        } else {
+            drop(s);
+        }
+    } else {
+        drop(s);
+    }
+
+    // Full fetch.
+    let result = achievements::fetch_game_achievements(&api_key, &steam_id, app_id)?;
+    let json = serde_json::to_value(&result).map_err(|e| e.to_string())?;
+
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    s.achievement_cache.insert(app_id, result);
+    s.save();
+
+    Ok(json)
+}
+
+#[tauri::command]
 fn detect_steam_id() -> Option<String> {
     steam::detect_steam_id()
 }
@@ -141,6 +211,8 @@ pub fn run() {
             sync_steam,
             sync_nonsteam,
             fetch_details,
+            get_game_details,
+            get_game_achievements,
             detect_steam_id,
             save_completed,
             save_completed_nonsteam,
