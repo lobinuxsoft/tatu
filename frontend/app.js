@@ -169,9 +169,11 @@ function openDetailPanel(gameId) {
     `<div class="detail-tabs">` +
       `<div class="detail-tab active" data-dp="info">Info</div>` +
       `<div class="detail-tab" data-dp="logros">Logros</div>` +
+      (g.has_cards ? `<div class="detail-tab" data-dp="cromos">Cromos</div>` : ``) +
     `</div>` +
     `<div class="detail-tab-panel active" id="dpInfo"><div class="loading"><div class="spinner"></div><br>Cargando info...</div></div>` +
-    `<div class="detail-tab-panel" id="dpLogros"><div class="loading"><div class="spinner"></div><br>Cargando logros...</div></div>`;
+    `<div class="detail-tab-panel" id="dpLogros"><div class="loading"><div class="spinner"></div><br>Cargando logros...</div></div>` +
+    (g.has_cards ? `<div class="detail-tab-panel" id="dpCromos"><div class="loading"><div class="spinner"></div><br>Cargando inventario de Steam (puede tardar unos segundos)...</div></div>` : ``);
 
   document.getElementById("detailOverlay").classList.add("open");
   document.getElementById("detailPanel").classList.add("open");
@@ -187,6 +189,7 @@ function openDetailPanel(gameId) {
 
   loadGameDetails(gameId);
   loadAchievements(gameId);
+  if (g.has_cards) loadCards(gameId);
 }
 
 async function loadGameDetails(gameId) {
@@ -280,6 +283,72 @@ async function loadAchievements(gameId) {
       if (panel) panel.innerHTML = `<div class="ach-empty">Perfil de Steam privado. Cambia la visibilidad a publico para ver logros.</div>`;
     } else {
       if (panel) panel.innerHTML = `<div class="ach-empty">Error al cargar logros: ${esc(errStr)}</div>`;
+    }
+  }
+}
+
+async function loadCards(gameId) {
+  const panel = document.getElementById("dpCromos");
+  if (!panel) return;
+  try {
+    const data = await invoke("get_game_cards", { appId: gameId });
+    if (panelGameId !== gameId) return;
+
+    const cards = data.cards || [];
+    if (cards.length === 0) {
+      panel.innerHTML = `<div class="ach-empty">No hay cromos disponibles para este juego.</div>`;
+      return;
+    }
+
+    const owned = cards.filter(c => c.owned);
+    const total = cards.length;
+    const pct = total ? Math.round(owned.length / total * 100) : 0;
+
+    let html = "";
+
+    // Badges section.
+    const badges = data.badges || [];
+    if (badges.length > 0) {
+      const normalBadges = badges.filter(b => !b.foil);
+      const foilBadges = badges.filter(b => b.foil);
+      const earnedCount = normalBadges.filter(b => b.owned).length;
+      const unlockInfo = data.user_badge_unlocked ? `<div class="badge-unlocked-info">${esc(data.user_badge_unlocked)}</div>` : "";
+
+      html += `<div class="badges-section"><div class="cards-section-title">Insignias (${earnedCount}/${normalBadges.length})</div>${unlockInfo}<div class="badges-grid">`;
+      for (const b of normalBadges) {
+        const cls = b.owned ? "" : " not-earned";
+        html += `<div class="badge-item${cls}"><img class="badge-img" src="${b.image_url}" loading="lazy"><div class="badge-name">${esc(b.name)}</div><div class="badge-level">Nivel ${b.level}</div><div class="badge-xp">${b.xp} XP</div></div>`;
+      }
+      html += `</div>`;
+      if (foilBadges.length > 0) {
+        html += `<div class="cards-section-title foil" style="margin-top:0.8rem">Foil</div><div class="badges-grid">`;
+        for (const b of foilBadges) {
+          const cls = "foil" + (b.owned ? "" : " not-earned");
+          html += `<div class="badge-item ${cls}"><img class="badge-img" src="${b.image_url}" loading="lazy"><div class="badge-name">${esc(b.name)}</div><div class="badge-xp">${b.xp} XP</div></div>`;
+        }
+        html += `</div>`;
+      }
+      html += `</div>`;
+    }
+
+    html += `<div class="cards-summary">${owned.length}/${total} cromos \u2014 ${pct}%</div>`;
+    html += `<div class="ach-progress-wrap"><div class="ach-progress-bar" style="width:${pct}%"></div><div class="ach-progress-text">${owned.length}/${total}</div></div>`;
+    html += `<div class="cards-grid">`;
+    for (const c of cards) {
+      const cls = c.owned ? "" : " unowned";
+      const qty = c.quantity > 1 ? `<span class="card-qty">x${c.quantity}</span>` : "";
+      html += `<div class="card-item${cls}"><img class="card-img" src="${c.image_url}" loading="lazy"><div class="card-name">${esc(c.name)}${qty}</div></div>`;
+    }
+    html += `</div>`;
+
+    panel.innerHTML = html;
+  } catch (e) {
+    if (panelGameId !== gameId) return;
+    const errStr = String(e);
+    if (errStr.includes("No trading cards")) {
+      if (panel) panel.innerHTML = `<div class="ach-empty">Este juego no tiene cromos.</div>`;
+    } else {
+      if (panel) panel.innerHTML = `<div class="ach-empty">Error al cargar cromos: ${esc(errStr)}</div>`;
     }
   }
 }

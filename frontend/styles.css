@@ -124,5 +124,32 @@ input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; accent-colo
 .ach-date { font-size: 0.68rem; color: #58a6ff; margin-top: 0.15rem; }
 .ach-empty { text-align: center; padding: 2rem; color: #6e7681; font-size: 0.9rem; }
 
+/* Trading cards grid */
+.cards-summary { font-size: 0.82rem; color: #8b949e; margin-bottom: 0.8rem; }
+.cards-section-title { font-size: 0.85rem; font-weight: 600; color: #e6edf3; margin: 0.8rem 0 0.5rem; }
+.cards-section-title.foil { color: #d29922; }
+.cards-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 0.6rem; }
+.card-item { background: #21262d; border: 1px solid #30363d; border-radius: 6px; padding: 0.4rem; text-align: center; transition: border-color 0.15s; }
+.card-item:hover { border-color: #58a6ff; }
+.card-item.unowned { opacity: 0.35; }
+.card-item.unowned .card-img { filter: grayscale(1); }
+.card-item.foil { border-color: #9e6a03; background: #1c1a15; }
+.card-img { width: 100%; aspect-ratio: 1; object-fit: contain; border-radius: 4px; }
+.card-name { font-size: 0.68rem; color: #c9d1d9; margin-top: 0.3rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card-qty { color: #58a6ff; font-weight: 600; margin-left: 0.2rem; }
+.badges-section { margin-bottom: 1rem; }
+.badges-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); gap: 0.5rem; }
+.badge-item { text-align: center; padding: 0.4rem; background: #21262d; border: 1px solid #30363d; border-radius: 6px; transition: border-color 0.15s; }
+.badge-item:hover { border-color: #58a6ff; }
+.badge-item.not-earned { opacity: 0.3; }
+.badge-item.not-earned .badge-img { filter: grayscale(1); }
+.badge-item.foil { border-color: #9e6a03; background: #1c1a15; }
+.badge-item.foil.not-earned { border-color: #30363d; }
+.badge-img { width: 64px; height: 64px; }
+.badge-name { font-size: 0.65rem; color: #c9d1d9; margin-top: 0.2rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.badge-level { font-size: 0.6rem; color: #58a6ff; }
+.badge-xp { font-size: 0.58rem; color: #8b949e; }
+.badge-unlocked-info { font-size: 0.72rem; color: #8b949e; margin-top: 0.3rem; }
+
 footer { text-align: center; margin-top: 1.5rem; padding-top: 0.8rem; border-top: 1px solid #21262d; color: #484f58; font-size: 0.75rem; }
 @media (max-width: 600px) { td, th { padding: 0.3rem; font-size: 0.8rem; } .letter-big { font-size: 1.5rem; width: 36px; } .letter-nav a { width: 26px; height: 26px; font-size: 0.68rem; } }

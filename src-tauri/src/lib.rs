@@ -1,4 +1,5 @@
 mod achievements;
+mod inventory;
 mod shortcuts;
 mod state;
 mod steam;
@@ -168,6 +169,33 @@ fn get_game_achievements(app_id: u64, state: State<'_, SharedState>) -> Result<s
 }
 
 #[tauri::command]
+fn get_game_cards(app_id: u64, state: State<'_, SharedState>) -> Result<serde_json::Value, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    let steam_id = s.steam_id.clone();
+
+    // Check cache (30 min = 1800 seconds).
+    if let Some(cached) = s.cards_cache.get(&app_id) {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        if now - cached.fetched_at < 1800 {
+            return serde_json::to_value(cached).map_err(|e| e.to_string());
+        }
+    }
+    drop(s);
+
+    let result = inventory::fetch_game_cards(&steam_id, app_id)?;
+    let json = serde_json::to_value(&result).map_err(|e| e.to_string())?;
+
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    s.cards_cache.insert(app_id, result);
+    s.save();
+
+    Ok(json)
+}
+
+#[tauri::command]
 fn detect_steam_id() -> Option<String> {
     steam::detect_steam_id()
 }
@@ -213,6 +241,7 @@ pub fn run() {
             fetch_details,
             get_game_details,
             get_game_achievements,
+            get_game_cards,
             detect_steam_id,
             save_completed,
             save_completed_nonsteam,
