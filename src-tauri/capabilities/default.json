@@ -1,0 +1,9 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicerapp/tauri/dev/core/tauri-utils/schema.json",
+  "identifier": "default",
+  "description": "Default capability",
+  "windows": ["main"],
+  "permissions": [
+    "core:default"
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicerapp/tauri/dev/core/tauri-config-schema/schema.json",
+  "productName": "Game Progress Tracker",
+  "identifier": "com.lobinux.game-progress-tracker",
+  "build": {
+    "frontendDist": "../frontend"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "Game Progress Tracker",
+        "width": 960,
+        "height": 800,
+        "resizable": true,
+        "decorations": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' https://media.steampowered.com https://shared.akamai.steamstatic.com"
+    }
+  }
+}

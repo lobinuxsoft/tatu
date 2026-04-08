@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Game Progress Tracker</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0e1117; color: #c9d1d9; min-height: 100vh; padding: 1.5rem 1rem; }
+  .container { max-width: 960px; margin: 0 auto; }
+  header { text-align: center; margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 1px solid #21262d; }
+  h1 { font-size: 1.8rem; color: #58a6ff; margin-bottom: 0.3rem; }
+  .subtitle { color: #8b949e; font-size: 0.9rem; }
+  .sync-bar { display: flex; align-items: center; justify-content: center; gap: 0.6rem; margin-bottom: 1.2rem; flex-wrap: wrap; }
+  .sync-info { font-size: 0.75rem; color: #6e7681; }
+  .sync-btn { padding: 0.3rem 0.7rem; background: #21262d; border: 1px solid #30363d; border-radius: 6px; color: #58a6ff; cursor: pointer; font-size: 0.75rem; transition: all 0.15s; }
+  .sync-btn:hover { background: #30363d; }
+  .sync-btn:disabled { opacity: 0.4; cursor: default; }
+  .stats { display: flex; justify-content: center; gap: 1.5rem; margin-bottom: 1.2rem; flex-wrap: wrap; }
+  .stat { text-align: center; }
+  .stat-value { font-size: 1.5rem; font-weight: 700; }
+  .stat-value.c1 { color: #2ea043; } .stat-value.c2 { color: #d29922; } .stat-value.c3 { color: #bc8cff; } .stat-value.c4 { color: #58a6ff; }
+  .stat-label { font-size: 0.7rem; color: #8b949e; text-transform: uppercase; letter-spacing: 0.04em; }
+  .progress-wrap { margin: 0 0 1.2rem; background: #161b22; border-radius: 8px; overflow: hidden; height: 26px; position: relative; border: 1px solid #21262d; }
+  .progress-bar { height: 100%; background: linear-gradient(90deg, #238636, #2ea043); transition: width 0.4s; border-radius: 8px; }
+  .progress-text { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 0.8rem; font-weight: 600; color: #e6edf3; text-shadow: 0 1px 3px rgba(0,0,0,0.8); }
+  .controls { display: flex; gap: 0.5rem; margin-bottom: 0.7rem; flex-wrap: wrap; align-items: center; }
+  .search { flex: 1; min-width: 200px; padding: 0.5rem 0.75rem; background: #161b22; border: 1px solid #30363d; border-radius: 6px; color: #e6edf3; font-size: 0.9rem; outline: none; }
+  .search:focus { border-color: #58a6ff; } .search::placeholder { color: #484f58; }
+  .filter-section { margin-bottom: 0.5rem; display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center; }
+  .filter-label { font-size: 0.75rem; color: #6e7681; margin-right: 0.2rem; min-width: 60px; }
+  .tbtn { padding: 0.32rem 0.6rem; background: #21262d; border: 1px solid #30363d; border-radius: 6px; color: #6e7681; cursor: pointer; font-size: 0.78rem; transition: all 0.15s; user-select: none; display: inline-flex; align-items: center; gap: 0.3rem; }
+  .tbtn:hover { background: #30363d; color: #c9d1d9; } .tbtn .cnt { opacity: 0.6; font-size: 0.68rem; }
+  .tbtn.on[data-t="game"] { background: #238636; border-color: #2ea043; color: #fff; }
+  .tbtn.on[data-t="mp"] { background: #1f6feb; border-color: #388bfd; color: #fff; }
+  .tbtn.on[data-t="tool"] { background: #6e40c9; border-color: #8957e5; color: #fff; }
+  .tbtn.on[data-t="demo"] { background: #9e6a03; border-color: #d29922; color: #fff; }
+  .sbtn { padding: 0.32rem 0.6rem; background: #21262d; border: 1px solid #30363d; border-radius: 6px; color: #6e7681; cursor: pointer; font-size: 0.78rem; transition: all 0.15s; user-select: none; }
+  .sbtn:hover { background: #30363d; color: #c9d1d9; }
+  .sbtn.active { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+  .letter-nav { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-bottom: 1rem; justify-content: center; }
+  .letter-nav a { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; background: #21262d; border: 1px solid #30363d; border-radius: 6px; color: #484f58; text-decoration: none; font-size: 0.78rem; font-weight: 600; transition: all 0.15s; }
+  .letter-nav a:hover { background: #30363d; color: #e6edf3; } .letter-nav a.hl { color: #58a6ff; }
+  .letter-group { margin-bottom: 1.5rem; }
+  .letter-header { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.5rem; padding: 0.4rem 0; }
+  .letter-big { font-size: 2rem; font-weight: 800; color: #58a6ff; width: 50px; text-align: center; flex-shrink: 0; }
+  .letter-info { font-size: 0.75rem; color: #8b949e; }
+  .letter-bar { flex: 1; height: 6px; background: #21262d; border-radius: 3px; overflow: hidden; max-width: 200px; }
+  .letter-bar-fill { height: 100%; background: #2ea043; border-radius: 3px; transition: width 0.3s; }
+  table { width: 100%; border-collapse: collapse; background: #161b22; border-radius: 8px; overflow: hidden; border: 1px solid #21262d; }
+  thead th { background: #1c2129; padding: 0.5rem; text-align: left; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.04em; color: #8b949e; border-bottom: 1px solid #21262d; }
+  thead th:nth-child(1) { width: 36px; text-align: center; }
+  thead th:nth-child(3) { text-align: center; width: 70px; }
+  tbody tr { border-bottom: 1px solid #1c2129; transition: background 0.1s; }
+  tbody tr:hover { background: #1c2129; }
+  tbody tr.done { background: rgba(46,160,67,0.07); }
+  tbody tr.done .gn { text-decoration: line-through; color: #6e7681; }
+  td { padding: 0.4rem 0.5rem; font-size: 0.88rem; }
+  td:nth-child(1) { text-align: center; }
+  td:nth-child(3) { text-align: center; color: #8b949e; font-size: 0.82rem; }
+  .gn { color: #e6edf3; display: flex; align-items: center; gap: 0.5rem; }
+  .gn img { width: 20px; height: 20px; border-radius: 3px; flex-shrink: 0; }
+  input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; accent-color: #2ea043; }
+
+  /* Tags */
+  .tags { display: flex; flex-wrap: wrap; gap: 0.25rem; margin-top: 0.25rem; }
+  .tag { display: inline-block; font-size: 0.6rem; padding: 0.1rem 0.35rem; border-radius: 3px; font-weight: 600; line-height: 1.4; }
+  .tag-tool { background: #6e40c9; color: #e6edf3; }
+  .tag-mp { background: #1f6feb; color: #e6edf3; }
+  .tag-demo { background: #9e6a03; color: #e6edf3; }
+  .tag-genre { background: #21262d; color: #8b949e; border: 1px solid #30363d; }
+  .tag-ach { background: #1a3a2a; color: #3fb950; border: 1px solid #238636; }
+  .tag-cards { background: #2a2315; color: #d29922; border: 1px solid #9e6a03; }
+
+  .game-cell { display: flex; flex-direction: column; gap: 0.15rem; }
+  .loading { text-align: center; padding: 3rem; color: #8b949e; }
+  .spinner { display: inline-block; width: 24px; height: 24px; border: 3px solid #30363d; border-top-color: #58a6ff; border-radius: 50%; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  footer { text-align: center; margin-top: 1.5rem; padding-top: 0.8rem; border-top: 1px solid #21262d; color: #484f58; font-size: 0.75rem; }
+  @media (max-width: 600px) { td, th { padding: 0.3rem; font-size: 0.8rem; } .letter-big { font-size: 1.5rem; width: 36px; } .letter-nav a { width: 26px; height: 26px; font-size: 0.68rem; } }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>Game Progress Tracker</h1>
+    <p class="subtitle" id="subtitle">Cargando...</p>
+  </header>
+  <div class="sync-bar">
+    <span class="sync-info" id="syncInfo"></span>
+    <button class="sync-btn" id="syncBtn">Sincronizar con Steam</button>
+    <button class="sync-btn" id="detailBtn">Cargar detalles</button>
+  </div>
+  <div class="stats">
+    <div class="stat"><div class="stat-value c1" id="sComp">0</div><div class="stat-label">Completados</div></div>
+    <div class="stat"><div class="stat-value c2" id="sPend">0</div><div class="stat-label">Pendientes</div></div>
+    <div class="stat"><div class="stat-value c3" id="sHours">0</div><div class="stat-label">Horas jugadas</div></div>
+    <div class="stat"><div class="stat-value c4" id="sVis">0</div><div class="stat-label">Mostrando</div></div>
+  </div>
+  <div class="progress-wrap"><div class="progress-bar" id="pBar"></div><div class="progress-text" id="pText">0%</div></div>
+  <div class="controls"><input type="text" class="search" id="search" placeholder="Buscar juego o género..." autocomplete="off"></div>
+  <div class="filter-section" id="catRow">
+    <span class="filter-label">Categoría:</span>
+    <button class="tbtn on" data-t="game">Juegos <span class="cnt" id="cG"></span></button>
+    <button class="tbtn" data-t="mp">Multiplayer <span class="cnt" id="cM"></span></button>
+    <button class="tbtn" data-t="tool">Herramientas <span class="cnt" id="cT"></span></button>
+    <button class="tbtn" data-t="demo">Demos <span class="cnt" id="cD"></span></button>
+  </div>
+  <div class="filter-section" id="statusRow">
+    <span class="filter-label">Estado:</span>
+    <button class="sbtn active" data-s="all">Todos</button>
+    <button class="sbtn" data-s="pending">Pendientes</button>
+    <button class="sbtn" data-s="done">Completados</button>
+    <button class="sbtn" data-s="unplayed">Sin tocar</button>
+  </div>
+  <div class="letter-nav" id="lNav"></div>
+  <div id="content"><div class="loading"><div class="spinner"></div><br>Cargando librería...</div></div>
+  <footer>Estado guardado en ~/.config/backlog-tracker/</footer>
+</div>
+<script>
+const { invoke } = window.__TAURI__.core;
+const { listen } = window.__TAURI__.event;
+
+let G = [], completed = new Set(), tog = { game: true, mp: false, tool: false, demo: false }, sf = "all", q = "";
+const TL = { tool: "Tool", mp: "MP", demo: "Demo" };
+const TC = { tool: "tag-tool", mp: "tag-mp", demo: "tag-demo" };
+const gCat = g => g.tag || "game";
+const gLetter = n => { const f = n.charAt(0).toUpperCase(); return /[A-Z]/.test(f) ? f : "#"; };
+
+function escHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+function matchesQuery(g) {
+  if (!q) return true;
+  if (g.name.toLowerCase().includes(q)) return true;
+  if (g.genres && g.genres.some(genre => genre.toLowerCase().includes(q))) return true;
+  return false;
+}
+
+function render() {
+  const content = document.getElementById("content"), nav = document.getElementById("lNav");
+  document.querySelectorAll(".tbtn").forEach(b => b.classList.toggle("on", !!tog[b.dataset.t]));
+  const cc = { game: 0, mp: 0, tool: 0, demo: 0 };
+  G.forEach(g => { cc[gCat(g)]++; });
+  document.getElementById("cG").textContent = "(" + cc.game + ")";
+  document.getElementById("cM").textContent = "(" + cc.mp + ")";
+  document.getElementById("cT").textContent = "(" + cc.tool + ")";
+  document.getElementById("cD").textContent = "(" + cc.demo + ")";
+
+  let comp = 0, vis = 0, hrs = 0;
+  const groups = {}, gs = {};
+  G.forEach(g => {
+    const cat = gCat(g), chk = completed.has(g.id);
+    if (!tog[cat]) return;
+    if (!matchesQuery(g)) return;
+    if (sf === "done" && !chk) return;
+    if (sf === "pending" && chk) return;
+    if (sf === "unplayed" && (g.hours > 0 || chk)) return;
+    vis++; if (chk) comp++; hrs += g.hours;
+    const L = gLetter(g.name);
+    if (!groups[L]) { groups[L] = []; gs[L] = { t: 0, d: 0 }; }
+    groups[L].push({ ...g, chk }); gs[L].t++; if (chk) gs[L].d++;
+  });
+
+  const AL = ["#","A","B","C","D","E","F","G","H","I","J","K","L","M","N","O","P","Q","R","S","T","U","V","W","X","Y","Z"];
+  nav.innerHTML = AL.map(l => `<a href="#g-${l}" class="${groups[l]?'hl':''}">${l}</a>`).join("");
+  content.innerHTML = "";
+
+  Object.keys(groups).sort((a,b) => a==="#"?-1:b==="#"?1:a.localeCompare(b)).forEach(L => {
+    const gg = groups[L], st = gs[L], pct = st.t ? Math.round(st.d/st.t*100) : 0;
+    const sec = document.createElement("div");
+    sec.className = "letter-group"; sec.id = "g-" + L;
+    let rows = "";
+    gg.forEach(g => {
+      const img = g.icon ? `<img src="https://media.steampowered.com/steamcommunity/public/images/apps/${g.id}/${g.icon}.jpg" loading="lazy">` : "";
+      const h = g.hours > 0 ? g.hours + "h" : "\u2014";
+
+      // Build tags
+      let tagsHtml = "";
+      if (g.tag) tagsHtml += `<span class="tag ${TC[g.tag]}">${TL[g.tag]}</span>`;
+      if (g.achievements > 0) tagsHtml += `<span class="tag tag-ach">\u{1F3C6} ${g.achievements}</span>`;
+      if (g.has_cards) tagsHtml += `<span class="tag tag-cards">\u{1F0CF} Cromos</span>`;
+      if (g.genres && g.genres.length > 0) {
+        g.genres.forEach(genre => {
+          tagsHtml += `<span class="tag tag-genre">${escHtml(genre)}</span>`;
+        });
+      }
+
+      const tagsRow = tagsHtml ? `<div class="tags">${tagsHtml}</div>` : "";
+
+      rows += `<tr class="${g.chk?'done':''}">
+        <td><input type="checkbox" data-id="${g.id}" ${g.chk?'checked':''}></td>
+        <td><div class="game-cell"><span class="gn">${img}${escHtml(g.name)}</span>${tagsRow}</div></td>
+        <td>${h}</td>
+      </tr>`;
+    });
+    sec.innerHTML = `<div class="letter-header"><div class="letter-big">${L}</div><div class="letter-info">${st.d}/${st.t}</div><div class="letter-bar"><div class="letter-bar-fill" style="width:${pct}%"></div></div></div><table><thead><tr><th></th><th>Juego</th><th>Horas</th></tr></thead><tbody>${rows}</tbody></table>`;
+    content.appendChild(sec);
+  });
+
+  if (vis === 0 && G.length > 0) content.innerHTML = '<div class="loading" style="color:#8b949e">No hay juegos con estos filtros.</div>';
+  const pct = vis ? Math.round(comp/vis*100) : 0;
+  document.getElementById("sComp").textContent = comp;
+  document.getElementById("sPend").textContent = vis - comp;
+  document.getElementById("sHours").textContent = Math.round(hrs).toLocaleString();
+  document.getElementById("sVis").textContent = vis;
+  document.getElementById("pBar").style.width = pct + "%";
+  document.getElementById("pText").textContent = pct + "% (" + comp + "/" + vis + ")";
+}
+
+function updateSubtitle() {
+  document.getElementById("subtitle").textContent = G.length + " juegos. Un cumpleaños. Una misión.";
+}
+
+async function doSync() {
+  const btn = document.getElementById("syncBtn");
+  btn.disabled = true; btn.textContent = "Sincronizando...";
+  document.getElementById("syncInfo").textContent = "Conectando con Steam...";
+  try {
+    G = await invoke("sync_steam");
+    updateSubtitle();
+    document.getElementById("syncInfo").textContent = `Sincronizado \u2014 ${G.length} juegos`;
+    render();
+  } catch (e) {
+    document.getElementById("syncInfo").textContent = "Error: " + e;
+  } finally { btn.disabled = false; btn.textContent = "Sincronizar con Steam"; }
+}
+
+async function doFetchDetails() {
+  const btn = document.getElementById("detailBtn");
+  btn.disabled = true; btn.textContent = "Cargando detalles...";
+  try {
+    await invoke("fetch_details");
+  } catch (e) {
+    document.getElementById("syncInfo").textContent = "Error detalles: " + e;
+    btn.disabled = false; btn.textContent = "Cargar detalles";
+  }
+}
+
+async function init() {
+  // Listen for detail fetch progress.
+  await listen("detail_progress", (event) => {
+    const { current, total } = event.payload;
+    document.getElementById("detailBtn").textContent = `Detalles: ${current}/${total}`;
+  });
+  await listen("details_done", (event) => {
+    G = event.payload.games;
+    render();
+    const btn = document.getElementById("detailBtn");
+    btn.disabled = false; btn.textContent = "Cargar detalles";
+    document.getElementById("syncInfo").textContent = `Detalles cargados \u2014 ${G.length} juegos`;
+  });
+
+  try {
+    const data = await invoke("get_state");
+    G = data.games || [];
+    completed = new Set(data.completed || []);
+    if (G.length > 0) { updateSubtitle(); render(); }
+    else { await doSync(); }
+  } catch (e) {
+    document.getElementById("content").innerHTML = '<div class="loading" style="color:#f85149">Error: ' + e + '</div>';
+  }
+}
+
+document.getElementById("syncBtn").addEventListener("click", doSync);
+document.getElementById("detailBtn").addEventListener("click", doFetchDetails);
+document.getElementById("catRow").addEventListener("click", e => { const b = e.target.closest(".tbtn"); if (!b) return; tog[b.dataset.t] = !tog[b.dataset.t]; render(); });
+document.getElementById("statusRow").addEventListener("click", e => { const b = e.target.closest(".sbtn"); if (!b) return; document.querySelectorAll(".sbtn").forEach(x => x.classList.remove("active")); b.classList.add("active"); sf = b.dataset.s; render(); });
+document.getElementById("content").addEventListener("change", async e => {
+  if (e.target.type === "checkbox") {
+    const id = parseInt(e.target.dataset.id, 10);
+    if (e.target.checked) completed.add(id); else completed.delete(id);
+    render();
+    await invoke("save_completed", { completed: [...completed] });
+  }
+});
+document.getElementById("search").addEventListener("input", e => { q = e.target.value.toLowerCase().trim(); render(); });
+document.getElementById("lNav").addEventListener("click", e => { if (e.target.tagName === "A") { e.preventDefault(); const t = document.querySelector(e.target.getAttribute("href")); if (t) t.scrollIntoView({ behavior: "smooth", block: "start" }); } });
+
+init();
+</script>
+</body>
+</html>
