@@ -4,13 +4,21 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::shortcuts::NonSteamGame;
 use crate::steam::Game;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AppState {
     pub games: Vec<Game>,
     pub completed: HashSet<u64>,
+    pub completed_nonsteam: HashSet<u64>,
     pub last_sync: Option<String>,
+    #[serde(default)]
+    pub non_steam: Vec<NonSteamGame>,
+    #[serde(default)]
+    pub steam_api_key: String,
+    #[serde(default)]
+    pub steam_id: String,
 }
 
 impl AppState {

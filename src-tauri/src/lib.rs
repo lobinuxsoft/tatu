@@ -1,8 +1,10 @@
+mod shortcuts;
 mod state;
 mod steam;
 
 use std::sync::Mutex;
 
+use shortcuts::NonSteamGame;
 use state::AppState;
 use steam::Game;
 use tauri::{Emitter, Manager, State};
@@ -15,13 +17,44 @@ fn get_state(state: State<'_, SharedState>) -> Result<serde_json::Value, String>
     Ok(serde_json::json!({
         "games": s.games,
         "completed": s.completed,
+        "completed_nonsteam": s.completed_nonsteam,
         "last_sync": s.last_sync,
+        "non_steam": s.non_steam,
+        "steam_api_key": s.steam_api_key,
+        "steam_id": s.steam_id,
     }))
 }
 
 #[tauri::command]
+fn get_settings(state: State<'_, SharedState>) -> Result<serde_json::Value, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({
+        "steam_api_key": s.steam_api_key,
+        "steam_id": s.steam_id,
+    }))
+}
+
+#[tauri::command]
+fn save_settings(
+    steam_api_key: String,
+    steam_id: String,
+    state: State<'_, SharedState>,
+) -> Result<(), String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    s.steam_api_key = steam_api_key;
+    s.steam_id = steam_id;
+    s.save();
+    Ok(())
+}
+
+#[tauri::command]
 fn sync_steam(state: State<'_, SharedState>) -> Result<Vec<Game>, String> {
-    let games = steam::fetch_games()?;
+    let s = state.lock().map_err(|e| e.to_string())?;
+    let key = s.steam_api_key.clone();
+    let id = s.steam_id.clone();
+    drop(s);
+
+    let games = steam::fetch_games(&key, &id)?;
     let mut s = state.lock().map_err(|e| e.to_string())?;
     s.games = games.clone();
     s.last_sync = Some(now_epoch());
@@ -30,28 +63,34 @@ fn sync_steam(state: State<'_, SharedState>) -> Result<Vec<Game>, String> {
 }
 
 #[tauri::command]
+fn sync_nonsteam(state: State<'_, SharedState>) -> Result<Vec<NonSteamGame>, String> {
+    let games = shortcuts::parse_shortcuts()?;
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    s.non_steam = games.clone();
+    s.save();
+    Ok(games)
+}
+
+#[tauri::command]
 fn fetch_details(app: tauri::AppHandle, state: State<'_, SharedState>) -> Result<(), String> {
     let s = state.lock().map_err(|e| e.to_string())?;
     let mut games = s.games.clone();
-    drop(s); // Release lock before long operation.
+    drop(s);
 
     let app_clone = app.clone();
     std::thread::spawn(move || {
         steam::fetch_details_for(&mut games, |current, total| {
-            let _ = app_clone.emit("detail_progress", serde_json::json!({
-                "current": current,
-                "total": total,
-            }));
+            let _ = app_clone.emit(
+                "detail_progress",
+                serde_json::json!({ "current": current, "total": total }),
+            );
         });
 
-        // Save updated games back to state.
         let state: tauri::State<'_, SharedState> = app_clone.state();
         if let Ok(mut s) = state.lock() {
             s.games = games;
             s.save();
-            let _ = app_clone.emit("details_done", serde_json::json!({
-                "games": &s.games,
-            }));
+            let _ = app_clone.emit("details_done", serde_json::json!({ "games": &s.games }));
         }
     });
 
@@ -59,9 +98,25 @@ fn fetch_details(app: tauri::AppHandle, state: State<'_, SharedState>) -> Result
 }
 
 #[tauri::command]
+fn detect_steam_id() -> Option<String> {
+    steam::detect_steam_id()
+}
+
+#[tauri::command]
 fn save_completed(completed: Vec<u64>, state: State<'_, SharedState>) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     s.completed = completed.into_iter().collect();
+    s.save();
+    Ok(())
+}
+
+#[tauri::command]
+fn save_completed_nonsteam(
+    completed: Vec<u64>,
+    state: State<'_, SharedState>,
+) -> Result<(), String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    s.completed_nonsteam = completed.into_iter().collect();
     s.save();
     Ok(())
 }
@@ -77,12 +132,18 @@ pub fn run() {
     let app_state = AppState::load();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
         .manage(Mutex::new(app_state))
         .invoke_handler(tauri::generate_handler![
             get_state,
+            get_settings,
+            save_settings,
             sync_steam,
+            sync_nonsteam,
             fetch_details,
+            detect_steam_id,
             save_completed,
+            save_completed_nonsteam,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -8,17 +8,25 @@
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0e1117; color: #c9d1d9; min-height: 100vh; padding: 1.5rem 1rem; }
   .container { max-width: 960px; margin: 0 auto; }
-  header { text-align: center; margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 1px solid #21262d; }
+  header { text-align: center; margin-bottom: 1rem; padding-bottom: 1rem; border-bottom: 1px solid #21262d; }
   h1 { font-size: 1.8rem; color: #58a6ff; margin-bottom: 0.3rem; }
   .subtitle { color: #8b949e; font-size: 0.9rem; }
+
+  /* Tabs */
+  .tabs { display: flex; gap: 0; margin-bottom: 1.2rem; border-bottom: 2px solid #21262d; }
+  .tab { padding: 0.6rem 1.2rem; cursor: pointer; color: #8b949e; font-size: 0.9rem; font-weight: 600; border-bottom: 2px solid transparent; margin-bottom: -2px; transition: all 0.15s; user-select: none; }
+  .tab:hover { color: #c9d1d9; }
+  .tab.active { color: #58a6ff; border-bottom-color: #58a6ff; }
+  .tab .tab-count { font-size: 0.7rem; opacity: 0.6; margin-left: 0.3rem; }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
   .sync-bar { display: flex; align-items: center; justify-content: center; gap: 0.6rem; margin-bottom: 1.2rem; flex-wrap: wrap; }
   .sync-info { font-size: 0.75rem; color: #6e7681; }
   .sync-btn { padding: 0.3rem 0.7rem; background: #21262d; border: 1px solid #30363d; border-radius: 6px; color: #58a6ff; cursor: pointer; font-size: 0.75rem; transition: all 0.15s; }
-  .sync-btn:hover { background: #30363d; }
-  .sync-btn:disabled { opacity: 0.4; cursor: default; }
+  .sync-btn:hover { background: #30363d; } .sync-btn:disabled { opacity: 0.4; cursor: default; }
   .stats { display: flex; justify-content: center; gap: 1.5rem; margin-bottom: 1.2rem; flex-wrap: wrap; }
-  .stat { text-align: center; }
-  .stat-value { font-size: 1.5rem; font-weight: 700; }
+  .stat { text-align: center; } .stat-value { font-size: 1.5rem; font-weight: 700; }
   .stat-value.c1 { color: #2ea043; } .stat-value.c2 { color: #d29922; } .stat-value.c3 { color: #bc8cff; } .stat-value.c4 { color: #58a6ff; }
   .stat-label { font-size: 0.7rem; color: #8b949e; text-transform: uppercase; letter-spacing: 0.04em; }
   .progress-wrap { margin: 0 0 1.2rem; background: #161b22; border-radius: 8px; overflow: hidden; height: 26px; position: relative; border: 1px solid #21262d; }
@@ -61,21 +69,19 @@
   .gn { color: #e6edf3; display: flex; align-items: center; gap: 0.5rem; }
   .gn img { width: 20px; height: 20px; border-radius: 3px; flex-shrink: 0; }
   input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; accent-color: #2ea043; }
-
-  /* Tags */
   .tags { display: flex; flex-wrap: wrap; gap: 0.25rem; margin-top: 0.25rem; }
   .tag { display: inline-block; font-size: 0.6rem; padding: 0.1rem 0.35rem; border-radius: 3px; font-weight: 600; line-height: 1.4; }
-  .tag-tool { background: #6e40c9; color: #e6edf3; }
-  .tag-mp { background: #1f6feb; color: #e6edf3; }
-  .tag-demo { background: #9e6a03; color: #e6edf3; }
+  .tag-tool { background: #6e40c9; color: #e6edf3; } .tag-mp { background: #1f6feb; color: #e6edf3; } .tag-demo { background: #9e6a03; color: #e6edf3; }
   .tag-genre { background: #21262d; color: #8b949e; border: 1px solid #30363d; }
   .tag-ach { background: #1a3a2a; color: #3fb950; border: 1px solid #238636; }
   .tag-cards { background: #2a2315; color: #d29922; border: 1px solid #9e6a03; }
-
   .game-cell { display: flex; flex-direction: column; gap: 0.15rem; }
+  .exe-path { font-size: 0.65rem; color: #484f58; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 500px; }
   .loading { text-align: center; padding: 3rem; color: #8b949e; }
   .spinner { display: inline-block; width: 24px; height: 24px; border: 3px solid #30363d; border-top-color: #58a6ff; border-radius: 50%; animation: spin 0.8s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
+  .empty-state { text-align: center; padding: 3rem; color: #6e7681; }
+  .config-warning { text-align: center; padding: 2rem; background: #1c1208; border: 1px solid #9e6a03; border-radius: 8px; margin-bottom: 1rem; color: #d29922; font-size: 0.9rem; }
   footer { text-align: center; margin-top: 1.5rem; padding-top: 0.8rem; border-top: 1px solid #21262d; color: #484f58; font-size: 0.75rem; }
   @media (max-width: 600px) { td, th { padding: 0.3rem; font-size: 0.8rem; } .letter-big { font-size: 1.5rem; width: 36px; } .letter-nav a { width: 26px; height: 26px; font-size: 0.68rem; } }
 </style>
@@ -86,57 +92,124 @@
     <h1>Game Progress Tracker</h1>
     <p class="subtitle" id="subtitle">Cargando...</p>
   </header>
-  <div class="sync-bar">
-    <span class="sync-info" id="syncInfo"></span>
-    <button class="sync-btn" id="syncBtn">Sincronizar con Steam</button>
-    <button class="sync-btn" id="detailBtn">Cargar detalles</button>
+
+  <div class="tabs">
+    <div class="tab active" data-tab="steam">Steam <span class="tab-count" id="tabSteamCount"></span></div>
+    <div class="tab" data-tab="nonsteam">Non-Steam <span class="tab-count" id="tabNonsteamCount"></span></div>
+    <div class="tab" data-tab="settings" style="margin-left:auto; color:#6e7681;">Settings</div>
   </div>
-  <div class="stats">
-    <div class="stat"><div class="stat-value c1" id="sComp">0</div><div class="stat-label">Completados</div></div>
-    <div class="stat"><div class="stat-value c2" id="sPend">0</div><div class="stat-label">Pendientes</div></div>
-    <div class="stat"><div class="stat-value c3" id="sHours">0</div><div class="stat-label">Horas jugadas</div></div>
-    <div class="stat"><div class="stat-value c4" id="sVis">0</div><div class="stat-label">Mostrando</div></div>
+
+  <!-- STEAM TAB -->
+  <div class="tab-panel active" id="panel-steam">
+    <div class="sync-bar">
+      <span class="sync-info" id="syncInfo"></span>
+      <button class="sync-btn" id="syncBtn">Sincronizar</button>
+      <button class="sync-btn" id="detailBtn">Cargar detalles</button>
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="stat-value c1" id="sComp">0</div><div class="stat-label">Completados</div></div>
+      <div class="stat"><div class="stat-value c2" id="sPend">0</div><div class="stat-label">Pendientes</div></div>
+      <div class="stat"><div class="stat-value c3" id="sHours">0</div><div class="stat-label">Horas jugadas</div></div>
+      <div class="stat"><div class="stat-value c4" id="sVis">0</div><div class="stat-label">Mostrando</div></div>
+    </div>
+    <div class="progress-wrap"><div class="progress-bar" id="pBar"></div><div class="progress-text" id="pText">0%</div></div>
+    <div class="controls"><input type="text" class="search" id="search" placeholder="Buscar juego o género..." autocomplete="off"></div>
+    <div class="filter-section" id="catRow">
+      <span class="filter-label">Categoría:</span>
+      <button class="tbtn on" data-t="game">Juegos <span class="cnt" id="cG"></span></button>
+      <button class="tbtn" data-t="mp">Multiplayer <span class="cnt" id="cM"></span></button>
+      <button class="tbtn" data-t="tool">Herramientas <span class="cnt" id="cT"></span></button>
+      <button class="tbtn" data-t="demo">Demos <span class="cnt" id="cD"></span></button>
+    </div>
+    <div class="filter-section" id="statusRow">
+      <span class="filter-label">Estado:</span>
+      <button class="sbtn active" data-s="all">Todos</button>
+      <button class="sbtn" data-s="pending">Pendientes</button>
+      <button class="sbtn" data-s="done">Completados</button>
+      <button class="sbtn" data-s="unplayed">Sin tocar</button>
+    </div>
+    <div class="letter-nav" id="lNav"></div>
+    <div id="content"><div class="loading"><div class="spinner"></div><br>Cargando librería...</div></div>
   </div>
-  <div class="progress-wrap"><div class="progress-bar" id="pBar"></div><div class="progress-text" id="pText">0%</div></div>
-  <div class="controls"><input type="text" class="search" id="search" placeholder="Buscar juego o género..." autocomplete="off"></div>
-  <div class="filter-section" id="catRow">
-    <span class="filter-label">Categoría:</span>
-    <button class="tbtn on" data-t="game">Juegos <span class="cnt" id="cG"></span></button>
-    <button class="tbtn" data-t="mp">Multiplayer <span class="cnt" id="cM"></span></button>
-    <button class="tbtn" data-t="tool">Herramientas <span class="cnt" id="cT"></span></button>
-    <button class="tbtn" data-t="demo">Demos <span class="cnt" id="cD"></span></button>
+
+  <!-- NON-STEAM TAB -->
+  <div class="tab-panel" id="panel-nonsteam">
+    <div class="sync-bar">
+      <span class="sync-info" id="nsSyncInfo"></span>
+      <button class="sync-btn" id="nsSyncBtn">Leer shortcuts.vdf</button>
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="stat-value c1" id="nsComp">0</div><div class="stat-label">Completados</div></div>
+      <div class="stat"><div class="stat-value c2" id="nsPend">0</div><div class="stat-label">Pendientes</div></div>
+    </div>
+    <div class="progress-wrap"><div class="progress-bar" id="nspBar"></div><div class="progress-text" id="nspText">0%</div></div>
+    <div id="nsContent"><div class="empty-state">Dale a "Leer shortcuts.vdf" para cargar tus juegos Non-Steam.</div></div>
   </div>
-  <div class="filter-section" id="statusRow">
-    <span class="filter-label">Estado:</span>
-    <button class="sbtn active" data-s="all">Todos</button>
-    <button class="sbtn" data-s="pending">Pendientes</button>
-    <button class="sbtn" data-s="done">Completados</button>
-    <button class="sbtn" data-s="unplayed">Sin tocar</button>
+
+  <!-- SETTINGS TAB -->
+  <div class="tab-panel" id="panel-settings">
+    <div style="max-width:500px; margin: 0 auto;">
+      <h2 style="color:#58a6ff; font-size:1.2rem; margin-bottom:1rem;">Configuración de Steam</h2>
+
+      <div style="margin-bottom:1.2rem;">
+        <label style="display:block; font-size:0.8rem; color:#8b949e; margin-bottom:0.3rem;">Steam API Key</label>
+        <div style="display:flex; gap:0.4rem;">
+          <input type="password" id="cfgApiKey" class="search" style="flex:1; font-family:monospace;" placeholder="Tu API key de Steam...">
+          <button class="sync-btn" id="toggleKeyBtn" style="white-space:nowrap;">Mostrar</button>
+        </div>
+        <p style="font-size:0.7rem; color:#484f58; margin-top:0.3rem;">
+          Generala en <a href="https://steamcommunity.com/dev/apikey" onclick="event.preventDefault(); window.__TAURI__.opener.openUrl('https://steamcommunity.com/dev/apikey');" style="color:#58a6ff; cursor:pointer;">steamcommunity.com/dev/apikey</a>
+        </p>
+      </div>
+
+      <div style="margin-bottom:1.2rem;">
+        <label style="display:block; font-size:0.8rem; color:#8b949e; margin-bottom:0.3rem;">Steam ID (numerico)</label>
+        <div style="display:flex; gap:0.4rem;">
+          <input type="text" id="cfgSteamId" class="search" placeholder="76561198xxxxxxxxx" style="flex:1; font-family:monospace;">
+          <button class="sync-btn" id="detectSteamIdBtn" style="white-space:nowrap;">Detectar</button>
+        </div>
+        <p style="font-size:0.7rem; color:#484f58; margin-top:0.3rem;">
+          Tu ID numerico de 17 digitos. Se detecta automaticamente si tenes Steam instalado.
+        </p>
+      </div>
+
+      <div style="display:flex; gap:0.5rem; align-items:center;">
+        <button class="sync-btn" id="saveSettingsBtn" style="background:#238636; border-color:#2ea043; color:#fff; padding:0.5rem 1.2rem; font-size:0.85rem;">Guardar</button>
+        <span id="settingsMsg" style="font-size:0.8rem; color:#2ea043;"></span>
+      </div>
+
+      <div style="margin-top:2rem; padding-top:1rem; border-top:1px solid #21262d;">
+        <p style="font-size:0.75rem; color:#484f58;">Los datos se guardan en <code style="color:#8b949e;">~/.config/backlog-tracker/state.json</code></p>
+      </div>
+    </div>
   </div>
-  <div class="letter-nav" id="lNav"></div>
-  <div id="content"><div class="loading"><div class="spinner"></div><br>Cargando librería...</div></div>
+
   <footer>Estado guardado en ~/.config/backlog-tracker/</footer>
 </div>
 <script>
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 
-let G = [], completed = new Set(), tog = { game: true, mp: false, tool: false, demo: false }, sf = "all", q = "";
+// --- State ---
+let G = [], NS = [], completed = new Set(), completedNS = new Set();
+let tog = { game: true, mp: false, tool: false, demo: false }, sf = "all", q = "";
 const TL = { tool: "Tool", mp: "MP", demo: "Demo" };
 const TC = { tool: "tag-tool", mp: "tag-mp", demo: "tag-demo" };
 const gCat = g => g.tag || "game";
 const gLetter = n => { const f = n.charAt(0).toUpperCase(); return /[A-Z]/.test(f) ? f : "#"; };
+function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
-function escHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+// --- Tabs ---
+document.querySelector(".tabs").addEventListener("click", e => {
+  const tab = e.target.closest(".tab"); if (!tab) return;
+  document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+  document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
+  tab.classList.add("active");
+  document.getElementById("panel-" + tab.dataset.tab).classList.add("active");
+});
 
-function matchesQuery(g) {
-  if (!q) return true;
-  if (g.name.toLowerCase().includes(q)) return true;
-  if (g.genres && g.genres.some(genre => genre.toLowerCase().includes(q))) return true;
-  return false;
-}
-
-function render() {
+// --- Steam render ---
+function renderSteam() {
   const content = document.getElementById("content"), nav = document.getElementById("lNav");
   document.querySelectorAll(".tbtn").forEach(b => b.classList.toggle("on", !!tog[b.dataset.t]));
   const cc = { game: 0, mp: 0, tool: 0, demo: 0 };
@@ -145,13 +218,14 @@ function render() {
   document.getElementById("cM").textContent = "(" + cc.mp + ")";
   document.getElementById("cT").textContent = "(" + cc.tool + ")";
   document.getElementById("cD").textContent = "(" + cc.demo + ")";
+  document.getElementById("tabSteamCount").textContent = "(" + G.length + ")";
 
   let comp = 0, vis = 0, hrs = 0;
   const groups = {}, gs = {};
   G.forEach(g => {
     const cat = gCat(g), chk = completed.has(g.id);
     if (!tog[cat]) return;
-    if (!matchesQuery(g)) return;
+    if (q && !g.name.toLowerCase().includes(q) && !(g.genres && g.genres.some(x => x.toLowerCase().includes(q)))) return;
     if (sf === "done" && !chk) return;
     if (sf === "pending" && chk) return;
     if (sf === "unplayed" && (g.hours > 0 || chk)) return;
@@ -173,25 +247,13 @@ function render() {
     gg.forEach(g => {
       const img = g.icon ? `<img src="https://media.steampowered.com/steamcommunity/public/images/apps/${g.id}/${g.icon}.jpg" loading="lazy">` : "";
       const h = g.hours > 0 ? g.hours + "h" : "\u2014";
-
-      // Build tags
       let tagsHtml = "";
       if (g.tag) tagsHtml += `<span class="tag ${TC[g.tag]}">${TL[g.tag]}</span>`;
       if (g.achievements > 0) tagsHtml += `<span class="tag tag-ach">\u{1F3C6} ${g.achievements}</span>`;
       if (g.has_cards) tagsHtml += `<span class="tag tag-cards">\u{1F0CF} Cromos</span>`;
-      if (g.genres && g.genres.length > 0) {
-        g.genres.forEach(genre => {
-          tagsHtml += `<span class="tag tag-genre">${escHtml(genre)}</span>`;
-        });
-      }
-
+      if (g.genres && g.genres.length) g.genres.forEach(x => { tagsHtml += `<span class="tag tag-genre">${esc(x)}</span>`; });
       const tagsRow = tagsHtml ? `<div class="tags">${tagsHtml}</div>` : "";
-
-      rows += `<tr class="${g.chk?'done':''}">
-        <td><input type="checkbox" data-id="${g.id}" ${g.chk?'checked':''}></td>
-        <td><div class="game-cell"><span class="gn">${img}${escHtml(g.name)}</span>${tagsRow}</div></td>
-        <td>${h}</td>
-      </tr>`;
+      rows += `<tr class="${g.chk?'done':''}"><td><input type="checkbox" data-id="${g.id}" data-list="steam" ${g.chk?'checked':''}></td><td><div class="game-cell"><span class="gn">${img}${esc(g.name)}</span>${tagsRow}</div></td><td>${h}</td></tr>`;
     });
     sec.innerHTML = `<div class="letter-header"><div class="letter-big">${L}</div><div class="letter-info">${st.d}/${st.t}</div><div class="letter-bar"><div class="letter-bar-fill" style="width:${pct}%"></div></div></div><table><thead><tr><th></th><th>Juego</th><th>Horas</th></tr></thead><tbody>${rows}</tbody></table>`;
     content.appendChild(sec);
@@ -207,73 +269,189 @@ function render() {
   document.getElementById("pText").textContent = pct + "% (" + comp + "/" + vis + ")";
 }
 
-function updateSubtitle() {
-  document.getElementById("subtitle").textContent = G.length + " juegos. Un cumpleaños. Una misión.";
+// --- Non-Steam render ---
+function renderNonSteam() {
+  const content = document.getElementById("nsContent");
+  document.getElementById("tabNonsteamCount").textContent = "(" + NS.length + ")";
+
+  if (NS.length === 0) {
+    content.innerHTML = '<div class="empty-state">No hay juegos Non-Steam. Dale a "Leer shortcuts.vdf".</div>';
+    document.getElementById("nsComp").textContent = "0";
+    document.getElementById("nsPend").textContent = "0";
+    document.getElementById("nspBar").style.width = "0%";
+    document.getElementById("nspText").textContent = "0%";
+    return;
+  }
+
+  let comp = 0;
+  let rows = "";
+  NS.forEach(g => {
+    const chk = completedNS.has(g.id);
+    if (chk) comp++;
+    const exePath = g.exe ? `<div class="exe-path" title="${esc(g.exe)}">${esc(g.exe)}</div>` : "";
+    rows += `<tr class="${chk?'done':''}"><td><input type="checkbox" data-id="${g.id}" data-list="nonsteam" ${chk?'checked':''}></td><td><div class="game-cell"><span class="gn">${esc(g.name)}</span>${exePath}</div></td><td>\u2014</td></tr>`;
+  });
+
+  const total = NS.length;
+  const pct = Math.round(comp / total * 100);
+  content.innerHTML = `<table><thead><tr><th></th><th>Juego</th><th>Horas</th></tr></thead><tbody>${rows}</tbody></table>`;
+  document.getElementById("nsComp").textContent = comp;
+  document.getElementById("nsPend").textContent = total - comp;
+  document.getElementById("nspBar").style.width = pct + "%";
+  document.getElementById("nspText").textContent = pct + "% (" + comp + "/" + total + ")";
 }
 
+// --- Actions ---
 async function doSync() {
   const btn = document.getElementById("syncBtn");
   btn.disabled = true; btn.textContent = "Sincronizando...";
-  document.getElementById("syncInfo").textContent = "Conectando con Steam...";
   try {
     G = await invoke("sync_steam");
-    updateSubtitle();
+    document.getElementById("subtitle").textContent = G.length + " juegos Steam + " + NS.length + " Non-Steam";
     document.getElementById("syncInfo").textContent = `Sincronizado \u2014 ${G.length} juegos`;
-    render();
-  } catch (e) {
-    document.getElementById("syncInfo").textContent = "Error: " + e;
-  } finally { btn.disabled = false; btn.textContent = "Sincronizar con Steam"; }
+    renderSteam();
+  } catch (e) { document.getElementById("syncInfo").textContent = "Error: " + e; }
+  finally { btn.disabled = false; btn.textContent = "Sincronizar"; }
 }
 
 async function doFetchDetails() {
   const btn = document.getElementById("detailBtn");
-  btn.disabled = true; btn.textContent = "Cargando detalles...";
+  btn.disabled = true; btn.textContent = "Cargando...";
+  try { await invoke("fetch_details"); }
+  catch (e) { document.getElementById("syncInfo").textContent = "Error: " + e; btn.disabled = false; btn.textContent = "Cargar detalles"; }
+}
+
+async function doSyncNonSteam() {
+  const btn = document.getElementById("nsSyncBtn");
+  btn.disabled = true; btn.textContent = "Leyendo...";
   try {
-    await invoke("fetch_details");
-  } catch (e) {
-    document.getElementById("syncInfo").textContent = "Error detalles: " + e;
-    btn.disabled = false; btn.textContent = "Cargar detalles";
+    NS = await invoke("sync_nonsteam");
+    document.getElementById("nsSyncInfo").textContent = `${NS.length} juegos Non-Steam encontrados`;
+    renderNonSteam();
+  } catch (e) { document.getElementById("nsSyncInfo").textContent = "Error: " + e; }
+  finally { btn.disabled = false; btn.textContent = "Leer shortcuts.vdf"; }
+}
+
+// --- Settings ---
+let hasConfig = false;
+
+function loadSettingsUI(apiKey, steamId) {
+  document.getElementById("cfgApiKey").value = apiKey || "";
+  document.getElementById("cfgSteamId").value = steamId || "";
+  hasConfig = !!(apiKey && steamId);
+}
+
+function checkConfigWarning() {
+  const existing = document.getElementById("configWarning");
+  if (existing) existing.remove();
+  if (!hasConfig) {
+    const warn = document.createElement("div");
+    warn.id = "configWarning";
+    warn.className = "config-warning";
+    warn.innerHTML = 'Configurá tu Steam API Key y Steam ID en la pestaña <strong>Settings</strong> para poder sincronizar.';
+    document.getElementById("panel-steam").prepend(warn);
   }
 }
 
+document.getElementById("toggleKeyBtn").addEventListener("click", () => {
+  const inp = document.getElementById("cfgApiKey");
+  const btn = document.getElementById("toggleKeyBtn");
+  if (inp.type === "password") { inp.type = "text"; btn.textContent = "Ocultar"; }
+  else { inp.type = "password"; btn.textContent = "Mostrar"; }
+});
+
+document.getElementById("detectSteamIdBtn").addEventListener("click", async () => {
+  const btn = document.getElementById("detectSteamIdBtn");
+  btn.disabled = true; btn.textContent = "Detectando...";
+  try {
+    const id = await invoke("detect_steam_id");
+    if (id) {
+      document.getElementById("cfgSteamId").value = id;
+      btn.textContent = "Detectado";
+    } else {
+      btn.textContent = "No encontrado";
+    }
+  } catch (e) { btn.textContent = "Error"; }
+  setTimeout(() => { btn.disabled = false; btn.textContent = "Detectar"; }, 3000);
+});
+
+document.getElementById("saveSettingsBtn").addEventListener("click", async () => {
+  const key = document.getElementById("cfgApiKey").value.trim();
+  const id = document.getElementById("cfgSteamId").value.trim();
+  const msg = document.getElementById("settingsMsg");
+  try {
+    await invoke("save_settings", { steamApiKey: key, steamId: id });
+    hasConfig = !!(key && id);
+    checkConfigWarning();
+    msg.style.color = "#2ea043";
+    msg.textContent = "Guardado";
+    setTimeout(() => { msg.textContent = ""; }, 3000);
+  } catch (e) {
+    msg.style.color = "#f85149";
+    msg.textContent = "Error: " + e;
+  }
+});
+
+// --- Init ---
 async function init() {
-  // Listen for detail fetch progress.
-  await listen("detail_progress", (event) => {
-    const { current, total } = event.payload;
-    document.getElementById("detailBtn").textContent = `Detalles: ${current}/${total}`;
+  await listen("detail_progress", (ev) => {
+    document.getElementById("detailBtn").textContent = `Detalles: ${ev.payload.current}/${ev.payload.total}`;
   });
-  await listen("details_done", (event) => {
-    G = event.payload.games;
-    render();
+  await listen("details_done", (ev) => {
+    G = ev.payload.games; renderSteam();
     const btn = document.getElementById("detailBtn");
     btn.disabled = false; btn.textContent = "Cargar detalles";
-    document.getElementById("syncInfo").textContent = `Detalles cargados \u2014 ${G.length} juegos`;
+    document.getElementById("syncInfo").textContent = `Detalles cargados`;
   });
 
   try {
     const data = await invoke("get_state");
-    G = data.games || [];
-    completed = new Set(data.completed || []);
-    if (G.length > 0) { updateSubtitle(); render(); }
-    else { await doSync(); }
-  } catch (e) {
-    document.getElementById("content").innerHTML = '<div class="loading" style="color:#f85149">Error: ' + e + '</div>';
-  }
+    G = data.games || []; completed = new Set(data.completed || []);
+    NS = data.non_steam || []; completedNS = new Set(data.completed_nonsteam || []);
+    loadSettingsUI(data.steam_api_key, data.steam_id);
+    // Auto-detect Steam ID if not configured.
+    if (!data.steam_id) {
+      try {
+        const detectedId = await invoke("detect_steam_id");
+        if (detectedId) {
+          document.getElementById("cfgSteamId").value = detectedId;
+        }
+      } catch (_) {}
+    }
+    checkConfigWarning();
+    document.getElementById("subtitle").textContent = G.length + " juegos Steam + " + NS.length + " Non-Steam";
+    if (G.length > 0) renderSteam();
+    else if (hasConfig) await doSync();
+    renderNonSteam();
+  } catch (e) { document.getElementById("content").innerHTML = '<div class="loading" style="color:#f85149">Error: ' + e + '</div>'; }
 }
 
-document.getElementById("syncBtn").addEventListener("click", doSync);
-document.getElementById("detailBtn").addEventListener("click", doFetchDetails);
-document.getElementById("catRow").addEventListener("click", e => { const b = e.target.closest(".tbtn"); if (!b) return; tog[b.dataset.t] = !tog[b.dataset.t]; render(); });
-document.getElementById("statusRow").addEventListener("click", e => { const b = e.target.closest(".sbtn"); if (!b) return; document.querySelectorAll(".sbtn").forEach(x => x.classList.remove("active")); b.classList.add("active"); sf = b.dataset.s; render(); });
-document.getElementById("content").addEventListener("change", async e => {
-  if (e.target.type === "checkbox") {
+// --- Events ---
+document.getElementById("syncBtn").addEventListener("click", () => {
+  if (!hasConfig) { document.getElementById("syncInfo").textContent = "Configurá API Key y Steam ID en Settings primero."; return; }
+  doSync();
+});
+document.getElementById("detailBtn").addEventListener("click", () => {
+  if (!hasConfig) { document.getElementById("syncInfo").textContent = "Configurá API Key y Steam ID en Settings primero."; return; }
+  doFetchDetails();
+});
+document.getElementById("nsSyncBtn").addEventListener("click", doSyncNonSteam);
+document.getElementById("catRow").addEventListener("click", e => { const b = e.target.closest(".tbtn"); if (!b) return; tog[b.dataset.t] = !tog[b.dataset.t]; renderSteam(); });
+document.getElementById("statusRow").addEventListener("click", e => { const b = e.target.closest(".sbtn"); if (!b) return; document.querySelectorAll(".sbtn").forEach(x => x.classList.remove("active")); b.classList.add("active"); sf = b.dataset.s; renderSteam(); });
+document.addEventListener("change", async e => {
+  if (e.target.type === "checkbox" && e.target.dataset.id) {
     const id = parseInt(e.target.dataset.id, 10);
-    if (e.target.checked) completed.add(id); else completed.delete(id);
-    render();
-    await invoke("save_completed", { completed: [...completed] });
+    const list = e.target.dataset.list;
+    if (list === "steam") {
+      if (e.target.checked) completed.add(id); else completed.delete(id);
+      renderSteam(); await invoke("save_completed", { completed: [...completed] });
+    } else if (list === "nonsteam") {
+      if (e.target.checked) completedNS.add(id); else completedNS.delete(id);
+      renderNonSteam(); await invoke("save_completed_nonsteam", { completed: [...completedNS] });
+    }
   }
 });
-document.getElementById("search").addEventListener("input", e => { q = e.target.value.toLowerCase().trim(); render(); });
+document.getElementById("search").addEventListener("input", e => { q = e.target.value.toLowerCase().trim(); renderSteam(); });
 document.getElementById("lNav").addEventListener("click", e => { if (e.target.tagName === "A") { e.preventDefault(); const t = document.querySelector(e.target.getAttribute("href")); if (t) t.scrollIntoView({ behavior: "smooth", block: "start" }); } });
 
 init();
