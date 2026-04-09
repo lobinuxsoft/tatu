@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/nicerapp/tauri/dev/core/tauri-config-schema/schema.json",
   "productName": "Game Progress Tracker",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "identifier": "com.lobinux.game-progress-tracker",
   "build": {
     "frontendDist": "../frontend"

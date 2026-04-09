@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.1](https://github.com/lobinuxsoft/game-progress-tracker/compare/v0.3.0...v0.3.1) (2026-04-09)
+
+
+### Bug Fixes
+
+* auto-install dialog broken by bundled library conflicts ([911a751](https://github.com/lobinuxsoft/game-progress-tracker/commit/911a75104062eac2761e32e599389398f77d9351))
+* defer LD_LIBRARY_PATH setup to prevent zenity/kdialog failure ([6c0d222](https://github.com/lobinuxsoft/game-progress-tracker/commit/6c0d22206741719731a35aad72a0391e9afe8358))
+
 ## [0.3.0](https://github.com/lobinuxsoft/game-progress-tracker/compare/v0.2.0...v0.3.0) (2026-04-09)
 
 
