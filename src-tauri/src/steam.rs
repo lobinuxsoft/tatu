@@ -132,12 +132,12 @@ pub fn fetch_single_detail(game: &mut Game) -> bool {
     if let Some(desc) = data["short_description"].as_str() {
         game.short_description = desc.to_string();
     }
-    if game.tag.is_empty() {
-        if let Some(app_type) = data["type"].as_str() {
-            match app_type {
-                "demo" | "mod" => game.tag = "demo".into(),
-                _ => {}
-            }
+    if game.tag.is_empty()
+        && let Some(app_type) = data["type"].as_str()
+    {
+        match app_type {
+            "demo" | "mod" => game.tag = "demo".into(),
+            _ => {}
         }
     }
     true
@@ -176,18 +176,18 @@ pub fn detect_steam_id() -> Option<String> {
         if trimmed.len() == 17 && trimmed.starts_with("7656119") && trimmed.parse::<u64>().is_ok() {
             current_id = Some(trimmed.to_string());
         }
-        if let Some(ref id) = current_id {
-            if line.contains("\"Timestamp\"") || line.contains("\"timestamp\"") {
-                let ts: u64 = line
-                    .split('"')
-                    .filter(|s| s.parse::<u64>().is_ok())
-                    .filter_map(|s| s.parse().ok())
-                    .next()
-                    .unwrap_or(0);
-                if ts > best_timestamp {
-                    best_timestamp = ts;
-                    best_id = Some(id.clone());
-                }
+        if let Some(ref id) = current_id
+            && (line.contains("\"Timestamp\"") || line.contains("\"timestamp\""))
+        {
+            let ts: u64 = line
+                .split('"')
+                .filter(|s| s.parse::<u64>().is_ok())
+                .filter_map(|s| s.parse().ok())
+                .next()
+                .unwrap_or(0);
+            if ts > best_timestamp {
+                best_timestamp = ts;
+                best_id = Some(id.clone());
             }
         }
     }

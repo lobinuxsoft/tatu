@@ -131,36 +131,34 @@ fn fetch_badge_images_sce(app_id: u64, user_level: u32) -> Result<Vec<Badge>, St
         let tag = &html[abs..tag_end + 1];
 
         // Check if this img tag contains our appid path AND a Series alt.
-        if tag.contains(&badge_alt_marker) {
-            if let Some(alt) = extract_between(tag, "alt=\"", "\"") {
-                if alt.starts_with("Series") {
-                    if let Some(src) = extract_between(tag, "src=\"", "\"") {
-                        // Extract clean name from alt (remove "Series X - " and game name prefix).
-                        let clean_name = alt.split(" - ").last().unwrap_or(alt).trim();
+        if tag.contains(&badge_alt_marker)
+            && let Some(alt) = extract_between(tag, "alt=\"", "\"")
+            && alt.starts_with("Series")
+            && let Some(src) = extract_between(tag, "src=\"", "\"")
+        {
+            // Extract clean name from alt (remove "Series X - " and game name prefix).
+            let clean_name = alt.split(" - ").last().unwrap_or(alt).trim();
 
-                        level_counter += 1;
-                        let is_foil = level_counter > 5;
-                        let level = if is_foil { 1 } else { level_counter };
-                        let xp = if is_foil {
-                            100
-                        } else {
-                            xp_per_level
-                                .get((level - 1) as usize)
-                                .copied()
-                                .unwrap_or(100)
-                        };
+            level_counter += 1;
+            let is_foil = level_counter > 5;
+            let level = if is_foil { 1 } else { level_counter };
+            let xp = if is_foil {
+                100
+            } else {
+                xp_per_level
+                    .get((level - 1) as usize)
+                    .copied()
+                    .unwrap_or(100)
+            };
 
-                        badges.push(Badge {
-                            name: clean_name.to_string(),
-                            image_url: src.to_string(),
-                            level,
-                            xp,
-                            foil: is_foil,
-                            owned: if is_foil { false } else { level <= user_level },
-                        });
-                    }
-                }
-            }
+            badges.push(Badge {
+                name: clean_name.to_string(),
+                image_url: src.to_string(),
+                level,
+                xp,
+                foil: is_foil,
+                owned: if is_foil { false } else { level <= user_level },
+            });
         }
 
         pos = tag_end + 1;
@@ -310,12 +308,12 @@ fn extract_card_name(block: &str) -> String {
             after_title.find('>').map(|p| &after_title[p + 1..])
         };
 
-        if let Some(region) = name_region {
-            if let Some(end) = region.find('<') {
-                let name = region[..end].trim().to_string();
-                if !name.is_empty() {
-                    return name;
-                }
+        if let Some(region) = name_region
+            && let Some(end) = region.find('<')
+        {
+            let name = region[..end].trim().to_string();
+            if !name.is_empty() {
+                return name;
             }
         }
     }
@@ -330,14 +328,12 @@ fn extract_series_info(block: &str) -> String {
         let region = &block[abs..];
         if region.starts_with("badge_card_set_text ellipsis")
             && !region.starts_with("badge_card_set_text_")
+            && found_first
+            && let Some(content) = extract_between(region, ">", "</div>")
         {
-            if found_first {
-                if let Some(content) = extract_between(region, ">", "</div>") {
-                    let cleaned = content.trim().to_string();
-                    if !cleaned.is_empty() {
-                        return cleaned;
-                    }
-                }
+            let cleaned = content.trim().to_string();
+            if !cleaned.is_empty() {
+                return cleaned;
             }
         }
         if region.starts_with("badge_card_set_text ") && !region.starts_with("badge_card_set_text_")
