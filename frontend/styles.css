@@ -99,6 +99,9 @@ input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; accent-colo
 .detail-meta span { margin-right: 0.8rem; }
 .metacritic-badge { display: inline-block; padding: 0.15rem 0.4rem; border-radius: 4px; font-weight: 700; font-size: 0.8rem; color: #fff; }
 .mc-green { background: #6c3; } .mc-yellow { background: #fc3; color: #333; } .mc-red { background: #f00; }
+.global-loading { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(14,17,23,0.88); z-index: 200; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.global-loading.hidden { display: none; }
+.global-loading-text { margin-top: 0.8rem; font-size: 0.9rem; color: #8b949e; }
 .detail-tabs { display: flex; border-bottom: 2px solid #21262d; padding: 0 1rem; }
 .detail-tab { padding: 0.5rem 1rem; cursor: pointer; color: #8b949e; font-size: 0.85rem; font-weight: 600; border-bottom: 2px solid transparent; margin-bottom: -2px; transition: all 0.15s; user-select: none; }
 .detail-tab:hover { color: #c9d1d9; }
@@ -141,11 +144,12 @@ input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; accent-colo
 .badges-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); gap: 0.5rem; }
 .badge-item { text-align: center; padding: 0.4rem; background: #21262d; border: 1px solid #30363d; border-radius: 6px; transition: border-color 0.15s; }
 .badge-item:hover { border-color: #58a6ff; }
-.badge-item.not-earned { opacity: 0.3; }
+.badge-item.not-earned { opacity: 0.4; }
 .badge-item.not-earned .badge-img { filter: grayscale(1); }
 .badge-item.foil { border-color: #9e6a03; background: #1c1a15; }
 .badge-item.foil.not-earned { border-color: #30363d; }
 .badge-img { width: 64px; height: 64px; }
+.badge-placeholder { width: 64px; height: 64px; background: #30363d; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; font-weight: 700; color: #484f58; margin: 0 auto; }
 .badge-name { font-size: 0.65rem; color: #c9d1d9; margin-top: 0.2rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .badge-level { font-size: 0.6rem; color: #58a6ff; }
 .badge-xp { font-size: 0.58rem; color: #8b949e; }
