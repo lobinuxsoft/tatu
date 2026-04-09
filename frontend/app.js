@@ -1,5 +1,6 @@
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
+const { getVersion } = window.__TAURI__.app;
 
 // --- State ---
 let G = [], NS = [], completed = new Set(), completedNS = new Set(), achProgress = {};
@@ -526,4 +527,5 @@ document.getElementById("content").addEventListener("click", e => {
   openDetailPanel(parseInt(cb.dataset.id, 10));
 });
 
+getVersion().then(v => { document.getElementById("appVersion").textContent = "v" + v; });
 init();
