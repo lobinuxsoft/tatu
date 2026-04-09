@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.3.0](https://github.com/lobinuxsoft/game-progress-tracker/compare/v0.2.0...v0.3.0) (2026-04-09)
+
+
+### Features
+
+* display app version in footer ([9c62b97](https://github.com/lobinuxsoft/game-progress-tracker/commit/9c62b9742ff95aca4ff29d481f2e1e1dfd688a5b))
+* display app version in footer ([0a77af5](https://github.com/lobinuxsoft/game-progress-tracker/commit/0a77af581ba613fd41156ac94cf8902182d67c7f))
+* display app version in footer ([9431211](https://github.com/lobinuxsoft/game-progress-tracker/commit/943121112758598247506209b430e0c7522dd812)), closes [#16](https://github.com/lobinuxsoft/game-progress-tracker/issues/16)
+
+
+### Bug Fixes
+
+* trigger CI only on PRs to development ([9e377e1](https://github.com/lobinuxsoft/game-progress-tracker/commit/9e377e1354b64b0214f026afebbe49cdb6110534))
+
 ## [0.2.0](https://github.com/lobinuxsoft/game-progress-tracker/compare/v0.1.0...v0.2.0) (2026-04-09)
 
 
