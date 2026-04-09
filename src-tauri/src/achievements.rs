@@ -31,7 +31,9 @@ pub fn fetch_game_achievements(
          ?appid={app_id}&key={api_key}&steamid={steam_id}&format=json"
     );
     let player_body: serde_json::Value = match ureq::get(&player_url).call() {
-        Ok(resp) => resp.into_body().read_json()
+        Ok(resp) => resp
+            .into_body()
+            .read_json()
             .map_err(|e| format!("Failed to parse player achievements: {e}"))?,
         Err(ureq::Error::StatusCode(403)) => {
             return Err("Profile is not public".to_string());
@@ -83,10 +85,7 @@ pub fn fetch_game_achievements(
 
     for sch in &schema_achs {
         let api_name = sch["name"].as_str().unwrap_or("").to_string();
-        let (achieved, unlock_time) = status_map
-            .get(&api_name)
-            .copied()
-            .unwrap_or((false, 0));
+        let (achieved, unlock_time) = status_map.get(&api_name).copied().unwrap_or((false, 0));
 
         if achieved && unlock_time > max_unlock_time {
             max_unlock_time = unlock_time;
@@ -117,17 +116,15 @@ pub fn fetch_game_achievements(
 }
 
 /// Lightweight check: fetch only the max unlock time from player achievements.
-pub fn fetch_max_unlock_time(
-    api_key: &str,
-    steam_id: &str,
-    app_id: u64,
-) -> Result<u64, String> {
+pub fn fetch_max_unlock_time(api_key: &str, steam_id: &str, app_id: u64) -> Result<u64, String> {
     let url = format!(
         "https://api.steampowered.com/ISteamUserStats/GetPlayerAchievements/v0001/\
          ?appid={app_id}&key={api_key}&steamid={steam_id}&format=json"
     );
     let body: serde_json::Value = match ureq::get(&url).call() {
-        Ok(resp) => resp.into_body().read_json()
+        Ok(resp) => resp
+            .into_body()
+            .read_json()
             .map_err(|e| format!("Failed to parse player achievements: {e}"))?,
         Err(ureq::Error::StatusCode(403)) => {
             return Err("Profile is not public".to_string());

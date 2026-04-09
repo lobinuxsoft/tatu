@@ -4,9 +4,9 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::shortcuts::NonSteamGame;
 use crate::achievements::GameAchievements;
 use crate::inventory::GameCards;
+use crate::shortcuts::NonSteamGame;
 use crate::steam::Game;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

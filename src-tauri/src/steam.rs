@@ -93,14 +93,21 @@ pub fn fetch_single_detail(game: &mut Game) -> bool {
         game.id
     );
 
-    let Ok(resp) = ureq::get(&url).call() else { return false };
-    let Ok(body) = resp.into_body().read_json::<serde_json::Value>() else { return false };
+    let Ok(resp) = ureq::get(&url).call() else {
+        return false;
+    };
+    let Ok(body) = resp.into_body().read_json::<serde_json::Value>() else {
+        return false;
+    };
 
     let key = game.id.to_string();
-    let Some(data) = body.get(&key).and_then(|v| v.get("data")) else { return false };
+    let Some(data) = body.get(&key).and_then(|v| v.get("data")) else {
+        return false;
+    };
 
     if let Some(arr) = data["genres"].as_array() {
-        game.genres = arr.iter()
+        game.genres = arr
+            .iter()
             .filter_map(|g| g["description"].as_str().map(String::from))
             .collect();
     }
@@ -117,7 +124,8 @@ pub fn fetch_single_detail(game: &mut Game) -> bool {
         game.metacritic = Some(score as u32);
     }
     if let Some(devs) = data["developers"].as_array() {
-        game.developers = devs.iter()
+        game.developers = devs
+            .iter()
             .filter_map(|d| d.as_str().map(String::from))
             .collect();
     }
@@ -138,10 +146,7 @@ pub fn fetch_single_detail(game: &mut Game) -> bool {
 /// Fetch details from the Steam Store API for a batch of app IDs.
 /// Steam rate-limits to ~200 requests per 5 minutes, so we sleep between calls.
 /// `on_progress` is called after each game with (current, total).
-pub fn fetch_details_for(
-    games: &mut [Game],
-    on_progress: impl Fn(usize, usize),
-) {
+pub fn fetch_details_for(games: &mut [Game], on_progress: impl Fn(usize, usize)) {
     let total = games.len();
     for (i, game) in games.iter_mut().enumerate() {
         if !game.genres.is_empty() {
@@ -228,7 +233,12 @@ fn classify(id: u64, name: &str) -> String {
         return "demo".into();
     }
     let nl = name.to_lowercase();
-    for w in ["playtest", "trial version", "playable teaser", "friend's pass"] {
+    for w in [
+        "playtest",
+        "trial version",
+        "playable teaser",
+        "friend's pass",
+    ] {
         if nl.contains(w) {
             return "demo".into();
         }

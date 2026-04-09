@@ -37,7 +37,8 @@ pub fn parse_shortcuts() -> Result<Vec<NonSteamGame>, String> {
                         let appid = find_int_field(region, "appid").unwrap_or(0) as u64;
                         let exe = find_string_field(region, "Exe").unwrap_or_default();
                         let icon = find_string_field(region, "icon").unwrap_or_default();
-                        let last_played = find_int_field(region, "LastPlayTime").unwrap_or(0) as u64;
+                        let last_played =
+                            find_int_field(region, "LastPlayTime").unwrap_or(0) as u64;
 
                         if !name.is_empty() {
                             games.push(NonSteamGame {

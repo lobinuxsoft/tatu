@@ -17,7 +17,9 @@ type SharedState = Mutex<AppState>;
 fn get_state(state: State<'_, SharedState>) -> Result<serde_json::Value, String> {
     let s = state.lock().map_err(|e| e.to_string())?;
     // Build achievement progress summary from cache.
-    let ach_progress: std::collections::HashMap<u64, (usize, usize)> = s.achievement_cache.iter()
+    let ach_progress: std::collections::HashMap<u64, (usize, usize)> = s
+        .achievement_cache
+        .iter()
         .map(|(&app_id, cached)| {
             let unlocked = cached.achievements.iter().filter(|a| a.achieved).count();
             let total = cached.achievements.len();
@@ -110,9 +112,16 @@ fn fetch_details(app: tauri::AppHandle, state: State<'_, SharedState>) -> Result
 }
 
 #[tauri::command]
-fn get_game_details(app_id: u64, state: State<'_, SharedState>) -> Result<serde_json::Value, String> {
+fn get_game_details(
+    app_id: u64,
+    state: State<'_, SharedState>,
+) -> Result<serde_json::Value, String> {
     let s = state.lock().map_err(|e| e.to_string())?;
-    let game = s.games.iter().find(|g| g.id == app_id).ok_or("Game not found")?;
+    let game = s
+        .games
+        .iter()
+        .find(|g| g.id == app_id)
+        .ok_or("Game not found")?;
     let needs_fetch = game.genres.is_empty();
     let mut game_clone = game.clone();
     drop(s);
@@ -130,12 +139,17 @@ fn get_game_details(app_id: u64, state: State<'_, SharedState>) -> Result<serde_
 }
 
 #[tauri::command]
-fn get_game_achievements(app_id: u64, state: State<'_, SharedState>) -> Result<serde_json::Value, String> {
+fn get_game_achievements(
+    app_id: u64,
+    state: State<'_, SharedState>,
+) -> Result<serde_json::Value, String> {
     let s = state.lock().map_err(|e| e.to_string())?;
     let api_key = s.steam_api_key.clone();
     let steam_id = s.steam_id.clone();
 
-    let game_ach_count = s.games.iter()
+    let game_ach_count = s
+        .games
+        .iter()
         .find(|g| g.id == app_id)
         .map(|g| g.achievements)
         .unwrap_or(0);
@@ -172,7 +186,10 @@ fn get_game_achievements(app_id: u64, state: State<'_, SharedState>) -> Result<s
 }
 
 #[tauri::command]
-async fn get_game_cards(app_id: u64, state: State<'_, SharedState>) -> Result<serde_json::Value, String> {
+async fn get_game_cards(
+    app_id: u64,
+    state: State<'_, SharedState>,
+) -> Result<serde_json::Value, String> {
     let steam_id = {
         let s = state.lock().map_err(|e| e.to_string())?;
 
