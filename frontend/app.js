@@ -5,6 +5,23 @@ const { listen } = window.__TAURI__.event;
 let G = [], NS = [], completed = new Set(), completedNS = new Set(), achProgress = {};
 let tog = { game: true, mp: false, tool: false, demo: false }, sf = "all", q = "";
 let panelOpen = false, panelGameId = null;
+let loadingTasks = new Set();
+function updateGlobalLoading() {
+  const el = document.getElementById("globalLoading");
+  if (!el) return;
+  if (loadingTasks.size === 0) {
+    el.classList.add("hidden");
+  } else {
+    el.classList.remove("hidden");
+    const msgs = [];
+    if (loadingTasks.has("info")) msgs.push("info del juego");
+    if (loadingTasks.has("logros")) msgs.push("logros");
+    if (loadingTasks.has("cromos")) msgs.push("cromos e insignias");
+    el.querySelector(".global-loading-text").textContent = `Cargando ${msgs.join(", ")}...`;
+  }
+}
+function startLoading(task) { loadingTasks.add(task); updateGlobalLoading(); }
+function doneLoading(task) { loadingTasks.delete(task); updateGlobalLoading(); }
 const TL = { tool: "Tool", mp: "MP", demo: "Demo" };
 const TC = { tool: "tag-tool", mp: "tag-mp", demo: "tag-demo" };
 const gCat = g => g.tag || "game";
@@ -187,9 +204,12 @@ function openDetailPanel(gameId) {
     document.getElementById("dp" + tab.dataset.dp.charAt(0).toUpperCase() + tab.dataset.dp.slice(1)).classList.add("active");
   };
 
+  loadingTasks.clear();
+  startLoading("info");
+  startLoading("logros");
   loadGameDetails(gameId);
   loadAchievements(gameId);
-  if (g.has_cards) loadCards(gameId);
+  if (g.has_cards) { startLoading("cromos"); loadCards(gameId); }
 }
 
 async function loadGameDetails(gameId) {
@@ -238,7 +258,28 @@ async function loadGameDetails(gameId) {
 
     if (!html) html = `<div class="ach-empty">No hay detalles disponibles.</div>`;
     infoEl.innerHTML = html;
+
+    // Dynamically add Cromos tab if details reveal has_cards and tab doesn't exist yet.
+    if (g.has_cards && !document.getElementById("dpCromos")) {
+      const tabsEl = document.querySelector(".detail-tabs");
+      if (tabsEl) {
+        const tab = document.createElement("div");
+        tab.className = "detail-tab";
+        tab.dataset.dp = "cromos";
+        tab.textContent = "Cromos";
+        tabsEl.appendChild(tab);
+      }
+      const panel = document.createElement("div");
+      panel.className = "detail-tab-panel";
+      panel.id = "dpCromos";
+      panel.innerHTML = `<div class="loading"><div class="spinner"></div><br>Cargando cromos...</div>`;
+      document.getElementById("detailContent").appendChild(panel);
+      startLoading("cromos");
+      loadCards(gameId);
+    }
+    doneLoading("info");
   } catch (e) {
+    doneLoading("info");
     if (panelGameId !== gameId) return;
     const infoEl = document.getElementById("dpInfo");
     if (infoEl) infoEl.innerHTML = `<div class="ach-empty">Error al cargar info: ${esc(String(e))}</div>`;
@@ -273,8 +314,10 @@ async function loadAchievements(gameId) {
     html += `</ul>`;
     if (panel) panel.innerHTML = html;
     achProgress[gameId] = [done, total];
+    doneLoading("logros");
     renderSteam();
   } catch (e) {
+    doneLoading("logros");
     if (panelGameId !== gameId) return;
     const errStr = String(e);
     if (errStr.includes("no stats") || errStr.includes("Requested app has no")) {
@@ -312,19 +355,20 @@ async function loadCards(gameId) {
       const normalBadges = badges.filter(b => !b.foil);
       const foilBadges = badges.filter(b => b.foil);
       const earnedCount = normalBadges.filter(b => b.owned).length;
-      const unlockInfo = data.user_badge_unlocked ? `<div class="badge-unlocked-info">${esc(data.user_badge_unlocked)}</div>` : "";
 
-      html += `<div class="badges-section"><div class="cards-section-title">Insignias (${earnedCount}/${normalBadges.length})</div>${unlockInfo}<div class="badges-grid">`;
+      html += `<div class="badges-section"><div class="cards-section-title">Insignias (${earnedCount}/${normalBadges.length})</div><div class="badges-grid">`;
       for (const b of normalBadges) {
         const cls = b.owned ? "" : " not-earned";
-        html += `<div class="badge-item${cls}"><img class="badge-img" src="${b.image_url}" loading="lazy"><div class="badge-name">${esc(b.name)}</div><div class="badge-level">Nivel ${b.level}</div><div class="badge-xp">${b.xp} XP</div></div>`;
+        const img = b.image_url ? `<img class="badge-img" src="${b.image_url}" loading="lazy">` : `<div class="badge-placeholder">${b.level}</div>`;
+        html += `<div class="badge-item${cls}">${img}<div class="badge-name">${esc(b.name)}</div><div class="badge-level">Nivel ${b.level}</div><div class="badge-xp">${b.xp} XP</div></div>`;
       }
       html += `</div>`;
       if (foilBadges.length > 0) {
         html += `<div class="cards-section-title foil" style="margin-top:0.8rem">Foil</div><div class="badges-grid">`;
         for (const b of foilBadges) {
           const cls = "foil" + (b.owned ? "" : " not-earned");
-          html += `<div class="badge-item ${cls}"><img class="badge-img" src="${b.image_url}" loading="lazy"><div class="badge-name">${esc(b.name)}</div><div class="badge-xp">${b.xp} XP</div></div>`;
+          const img = b.image_url ? `<img class="badge-img" src="${b.image_url}" loading="lazy">` : `<div class="badge-placeholder">F</div>`;
+          html += `<div class="badge-item ${cls}">${img}<div class="badge-name">${esc(b.name)}</div><div class="badge-xp">${b.xp} XP</div></div>`;
         }
         html += `</div>`;
       }
@@ -342,7 +386,9 @@ async function loadCards(gameId) {
     html += `</div>`;
 
     panel.innerHTML = html;
+    doneLoading("cromos");
   } catch (e) {
+    doneLoading("cromos");
     if (panelGameId !== gameId) return;
     const errStr = String(e);
     if (errStr.includes("No trading cards")) {
@@ -356,6 +402,8 @@ async function loadCards(gameId) {
 function closeDetailPanel() {
   document.getElementById("detailOverlay").classList.remove("open");
   document.getElementById("detailPanel").classList.remove("open");
+  loadingTasks.clear();
+  updateGlobalLoading();
   panelOpen = false; panelGameId = null;
 }
 

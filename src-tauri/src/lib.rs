@@ -111,19 +111,22 @@ fn fetch_details(app: tauri::AppHandle, state: State<'_, SharedState>) -> Result
 
 #[tauri::command]
 fn get_game_details(app_id: u64, state: State<'_, SharedState>) -> Result<serde_json::Value, String> {
-    let mut s = state.lock().map_err(|e| e.to_string())?;
-    let game = s.games.iter_mut()
-        .find(|g| g.id == app_id)
-        .ok_or("Game not found")?;
+    let s = state.lock().map_err(|e| e.to_string())?;
+    let game = s.games.iter().find(|g| g.id == app_id).ok_or("Game not found")?;
+    let needs_fetch = game.genres.is_empty();
+    let mut game_clone = game.clone();
+    drop(s);
 
-    // Fetch from Store API if not loaded yet.
-    if game.genres.is_empty() {
-        steam::fetch_single_detail(game);
+    if needs_fetch {
+        steam::fetch_single_detail(&mut game_clone);
+        let mut s = state.lock().map_err(|e| e.to_string())?;
+        if let Some(g) = s.games.iter_mut().find(|g| g.id == app_id) {
+            *g = game_clone.clone();
+        }
+        s.save();
     }
 
-    let json = serde_json::to_value(&*game).map_err(|e| e.to_string())?;
-    s.save();
-    Ok(json)
+    serde_json::to_value(&game_clone).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -169,23 +172,23 @@ fn get_game_achievements(app_id: u64, state: State<'_, SharedState>) -> Result<s
 }
 
 #[tauri::command]
-fn get_game_cards(app_id: u64, state: State<'_, SharedState>) -> Result<serde_json::Value, String> {
-    let s = state.lock().map_err(|e| e.to_string())?;
-    let steam_id = s.steam_id.clone();
+async fn get_game_cards(app_id: u64, state: State<'_, SharedState>) -> Result<serde_json::Value, String> {
+    let steam_id = {
+        let s = state.lock().map_err(|e| e.to_string())?;
 
-    // Check cache (30 min = 1800 seconds).
-    if let Some(cached) = s.cards_cache.get(&app_id) {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        if now - cached.fetched_at < 1800 {
-            return serde_json::to_value(cached).map_err(|e| e.to_string());
+        if let Some(cached) = s.cards_cache.get(&app_id) {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            if now - cached.fetched_at < 1800 {
+                return serde_json::to_value(cached).map_err(|e| e.to_string());
+            }
         }
-    }
-    drop(s);
+        s.steam_id.clone()
+    };
 
-    let result = inventory::fetch_game_cards(&steam_id, app_id)?;
+    let result = inventory::fetch_game_cards(steam_id, app_id).await?;
     let json = serde_json::to_value(&result).map_err(|e| e.to_string())?;
 
     let mut s = state.lock().map_err(|e| e.to_string())?;

@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -29,19 +31,33 @@ pub struct GameCards {
     pub fetched_at: u64,
 }
 
-/// Fetch trading card set for a game by scraping the Steam badge/gamecards page.
-/// Returns all cards in the set with owned/unowned status.
-pub fn fetch_game_cards(steam_id: &str, app_id: u64) -> Result<GameCards, String> {
+/// Fetch trading cards and badges for a game.
+pub async fn fetch_game_cards(steam_id: String, app_id: u64) -> Result<GameCards, String> {
+    tokio::task::spawn_blocking(move || fetch_game_cards_sync(&steam_id, app_id))
+        .await
+        .map_err(|e| format!("Task error: {e}"))?
+}
+
+fn fetch_game_cards_sync(steam_id: &str, app_id: u64) -> Result<GameCards, String> {
+    let agent = ureq::Agent::new_with_config(
+        ureq::config::Config::builder()
+            .timeout_global(Some(Duration::from_secs(15)))
+            .build(),
+    );
+
+    // Fetch gamecards page from Steam.
     let url = format!(
         "https://steamcommunity.com/profiles/{steam_id}/gamecards/{app_id}"
     );
-
-    let html = ureq::get(&url)
+    eprintln!("[cards] requesting {url}");
+    let html = agent
+        .get(&url)
         .call()
         .map_err(|e| format!("Failed to fetch gamecards page: {e}"))?
         .into_body()
         .read_to_string()
         .map_err(|e| format!("Failed to read gamecards page: {e}"))?;
+    eprintln!("[cards] got {} bytes from gamecards page", html.len());
 
     let cards = parse_gamecards_html(&html);
     let (user_badge_level, user_badge_unlocked) = parse_user_badge(&html);
@@ -50,15 +66,17 @@ pub fn fetch_game_cards(steam_id: &str, app_id: u64) -> Result<GameCards, String
         return Err("No trading cards found for this game".to_string());
     }
 
-    // Fetch all badge levels from steamcardexchange.net.
-    let mut badges = fetch_badge_levels(app_id).unwrap_or_default();
-
-    // Mark owned badges based on user's current level.
-    for badge in &mut badges {
-        if !badge.foil {
-            badge.owned = badge.level <= user_badge_level;
+    // Fetch full badge images from steamcardexchange.net.
+    let badges = match fetch_badge_images_sce(app_id, user_badge_level) {
+        Ok(b) if !b.is_empty() => {
+            eprintln!("[cards] got {} badges from steamcardexchange", b.len());
+            b
         }
-    }
+        _ => {
+            eprintln!("[cards] steamcardexchange failed, using page fallback");
+            parse_badge_from_page(&html, user_badge_level)
+        }
+    };
 
     let fetched_at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -75,6 +93,80 @@ pub fn fetch_game_cards(steam_id: &str, app_id: u64) -> Result<GameCards, String
     })
 }
 
+/// Fetch badge images from steamcardexchange.net using HTTP/1.0 behavior (Connection: close).
+fn fetch_badge_images_sce(app_id: u64, user_level: u32) -> Result<Vec<Badge>, String> {
+    let url = format!("https://www.steamcardexchange.net/index.php?gamepage-appid-{app_id}");
+
+    let agent = ureq::Agent::new_with_config(
+        ureq::config::Config::builder()
+            .timeout_global(Some(Duration::from_secs(10)))
+            .build(),
+    );
+
+    eprintln!("[badges] requesting {url}");
+    let html = agent
+        .get(&url)
+        .header("Connection", "close")
+        .header("Accept-Encoding", "identity")
+        .call()
+        .map_err(|e| format!("SCE request failed: {e}"))?
+        .into_body()
+        .read_to_string()
+        .map_err(|e| format!("SCE read failed: {e}"))?;
+    eprintln!("[badges] got {} bytes from steamcardexchange", html.len());
+
+    // Badge images have alt attributes starting with "Series".
+    // Pattern: <img ... src="URL" ... alt="Series X - Name">
+    let badge_alt_marker = format!("/images/items/{app_id}/");
+    let mut badges = Vec::new();
+    let mut level_counter: u32 = 0;
+    let xp_per_level = [100, 200, 300, 400, 500];
+
+    // Find all <img> tags that have both the items path and a "Series" alt.
+    let mut pos = 0;
+    while let Some(img_tag_start) = html[pos..].find("<img") {
+        let abs = pos + img_tag_start;
+        let tag_end = match html[abs..].find('>') {
+            Some(p) => abs + p,
+            None => break,
+        };
+        let tag = &html[abs..tag_end + 1];
+
+        // Check if this img tag contains our appid path AND a Series alt.
+        if tag.contains(&badge_alt_marker) {
+            if let Some(alt) = extract_between(tag, "alt=\"", "\"") {
+                if alt.starts_with("Series") {
+                    if let Some(src) = extract_between(tag, "src=\"", "\"") {
+                        // Extract clean name from alt (remove "Series X - " and game name prefix).
+                        let clean_name = alt.split(" - ").last().unwrap_or(alt).trim();
+
+                        level_counter += 1;
+                        let is_foil = level_counter > 5;
+                        let level = if is_foil { 1 } else { level_counter };
+                        let xp = if is_foil { 100 } else {
+                            xp_per_level.get((level - 1) as usize).copied().unwrap_or(100)
+                        };
+
+                        badges.push(Badge {
+                            name: clean_name.to_string(),
+                            image_url: src.to_string(),
+                            level,
+                            xp,
+                            foil: is_foil,
+                            owned: if is_foil { false } else { level <= user_level },
+                        });
+                    }
+                }
+            }
+        }
+
+        pos = tag_end + 1;
+    }
+
+    eprintln!("[badges] parsed {} badges", badges.len());
+    Ok(badges)
+}
+
 fn parse_gamecards_html(html: &str) -> Vec<TradingCard> {
     let mut cards = Vec::new();
     let mut pos = 0;
@@ -83,30 +175,23 @@ fn parse_gamecards_html(html: &str) -> Vec<TradingCard> {
         let abs_start = pos + card_start;
         let card_class_end = abs_start + 40;
 
-        // Determine owned/unowned from class.
         let class_region = &html[abs_start..card_class_end.min(html.len())];
         let owned = class_region.contains("owned") && !class_region.contains("unowned");
 
-        // Find the next card block boundary.
         let block_end = html[abs_start + 20..]
             .find("badge_card_set_card ")
             .map(|p| abs_start + 20 + p)
             .unwrap_or(html.len());
         let block = &html[abs_start..block_end];
 
-        // Extract image URL.
         let image_url = extract_between(block, "src=\"", "\"")
             .unwrap_or_default();
 
-        // Extract quantity (e.g., "(2)").
         let quantity = extract_between(block, "badge_card_set_text_qty\">", "</div>")
             .and_then(|q| q.trim().trim_matches(|c| c == '(' || c == ')').parse::<u32>().ok())
             .unwrap_or(if owned { 1 } else { 0 });
 
-        // Extract card name (after qty div or directly in title).
         let name = extract_card_name(block);
-
-        // Extract series info (e.g., "5 of 15, Series 1").
         let series_info = extract_series_info(block);
 
         if !image_url.is_empty() {
@@ -125,60 +210,6 @@ fn parse_gamecards_html(html: &str) -> Vec<TradingCard> {
     cards
 }
 
-fn extract_card_name(block: &str) -> String {
-    // The name is in the badge_card_set_title div, after any qty div.
-    if let Some(title_start) = block.find("badge_card_set_title") {
-        let after_title = &block[title_start..];
-        // Find content after the last </div> of qty or after the title class.
-        // The name text is between the qty div (if present) and <div style="clear:
-        let name_region = if let Some(qty_end) = after_title.find("badge_card_set_text_qty") {
-            // After the qty </div>
-            let after_qty_div = &after_title[qty_end..];
-            after_qty_div.find("</div>").map(|p| &after_qty_div[p + 6..])
-        } else {
-            // No qty, name is directly after the opening tag
-            after_title.find('>').map(|p| &after_title[p + 1..])
-        };
-
-        if let Some(region) = name_region {
-            if let Some(end) = region.find('<') {
-                let name = region[..end].trim().to_string();
-                if !name.is_empty() {
-                    return name;
-                }
-            }
-        }
-    }
-    String::from("Unknown")
-}
-
-fn extract_series_info(block: &str) -> String {
-    // Series info is in the second badge_card_set_text div (not the title one).
-    let mut found_first = false;
-    let mut search_pos = 0;
-    while let Some(idx) = block[search_pos..].find("badge_card_set_text") {
-        let abs = search_pos + idx;
-        let region = &block[abs..];
-        if region.starts_with("badge_card_set_text ellipsis") && !region.starts_with("badge_card_set_text_") {
-            if found_first {
-                // This is the second one (series info).
-                if let Some(content) = extract_between(region, ">", "</div>") {
-                    let cleaned = content.trim().to_string();
-                    if !cleaned.is_empty() {
-                        return cleaned;
-                    }
-                }
-            }
-        }
-        if region.starts_with("badge_card_set_text ") && !region.starts_with("badge_card_set_text_") {
-            found_first = true;
-        }
-        search_pos = abs + 19;
-    }
-    String::new()
-}
-
-/// Parse the user's current badge level from the gamecards page.
 fn parse_user_badge(html: &str) -> (u32, String) {
     let Some(badge_section) = html.find("badge_current") else { return (0, String::new()) };
     let region = &html[badge_section..];
@@ -189,7 +220,6 @@ fn parse_user_badge(html: &str) -> (u32, String) {
         return (0, String::new());
     }
 
-    // Extract level from "Level X, Y XP".
     let level_text = extract_between(region, "badge_info_description\">", "badge_info_unlocked")
         .and_then(|s| extract_between(s, "<div>", "</div>"))
         .unwrap_or("");
@@ -208,65 +238,101 @@ fn parse_user_badge(html: &str) -> (u32, String) {
     (level, unlocked)
 }
 
-/// Fetch all badge levels (normal + foil) from steamcardexchange.net.
-fn fetch_badge_levels(app_id: u64) -> Result<Vec<Badge>, String> {
-    let url = format!("https://www.steamcardexchange.net/index.php?gamepage-appid-{app_id}");
-
-    let html = ureq::get(&url)
-        .call()
-        .map_err(|e| format!("Failed to fetch badge data: {e}"))?
-        .into_body()
-        .read_to_string()
-        .map_err(|e| format!("Failed to read badge data: {e}"))?;
-
+fn parse_badge_from_page(html: &str, user_level: u32) -> Vec<Badge> {
     let mut badges = Vec::new();
-
-    // Pattern: badge image with alt text, followed by name and level/XP info.
-    let badge_img_prefix = format!(
-        "https://steamcdn-a.akamaihd.net/steamcommunity/public/images/items/{app_id}/"
-    );
-
-    let mut pos = 0;
-    let mut level_counter: u32 = 0;
     let xp_per_level = [100, 200, 300, 400, 500];
 
-    while let Some(idx) = html[pos..].find(&badge_img_prefix) {
-        let abs = pos + idx;
-        // Extract image URL.
-        let img_start = html[..abs].rfind("src=\"").map(|p| p + 5).unwrap_or(abs);
-        let img_end = html[abs..].find('"').map(|p| abs + p).unwrap_or(abs);
-        let image_url = html[img_start..img_end].to_string();
+    let badge_section = html.find("badge_current");
+    let current_image = badge_section.and_then(|start| {
+        let region = &html[start..];
+        extract_between(region, "src=\"", "\"")
+            .filter(|url| url.contains("/images/items/"))
+            .map(|s| s.to_string())
+    });
 
-        // Extract name from alt attribute.
-        let alt_region = &html[img_end..];
-        let name = extract_between(&html[img_start - 5..img_end + 200], "alt=\"", "\"")
-            .unwrap_or("Unknown");
-
-        // Clean name: remove "Series X - " prefix.
-        let clean_name = if let Some(dash_pos) = name.find(" - ") {
-            name[dash_pos + 3..].trim()
+    let current_name = badge_section.and_then(|start| {
+        let region = &html[start..];
+        if region.contains("badge_info_title") {
+            extract_between(region, "badge_info_title\">", "</div>")
+                .map(|s| s.trim().to_string())
+        } else if region.contains("badge_empty_name") {
+            extract_between(region, "badge_empty_name\">", "</div>")
+                .map(|s| s.trim().to_string())
         } else {
-            name.trim()
+            None
+        }
+    });
+
+    for level in 1..=5u32 {
+        let owned = level <= user_level;
+        let image_url = if owned && level == user_level {
+            current_image.clone().unwrap_or_default()
+        } else {
+            String::new()
+        };
+        let name = if level == user_level || (level == user_level + 1 && user_level < 5) {
+            current_name.clone().unwrap_or_else(|| format!("Nivel {level}"))
+        } else {
+            format!("Nivel {level}")
         };
 
-        level_counter += 1;
-        let is_foil = level_counter > 5;
-        let level = if is_foil { 1 } else { level_counter };
-        let xp = if is_foil { 100 } else { xp_per_level.get((level - 1) as usize).copied().unwrap_or(100) };
-
         badges.push(Badge {
-            name: clean_name.to_string(),
+            name,
             image_url,
             level,
-            xp,
-            foil: is_foil,
-            owned: false,
+            xp: xp_per_level[(level - 1) as usize],
+            foil: false,
+            owned,
         });
-
-        pos = img_end + 1;
     }
 
-    Ok(badges)
+    badges
+}
+
+fn extract_card_name(block: &str) -> String {
+    if let Some(title_start) = block.find("badge_card_set_title") {
+        let after_title = &block[title_start..];
+        let name_region = if let Some(qty_end) = after_title.find("badge_card_set_text_qty") {
+            let after_qty_div = &after_title[qty_end..];
+            after_qty_div.find("</div>").map(|p| &after_qty_div[p + 6..])
+        } else {
+            after_title.find('>').map(|p| &after_title[p + 1..])
+        };
+
+        if let Some(region) = name_region {
+            if let Some(end) = region.find('<') {
+                let name = region[..end].trim().to_string();
+                if !name.is_empty() {
+                    return name;
+                }
+            }
+        }
+    }
+    String::from("Unknown")
+}
+
+fn extract_series_info(block: &str) -> String {
+    let mut found_first = false;
+    let mut search_pos = 0;
+    while let Some(idx) = block[search_pos..].find("badge_card_set_text") {
+        let abs = search_pos + idx;
+        let region = &block[abs..];
+        if region.starts_with("badge_card_set_text ellipsis") && !region.starts_with("badge_card_set_text_") {
+            if found_first {
+                if let Some(content) = extract_between(region, ">", "</div>") {
+                    let cleaned = content.trim().to_string();
+                    if !cleaned.is_empty() {
+                        return cleaned;
+                    }
+                }
+            }
+        }
+        if region.starts_with("badge_card_set_text ") && !region.starts_with("badge_card_set_text_") {
+            found_first = true;
+        }
+        search_pos = abs + 19;
+    }
+    String::new()
 }
 
 fn extract_between<'a>(text: &'a str, start: &str, end: &str) -> Option<&'a str> {
