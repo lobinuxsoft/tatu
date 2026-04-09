@@ -62,12 +62,13 @@ install_app() {
         echo "  Icon installed"
     fi
 
-    # Create .desktop entry
+    # Create .desktop entry (escape spaces in Exec path)
+    local exec_path="${DEST// /\\ }"
     cat > "$DESKTOP_DIR/$DESKTOP_ID.desktop" << DESKTOP
 [Desktop Entry]
 Name=$APP_NAME
 Comment=Track your Steam game library progress, achievements, trading cards and badges
-Exec=$DEST --run
+Exec="${DEST}" --run
 Icon=$ICON_DIR/$DESKTOP_ID.png
 Type=Application
 Categories=Game;Utility;
