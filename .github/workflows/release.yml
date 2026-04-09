@@ -1,0 +1,403 @@
+name: Release
+
+on:
+  workflow_call:
+    inputs:
+      tag_name:
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Tag name (e.g., v0.2.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-amd64
+            os: ubuntu-latest
+            binary: game-progress-tracker
+          - target: windows-amd64
+            os: windows-latest
+            binary: game-progress-tracker.exe
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag_name }}
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri -> target"
+          key: release-${{ matrix.target }}
+
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev
+
+      - name: Build binary
+        working-directory: src-tauri
+        run: cargo build --release
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.target }}
+          path: src-tauri/target/release/${{ matrix.binary }}
+
+  appimage:
+    name: AppImage
+    needs: build
+    runs-on: ubuntu-latest
+    env:
+      APPIMAGE_EXTRACT_AND_RUN: "1"
+      APP_NAME: "Game Progress Tracker"
+      BINARY_NAME: "game-progress-tracker"
+      DESKTOP_ID: "com.lobinux.game-progress-tracker"
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag_name }}
+
+      - name: Download Linux binary
+        uses: actions/download-artifact@v4
+        with:
+          name: binary-linux-amd64
+          path: artifacts
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libgdk-pixbuf2.0-bin \
+            gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-gl libgstreamer1.0-dev
+
+      - name: Download tools
+        run: |
+          curl -sL -o appimagetool https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
+          curl -sL -o linuxdeploy https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          chmod +x appimagetool linuxdeploy
+
+      - name: Prepare AppDir
+        run: |
+          mkdir -p appdir/usr/bin
+          cp artifacts/$BINARY_NAME appdir/usr/bin/
+          chmod +x appdir/usr/bin/$BINARY_NAME
+          cp src-tauri/icons/256x256.png appdir/$DESKTOP_ID.png
+
+          cat > appdir/$DESKTOP_ID.desktop << DESKTOP
+          [Desktop Entry]
+          Name=$APP_NAME
+          Comment=Track your Steam game library progress, achievements, trading cards and badges
+          Exec=$BINARY_NAME
+          Icon=$DESKTOP_ID
+          Type=Application
+          Categories=Game;Utility;
+          Keywords=steam;games;progress;achievements;trading cards;
+          Terminal=false
+          DESKTOP
+
+      - name: Bundle libraries
+        run: |
+          # Bundle shared libraries with linuxdeploy
+          ./linuxdeploy --appdir appdir \
+            --executable appdir/usr/bin/$BINARY_NAME \
+            --desktop-file appdir/$DESKTOP_ID.desktop \
+            --icon-file appdir/$DESKTOP_ID.png
+
+          # Bundle WebKit helpers and patch hardcoded paths
+          WEBKIT_DIR=""
+          for candidate in /usr/libexec/webkit2gtk-4.1 /usr/lib/x86_64-linux-gnu/webkit2gtk-4.1; do
+            if [ -d "$candidate" ]; then
+              WEBKIT_DIR="$candidate"
+              break
+            fi
+          done
+          if [ -z "$WEBKIT_DIR" ]; then
+            WKP=$(find /usr -name "WebKitWebProcess" -path "*webkit2gtk*" 2>/dev/null | head -1)
+            if [ -n "$WKP" ]; then
+              WEBKIT_DIR=$(dirname "$WKP")
+            fi
+          fi
+          WEBKIT_HARDCODED=$(strings appdir/usr/lib/libwebkit2gtk-4.1.so.0 2>/dev/null | grep -m1 '/webkit2gtk-4.1$' || true)
+          if [ -n "$WEBKIT_DIR" ] && [ -n "$WEBKIT_HARDCODED" ]; then
+            WEBKIT_RELATIVE="././${WEBKIT_HARDCODED#/usr}"
+            echo "Patching WebKit path: $WEBKIT_HARDCODED -> $WEBKIT_RELATIVE"
+            LC_ALL=C sed -i "s|$WEBKIT_HARDCODED|$WEBKIT_RELATIVE|g" appdir/usr/lib/libwebkit2gtk-4.1.so.0
+            HELPERS_DEST="appdir${WEBKIT_HARDCODED#/usr}"
+            mkdir -p "$HELPERS_DEST"
+            cp "$WEBKIT_DIR/WebKitWebProcess" "$HELPERS_DEST/"
+            cp "$WEBKIT_DIR/WebKitNetworkProcess" "$HELPERS_DEST/"
+            if [ -d "$WEBKIT_DIR/injected-bundle" ]; then
+              cp -r "$WEBKIT_DIR/injected-bundle" "$HELPERS_DEST/"
+            fi
+          else
+            echo "::warning::WebKit helpers or library not found"
+          fi
+
+          # Bundle GLib compiled schemas
+          if [ -f "/usr/share/glib-2.0/schemas/gschemas.compiled" ]; then
+            mkdir -p appdir/usr/share/glib-2.0/schemas
+            cp /usr/share/glib-2.0/schemas/gschemas.compiled appdir/usr/share/glib-2.0/schemas/
+          fi
+
+          # Bundle GIO modules (TLS support)
+          GIO_DIR=$(pkg-config --variable=giomoduledir gio-2.0 2>/dev/null || echo "/usr/lib/x86_64-linux-gnu/gio/modules")
+          if [ -d "$GIO_DIR" ]; then
+            mkdir -p appdir/usr/lib/gio/modules
+            cp "$GIO_DIR"/*.so appdir/usr/lib/gio/modules/
+          fi
+
+          # Bundle GDK pixbuf loaders
+          PIXBUF_DIR="/usr/lib/x86_64-linux-gnu/gdk-pixbuf-2.0/2.10.0"
+          if compgen -G "$PIXBUF_DIR/loaders/*.so" > /dev/null 2>&1; then
+            mkdir -p appdir/usr/lib/gdk-pixbuf-2.0/2.10.0/loaders
+            cp "$PIXBUF_DIR/loaders"/*.so appdir/usr/lib/gdk-pixbuf-2.0/2.10.0/loaders/
+            if command -v gdk-pixbuf-query-loaders &>/dev/null; then
+              GDK_PIXBUF_MODULEDIR=appdir/usr/lib/gdk-pixbuf-2.0/2.10.0/loaders \
+                gdk-pixbuf-query-loaders > appdir/usr/lib/gdk-pixbuf-2.0/2.10.0/loaders.cache
+            fi
+          fi
+
+      - name: Bundle GStreamer plugins
+        run: |
+          GST_PLUGIN_DIR=$(pkg-config --variable=pluginsdir gstreamer-1.0 2>/dev/null)
+          if [ -z "$GST_PLUGIN_DIR" ] || [ ! -d "$GST_PLUGIN_DIR" ]; then
+            for candidate in /usr/lib/x86_64-linux-gnu/gstreamer-1.0 /usr/lib64/gstreamer-1.0; do
+              if [ -d "$candidate" ]; then
+                GST_PLUGIN_DIR="$candidate"
+                break
+              fi
+            done
+          fi
+          if [ -n "$GST_PLUGIN_DIR" ] && [ -d "$GST_PLUGIN_DIR" ]; then
+            echo "Bundling GStreamer plugins from $GST_PLUGIN_DIR..."
+            mkdir -p appdir/usr/lib/gstreamer-1.0
+            GST_PLUGINS=(
+              coreelements typefindfunctions app playback matroska vpx
+              opus vorbis ogg audioconvert audioresample videoconvertscale
+              autodetect volume opengl gio
+            )
+            for plugin in "${GST_PLUGINS[@]}"; do
+              FOUND=$(compgen -G "$GST_PLUGIN_DIR/libgst${plugin}.*" 2>/dev/null | head -1)
+              if [ -n "$FOUND" ]; then
+                cp "$FOUND" appdir/usr/lib/gstreamer-1.0/
+              else
+                echo "::warning::GStreamer plugin not found: $plugin"
+              fi
+            done
+
+            # Bundle GStreamer plugin scanner
+            GST_SCANNER=""
+            GST_SCANNER_DIR=$(pkg-config --variable=pluginscannerdir gstreamer-1.0 2>/dev/null)
+            if [ -n "$GST_SCANNER_DIR" ] && [ -x "$GST_SCANNER_DIR/gst-plugin-scanner" ]; then
+              GST_SCANNER="$GST_SCANNER_DIR/gst-plugin-scanner"
+            elif [ -x "/usr/libexec/gstreamer-1.0/gst-plugin-scanner" ]; then
+              GST_SCANNER="/usr/libexec/gstreamer-1.0/gst-plugin-scanner"
+            else
+              GST_SCANNER=$(find /usr -name "gst-plugin-scanner" -path "*/gstreamer-1.0/*" 2>/dev/null | head -1)
+            fi
+            if [ -n "$GST_SCANNER" ]; then
+              mkdir -p appdir/usr/libexec/gstreamer-1.0
+              cp "$GST_SCANNER" appdir/usr/libexec/gstreamer-1.0/
+            else
+              echo "::warning::GStreamer plugin scanner not found"
+            fi
+          else
+            echo "::warning::GStreamer plugin directory not found, skipping"
+          fi
+
+      - name: Generate AppRun
+        run: |
+          rm -f appdir/AppRun
+          cat > appdir/AppRun << 'APPRUN'
+          #!/bin/bash
+          SELF=$(readlink -f "$0")
+          HERE=${SELF%/*}
+          APPIMAGE="${APPIMAGE:-$SELF}"
+          APP_NAME="Game Progress Tracker"
+          BINARY_NAME="game-progress-tracker"
+          DESKTOP_ID="com.lobinux.game-progress-tracker"
+          INSTALL_DIR="$HOME/.local/bin"
+          DESKTOP_DIR="$HOME/.local/share/applications"
+          ICON_DIR="$HOME/.local/share/icons"
+
+          # Bundled library paths
+          export LD_LIBRARY_PATH="${HERE}/usr/lib:${LD_LIBRARY_PATH}"
+          export GIO_MODULE_DIR="${HERE}/usr/lib/gio/modules"
+          export GDK_PIXBUF_MODULE_FILE="${HERE}/usr/lib/gdk-pixbuf-2.0/2.10.0/loaders.cache"
+          export GSETTINGS_SCHEMA_DIR="${HERE}/usr/share/glib-2.0/schemas"
+
+          # GStreamer plugin paths
+          export GST_PLUGIN_PATH="${HERE}/usr/lib/gstreamer-1.0"
+          export GST_PLUGIN_SYSTEM_PATH=""
+          export GST_PLUGIN_SCANNER="${HERE}/usr/libexec/gstreamer-1.0/gst-plugin-scanner"
+          export GST_REGISTRY="${HOME}/.cache/game-progress-tracker/gst-registry.bin"
+
+          # WebKit helpers use paths patched to be relative (././ prefix)
+          cd "${HERE}"
+
+          install_app() {
+              echo "Installing $APP_NAME..."
+              mkdir -p "$INSTALL_DIR" "$DESKTOP_DIR" "$ICON_DIR"
+              DEST="$INSTALL_DIR/$(basename "$APPIMAGE")"
+              if [ "$APPIMAGE" != "$DEST" ]; then
+                  mv "$APPIMAGE" "$DEST"
+                  chmod +x "$DEST"
+                  echo "  Moved to: $DEST"
+              fi
+              "$DEST" --appimage-extract "$DESKTOP_ID.png" >/dev/null 2>&1
+              if [ -f "squashfs-root/$DESKTOP_ID.png" ]; then
+                  cp "squashfs-root/$DESKTOP_ID.png" "$ICON_DIR/$DESKTOP_ID.png"
+                  rm -rf squashfs-root
+                  echo "  Icon installed"
+              fi
+              cat > "$DESKTOP_DIR/$DESKTOP_ID.desktop" << DESKTOP
+          [Desktop Entry]
+          Name=$APP_NAME
+          Comment=Track your Steam game library progress, achievements, trading cards and badges
+          Exec=$DEST --run
+          Icon=$ICON_DIR/$DESKTOP_ID.png
+          Type=Application
+          Categories=Game;Utility;
+          Keywords=steam;games;progress;achievements;trading cards;
+          Terminal=false
+          DESKTOP
+              echo "  Desktop entry created"
+              echo ""
+              echo "Installation complete! You can find the app in your application menu."
+          }
+
+          uninstall_app() {
+              echo "Uninstalling $APP_NAME..."
+              find "$INSTALL_DIR" -maxdepth 1 -iname "*game-progress-tracker*.AppImage" -delete 2>/dev/null
+              rm -f "$DESKTOP_DIR/$DESKTOP_ID.desktop"
+              rm -f "$ICON_DIR/$DESKTOP_ID.png"
+              rm -rf "${HOME}/.cache/game-progress-tracker"
+              echo "Uninstalled."
+          }
+
+          case "$1" in
+              --install)
+                  install_app
+                  exit 0
+                  ;;
+              --uninstall)
+                  uninstall_app
+                  exit 0
+                  ;;
+              --run)
+                  shift
+                  export PATH="${HERE}/usr/bin:${PATH}"
+                  exec "${HERE}/usr/bin/$BINARY_NAME" "$@"
+                  ;;
+              --help)
+                  echo "Usage: $(basename "$APPIMAGE") [OPTIONS]"
+                  echo ""
+                  echo "Options:"
+                  echo "  --install     Install to ~/.local/bin and create desktop entry"
+                  echo "  --uninstall   Remove installation"
+                  echo "  --run         Run without install check (used by .desktop)"
+                  echo "  --help        Show this help"
+                  exit 0
+                  ;;
+          esac
+
+          if [[ "$APPIMAGE" != "$INSTALL_DIR"/* ]] && [ ! -t 0 ]; then
+              if command -v zenity &>/dev/null; then
+                  if zenity --question --title="Install $APP_NAME" \
+                      --text="Install to ~/.local/bin and create menu entry?" \
+                      --width=300 2>/dev/null; then
+                      install_app
+                      exec "$INSTALL_DIR/$(basename "$APPIMAGE")" --run "$@"
+                  fi
+              elif command -v kdialog &>/dev/null; then
+                  if kdialog --yesno "Install to ~/.local/bin and create menu entry?" \
+                      --title "Install $APP_NAME" 2>/dev/null; then
+                      install_app
+                      exec "$INSTALL_DIR/$(basename "$APPIMAGE")" --run "$@"
+                  fi
+              fi
+          fi
+
+          export PATH="${HERE}/usr/bin:${PATH}"
+          exec "${HERE}/usr/bin/$BINARY_NAME" "$@"
+          APPRUN
+          chmod +x appdir/AppRun
+
+      - name: Build AppImage
+        run: |
+          ARCH=x86_64 ./appimagetool appdir "Game_Progress_Tracker.AppImage"
+
+      - name: Upload AppImage
+        uses: actions/upload-artifact@v4
+        with:
+          name: appimage
+          path: Game_Progress_Tracker.AppImage
+
+  upload-assets:
+    name: Upload Release Assets
+    needs: [build, appimage]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag_name }}
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Package release assets
+        run: |
+          mkdir -p release
+
+          # Linux tar.gz
+          mkdir -p staging/linux
+          cp artifacts/binary-linux-amd64/game-progress-tracker staging/linux/
+          chmod +x staging/linux/*
+          tar -czf "release/game-progress-tracker-linux-amd64.tar.gz" -C staging/linux .
+
+          # Windows zip
+          mkdir -p staging/windows
+          cp artifacts/binary-windows-amd64/game-progress-tracker.exe staging/windows/
+          cd staging/windows && zip -r "../../release/game-progress-tracker-windows-amd64.zip" . && cd ../..
+
+          # AppImage
+          cp artifacts/appimage/Game_Progress_Tracker.AppImage release/
+          chmod +x release/*.AppImage
+
+          # Checksums
+          cd release
+          sha256sum * > checksums-sha256.txt
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag_name }}
+          append_body: true
+          body: |
+
+            ## Downloads
+
+            | File | Description |
+            |------|-------------|
+            | `game-progress-tracker-linux-amd64.tar.gz` | Linux binary |
+            | `game-progress-tracker-windows-amd64.zip` | Windows binary |
+            | `Game_Progress_Tracker.AppImage` | Linux AppImage (auto-install support) |
+            | `checksums-sha256.txt` | SHA-256 checksums |
+          files: release/*
+          generate_release_notes: false
