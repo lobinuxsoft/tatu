@@ -25,34 +25,33 @@ pub fn parse_shortcuts() -> Result<Vec<NonSteamGame>, String> {
         // Look for AppName key (0x01 "AppName" 0x00 value 0x00).
         if i + 9 < len && data[i] == 0x01 {
             let key = read_cstring(&data, i + 1);
-            if let Some((key_str, after_key)) = key {
-                if key_str == "AppName" || key_str == "appname" {
-                    if let Some((name, after_val)) = read_cstring(&data, after_key) {
-                        // Found a game entry. Now scan nearby bytes for other fields.
-                        let search_start = if i > 200 { i - 200 } else { 0 };
-                        let search_end = (after_val + 500).min(len);
-                        let region = &data[search_start..search_end];
-                        let offset = i - search_start;
+            if let Some((key_str, after_key)) = key
+                && (key_str == "AppName" || key_str == "appname")
+                && let Some((name, after_val)) = read_cstring(&data, after_key)
+            {
+                // Found a game entry. Now scan nearby bytes for other fields.
+                let search_start = i.saturating_sub(200);
+                let search_end = (after_val + 500).min(len);
+                let region = &data[search_start..search_end];
+                let _offset = i - search_start;
 
-                        let appid = find_int_field(region, "appid").unwrap_or(0) as u64;
-                        let exe = find_string_field(region, "Exe").unwrap_or_default();
-                        let icon = find_string_field(region, "icon").unwrap_or_default();
-                        let last_played = find_int_field(region, "LastPlayTime").unwrap_or(0) as u64;
+                let appid = find_int_field(region, "appid").unwrap_or(0) as u64;
+                let exe = find_string_field(region, "Exe").unwrap_or_default();
+                let icon = find_string_field(region, "icon").unwrap_or_default();
+                let last_played = find_int_field(region, "LastPlayTime").unwrap_or(0) as u64;
 
-                        if !name.is_empty() {
-                            games.push(NonSteamGame {
-                                id: appid,
-                                name,
-                                exe,
-                                icon,
-                                last_played,
-                            });
-                        }
-
-                        i = after_val;
-                        continue;
-                    }
+                if !name.is_empty() {
+                    games.push(NonSteamGame {
+                        id: appid,
+                        name,
+                        exe,
+                        icon,
+                        last_played,
+                    });
                 }
+
+                i = after_val;
+                continue;
             }
         }
         i += 1;

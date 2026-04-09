@@ -93,14 +93,21 @@ pub fn fetch_single_detail(game: &mut Game) -> bool {
         game.id
     );
 
-    let Ok(resp) = ureq::get(&url).call() else { return false };
-    let Ok(body) = resp.into_body().read_json::<serde_json::Value>() else { return false };
+    let Ok(resp) = ureq::get(&url).call() else {
+        return false;
+    };
+    let Ok(body) = resp.into_body().read_json::<serde_json::Value>() else {
+        return false;
+    };
 
     let key = game.id.to_string();
-    let Some(data) = body.get(&key).and_then(|v| v.get("data")) else { return false };
+    let Some(data) = body.get(&key).and_then(|v| v.get("data")) else {
+        return false;
+    };
 
     if let Some(arr) = data["genres"].as_array() {
-        game.genres = arr.iter()
+        game.genres = arr
+            .iter()
             .filter_map(|g| g["description"].as_str().map(String::from))
             .collect();
     }
@@ -117,19 +124,20 @@ pub fn fetch_single_detail(game: &mut Game) -> bool {
         game.metacritic = Some(score as u32);
     }
     if let Some(devs) = data["developers"].as_array() {
-        game.developers = devs.iter()
+        game.developers = devs
+            .iter()
             .filter_map(|d| d.as_str().map(String::from))
             .collect();
     }
     if let Some(desc) = data["short_description"].as_str() {
         game.short_description = desc.to_string();
     }
-    if game.tag.is_empty() {
-        if let Some(app_type) = data["type"].as_str() {
-            match app_type {
-                "demo" | "mod" => game.tag = "demo".into(),
-                _ => {}
-            }
+    if game.tag.is_empty()
+        && let Some(app_type) = data["type"].as_str()
+    {
+        match app_type {
+            "demo" | "mod" => game.tag = "demo".into(),
+            _ => {}
         }
     }
     true
@@ -138,10 +146,7 @@ pub fn fetch_single_detail(game: &mut Game) -> bool {
 /// Fetch details from the Steam Store API for a batch of app IDs.
 /// Steam rate-limits to ~200 requests per 5 minutes, so we sleep between calls.
 /// `on_progress` is called after each game with (current, total).
-pub fn fetch_details_for(
-    games: &mut [Game],
-    on_progress: impl Fn(usize, usize),
-) {
+pub fn fetch_details_for(games: &mut [Game], on_progress: impl Fn(usize, usize)) {
     let total = games.len();
     for (i, game) in games.iter_mut().enumerate() {
         if !game.genres.is_empty() {
@@ -171,18 +176,18 @@ pub fn detect_steam_id() -> Option<String> {
         if trimmed.len() == 17 && trimmed.starts_with("7656119") && trimmed.parse::<u64>().is_ok() {
             current_id = Some(trimmed.to_string());
         }
-        if let Some(ref id) = current_id {
-            if line.contains("\"Timestamp\"") || line.contains("\"timestamp\"") {
-                let ts: u64 = line
-                    .split('"')
-                    .filter(|s| s.parse::<u64>().is_ok())
-                    .filter_map(|s| s.parse().ok())
-                    .next()
-                    .unwrap_or(0);
-                if ts > best_timestamp {
-                    best_timestamp = ts;
-                    best_id = Some(id.clone());
-                }
+        if let Some(ref id) = current_id
+            && (line.contains("\"Timestamp\"") || line.contains("\"timestamp\""))
+        {
+            let ts: u64 = line
+                .split('"')
+                .filter(|s| s.parse::<u64>().is_ok())
+                .filter_map(|s| s.parse().ok())
+                .next()
+                .unwrap_or(0);
+            if ts > best_timestamp {
+                best_timestamp = ts;
+                best_id = Some(id.clone());
             }
         }
     }
@@ -228,7 +233,12 @@ fn classify(id: u64, name: &str) -> String {
         return "demo".into();
     }
     let nl = name.to_lowercase();
-    for w in ["playtest", "trial version", "playable teaser", "friend's pass"] {
+    for w in [
+        "playtest",
+        "trial version",
+        "playable teaser",
+        "friend's pass",
+    ] {
         if nl.contains(w) {
             return "demo".into();
         }
