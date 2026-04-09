@@ -234,20 +234,20 @@ jobs:
           DESKTOP_DIR="$HOME/.local/share/applications"
           ICON_DIR="$HOME/.local/share/icons"
 
-          # Bundled library paths
-          export LD_LIBRARY_PATH="${HERE}/usr/lib:${LD_LIBRARY_PATH}"
-          export GIO_MODULE_DIR="${HERE}/usr/lib/gio/modules"
-          export GDK_PIXBUF_MODULE_FILE="${HERE}/usr/lib/gdk-pixbuf-2.0/2.10.0/loaders.cache"
-          export GSETTINGS_SCHEMA_DIR="${HERE}/usr/share/glib-2.0/schemas"
-
-          # GStreamer plugin paths
-          export GST_PLUGIN_PATH="${HERE}/usr/lib/gstreamer-1.0"
-          export GST_PLUGIN_SYSTEM_PATH=""
-          export GST_PLUGIN_SCANNER="${HERE}/usr/libexec/gstreamer-1.0/gst-plugin-scanner"
-          export GST_REGISTRY="${HOME}/.cache/game-progress-tracker/gst-registry.bin"
-
-          # WebKit helpers use paths patched to be relative (././ prefix)
-          cd "${HERE}"
+          # Setup bundled library environment. Called only before running the app
+          # binary, NOT before system tools like zenity/kdialog which break when
+          # they pick up our bundled GStreamer/GTK libs.
+          setup_env() {
+              export LD_LIBRARY_PATH="${HERE}/usr/lib:${LD_LIBRARY_PATH}"
+              export GIO_MODULE_DIR="${HERE}/usr/lib/gio/modules"
+              export GDK_PIXBUF_MODULE_FILE="${HERE}/usr/lib/gdk-pixbuf-2.0/2.10.0/loaders.cache"
+              export GSETTINGS_SCHEMA_DIR="${HERE}/usr/share/glib-2.0/schemas"
+              export GST_PLUGIN_PATH="${HERE}/usr/lib/gstreamer-1.0"
+              export GST_PLUGIN_SYSTEM_PATH=""
+              export GST_PLUGIN_SCANNER="${HERE}/usr/libexec/gstreamer-1.0/gst-plugin-scanner"
+              export GST_REGISTRY="${HOME}/.cache/game-progress-tracker/gst-registry.bin"
+              cd "${HERE}"
+          }
 
           install_app() {
               echo "Installing $APP_NAME..."
@@ -300,6 +300,7 @@ jobs:
                   ;;
               --run)
                   shift
+                  setup_env
                   export PATH="${HERE}/usr/bin:${PATH}"
                   exec "${HERE}/usr/bin/$BINARY_NAME" "$@"
                   ;;
@@ -332,6 +333,7 @@ jobs:
               fi
           fi
 
+          setup_env
           export PATH="${HERE}/usr/bin:${PATH}"
           exec "${HERE}/usr/bin/$BINARY_NAME" "$@"
           APPRUN
