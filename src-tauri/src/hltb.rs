@@ -115,16 +115,16 @@ fn fetch_auth_fresh(endpoint: &str) -> Result<AuthInfo, String> {
 fn get_auth() -> Result<(String, String, String, String, String), String> {
     {
         let cache = AUTH_CACHE.lock().unwrap();
-        if let Some(ref auth) = *cache {
-            if now_secs() - auth.fetched_at < AUTH_TTL_SECS {
-                return Ok((
-                    auth.endpoint.clone(),
-                    auth.token.clone(),
-                    auth.key.clone(),
-                    auth.value.clone(),
-                    format!("{}{}", BASE_URL, auth.endpoint),
-                ));
-            }
+        if let Some(ref auth) = *cache
+            && now_secs() - auth.fetched_at < AUTH_TTL_SECS
+        {
+            return Ok((
+                auth.endpoint.clone(),
+                auth.token.clone(),
+                auth.key.clone(),
+                auth.value.clone(),
+                format!("{}{}", BASE_URL, auth.endpoint),
+            ));
         }
     }
 
