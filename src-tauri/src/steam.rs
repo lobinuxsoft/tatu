@@ -201,9 +201,7 @@ pub fn detect_steam_id() -> Option<String> {
 /// correct userdata folder, then parses the cloud storage JSON.
 pub fn get_steam_favorites(steam_id: &str) -> Result<Vec<u64>, String> {
     let steam_dir = steam_install_dir().ok_or("Steam install directory not found")?;
-    let id64: u64 = steam_id
-        .parse()
-        .map_err(|_| "Invalid Steam ID format")?;
+    let id64: u64 = steam_id.parse().map_err(|_| "Invalid Steam ID format")?;
     // Convert SteamID64 to account ID (userdata folder name).
     let account_id = id64 - 76561197960265728;
 
@@ -215,8 +213,8 @@ pub fn get_steam_favorites(steam_id: &str) -> Result<Vec<u64>, String> {
     let content = std::fs::read_to_string(&cloud_path)
         .map_err(|e| format!("Cannot read cloud storage: {e}"))?;
 
-    let entries: Vec<serde_json::Value> = serde_json::from_str(&content)
-        .map_err(|e| format!("Cannot parse cloud storage: {e}"))?;
+    let entries: Vec<serde_json::Value> =
+        serde_json::from_str(&content).map_err(|e| format!("Cannot parse cloud storage: {e}"))?;
 
     for entry in &entries {
         // Each entry is a 2-element array: [key_string, object].
@@ -238,10 +236,7 @@ pub fn get_steam_favorites(steam_id: &str) -> Result<Vec<u64>, String> {
         let added = value["added"]
             .as_array()
             .ok_or("No 'added' array in favorites")?;
-        return Ok(added
-            .iter()
-            .filter_map(|v| v.as_u64())
-            .collect());
+        return Ok(added.iter().filter_map(|v| v.as_u64()).collect());
     }
 
     Ok(vec![])

@@ -50,9 +50,10 @@ fn discover_endpoint() -> Result<String, String> {
         .map_err(|e| format!("HLTB read error: {e}"))?;
 
     let script_re = Regex::new(r#"src="(/_next/static/chunks/[^"]+\.js)""#).unwrap();
-    let fetch_re =
-        Regex::new(r#"fetch\s*\(\s*["']/api/([a-zA-Z0-9_]+)[^"']*["']\s*,\s*\{[^}]*method:\s*["']POST"#)
-            .unwrap();
+    let fetch_re = Regex::new(
+        r#"fetch\s*\(\s*["']/api/([a-zA-Z0-9_]+)[^"']*["']\s*,\s*\{[^}]*method:\s*["']POST"#,
+    )
+    .unwrap();
 
     for cap in script_re.captures_iter(&html) {
         let script_path = &cap[1];
@@ -192,9 +193,7 @@ pub fn search(game_name: &str) -> Result<Vec<HltbResult>, String> {
         .read_json()
         .map_err(|e| format!("HLTB search parse error: {e}"))?;
 
-    let data = resp["data"]
-        .as_array()
-        .ok_or("No data in HLTB response")?;
+    let data = resp["data"].as_array().ok_or("No data in HLTB response")?;
 
     let results: Vec<HltbResult> = data
         .iter()
