@@ -196,6 +196,57 @@ pub fn detect_steam_id() -> Option<String> {
     best_id.or(current_id)
 }
 
+/// Read the user's Steam favorites from the local cloud storage file.
+/// Converts the 64-bit Steam ID to a 32-bit account ID to locate the
+/// correct userdata folder, then parses the cloud storage JSON.
+pub fn get_steam_favorites(steam_id: &str) -> Result<Vec<u64>, String> {
+    let steam_dir = steam_install_dir().ok_or("Steam install directory not found")?;
+    let id64: u64 = steam_id
+        .parse()
+        .map_err(|_| "Invalid Steam ID format")?;
+    // Convert SteamID64 to account ID (userdata folder name).
+    let account_id = id64 - 76561197960265728;
+
+    let cloud_path = steam_dir
+        .join("userdata")
+        .join(account_id.to_string())
+        .join("config/cloudstorage/cloud-storage-namespace-1.json");
+
+    let content = std::fs::read_to_string(&cloud_path)
+        .map_err(|e| format!("Cannot read cloud storage: {e}"))?;
+
+    let entries: Vec<serde_json::Value> = serde_json::from_str(&content)
+        .map_err(|e| format!("Cannot parse cloud storage: {e}"))?;
+
+    for entry in &entries {
+        // Each entry is a 2-element array: [key_string, object].
+        let arr = match entry.as_array() {
+            Some(a) if a.len() == 2 => a,
+            _ => continue,
+        };
+        let obj = match arr[1].as_object() {
+            Some(o) => o,
+            None => continue,
+        };
+        let key = obj.get("key").and_then(|v| v.as_str()).unwrap_or("");
+        if key != "user-collections.favorite" {
+            continue;
+        }
+        let value_str = obj.get("value").and_then(|v| v.as_str()).unwrap_or("");
+        let value: serde_json::Value = serde_json::from_str(value_str)
+            .map_err(|e| format!("Cannot parse favorites value: {e}"))?;
+        let added = value["added"]
+            .as_array()
+            .ok_or("No 'added' array in favorites")?;
+        return Ok(added
+            .iter()
+            .filter_map(|v| v.as_u64())
+            .collect());
+    }
+
+    Ok(vec![])
+}
+
 fn steam_install_dir() -> Option<PathBuf> {
     // Linux: ~/.local/share/Steam or ~/.steam/steam
     if let Some(home) = dirs::home_dir() {

@@ -5,6 +5,7 @@ const { getVersion } = window.__TAURI__.app;
 // --- State ---
 let G = [], NS = [], completed = new Set(), completedNS = new Set(), achProgress = {};
 let tog = { game: true, mp: false, tool: false, demo: false }, sf = "all", q = "";
+let favorites = new Set(), hltbCache = {};
 let panelOpen = false, panelGameId = null;
 let loadingTasks = new Set();
 function updateGlobalLoading() {
@@ -53,6 +54,8 @@ function renderSteam() {
   document.getElementById("cM").textContent = "(" + cc.mp + ")";
   document.getElementById("cT").textContent = "(" + cc.tool + ")";
   document.getElementById("cD").textContent = "(" + cc.demo + ")";
+  const favCount = G.filter(g => favorites.has(g.id)).length;
+  document.getElementById("cFav").textContent = "(" + favCount + ")";
   document.getElementById("tabSteamCount").textContent = "(" + G.length + ")";
 
   let comp = 0, vis = 0, hrs = 0;
@@ -64,6 +67,7 @@ function renderSteam() {
     if (sf === "done" && !chk) return;
     if (sf === "pending" && chk) return;
     if (sf === "unplayed" && (g.hours > 0 || chk)) return;
+    if (sf === "favorites" && !favorites.has(g.id)) return;
     vis++; if (chk) comp++; hrs += g.hours;
     const L = gLetter(g.name);
     if (!groups[L]) { groups[L] = []; gs[L] = { t: 0, d: 0 }; }
@@ -95,6 +99,12 @@ function renderSteam() {
       }
       if (g.has_cards) tagsHtml += `<span class="tag tag-cards">\u{1F0CF} Cromos</span>`;
       if (g.genres && g.genres.length) g.genres.forEach(x => { tagsHtml += `<span class="tag tag-genre">${esc(x)}</span>`; });
+      const hl = hltbCache[g.id];
+      if (hl) {
+        if (hl.main_hours > 0) tagsHtml += `<span class="tag tag-genre">\u{1F552} Historia: ${hl.main_hours}h</span>`;
+        if (hl.extra_hours > 0) tagsHtml += `<span class="tag tag-ach">\u{1F552} Main+Extra: ${hl.extra_hours}h</span>`;
+        if (hl.completionist_hours > 0) tagsHtml += `<span class="tag tag-cards">\u{1F552} 100%: ${hl.completionist_hours}h</span>`;
+      }
       const tagsRow = tagsHtml ? `<div class="tags">${tagsHtml}</div>` : "";
       rows += `<tr class="${g.chk?'done':''}"><td><input type="checkbox" data-id="${g.id}" data-list="steam" ${g.chk?'checked':''}></td><td><div class="game-cell"><span class="gn">${img}${esc(g.name)}</span>${tagsRow}</div></td><td>${h}</td></tr>`;
     });
@@ -256,9 +266,11 @@ async function loadGameDetails(gameId) {
       html += `<div class="detail-info-row"><span class="detail-info-label">Categoria</span><span class="detail-info-value"><span class="tag ${TC[g.tag]}">${TL[g.tag]}</span></span></div>`;
     }
     html += `<div class="detail-info-row"><span class="detail-info-label">Horas</span><span class="detail-info-value">${g.hours > 0 ? g.hours + "h" : "Sin jugar"}</span></div>`;
+    html += `<div id="dpHltb" class="detail-info-row"><span class="detail-info-label">Duracion (HLTB)</span><span class="detail-info-value" style="color:#6e7681">Buscando...</span></div>`;
 
     if (!html) html = `<div class="ach-empty">No hay detalles disponibles.</div>`;
     infoEl.innerHTML = html;
+    loadHltb(g.name, gameId);
 
     // Dynamically add Cromos tab if details reveal has_cards and tab doesn't exist yet.
     if (g.has_cards && !document.getElementById("dpCromos")) {
@@ -400,6 +412,31 @@ async function loadCards(gameId) {
   }
 }
 
+async function loadHltb(gameName, gameId) {
+  try {
+    const r = await invoke("search_hltb", { appId: gameId, gameName });
+    if (panelGameId !== gameId) return;
+    const el = document.getElementById("dpHltb");
+    if (!el) return;
+    if (!r) {
+      el.querySelector(".detail-info-value").textContent = "No encontrado";
+      el.querySelector(".detail-info-value").style.color = "#484f58";
+      return;
+    }
+    hltbCache[gameId] = r;
+    let html = '<div style="display:flex;gap:1rem;flex-wrap:wrap">';
+    if (r.main_hours > 0) html += `<span class="tag tag-genre">Historia: ${r.main_hours}h</span>`;
+    if (r.extra_hours > 0) html += `<span class="tag tag-ach">Main+Extra: ${r.extra_hours}h</span>`;
+    if (r.completionist_hours > 0) html += `<span class="tag tag-cards">100%: ${r.completionist_hours}h</span>`;
+    html += '</div>';
+    el.innerHTML = `<span class="detail-info-label">Duracion (HLTB)</span><span class="detail-info-value">${html}</span>`;
+    renderSteam();
+  } catch (_) {
+    const el = document.getElementById("dpHltb");
+    if (el) { el.querySelector(".detail-info-value").textContent = "Error"; el.querySelector(".detail-info-value").style.color = "#f85149"; }
+  }
+}
+
 function closeDetailPanel() {
   document.getElementById("detailOverlay").classList.remove("open");
   document.getElementById("detailPanel").classList.remove("open");
@@ -476,7 +513,7 @@ document.getElementById("saveSettingsBtn").addEventListener("click", async () =>
 async function init() {
   try {
     const data = await invoke("get_state");
-    G = data.games || []; completed = new Set(data.completed || []); achProgress = data.ach_progress || {};
+    G = data.games || []; completed = new Set(data.completed || []); achProgress = data.ach_progress || {}; hltbCache = data.hltb_cache || {};
     NS = data.non_steam || []; completedNS = new Set(data.completed_nonsteam || []);
     loadSettingsUI(data.steam_api_key, data.steam_id);
     if (!data.steam_id) {
@@ -488,6 +525,10 @@ async function init() {
       } catch (_) {}
     }
     checkConfigWarning();
+    try {
+      const favIds = await invoke("get_steam_favorites");
+      favorites = new Set(favIds || []);
+    } catch (_) { favorites = new Set(); }
     document.getElementById("subtitle").textContent = G.length + " juegos Steam + " + NS.length + " Non-Steam";
     if (G.length > 0) renderSteam();
     else if (hasConfig) await doSync();
