@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.4.0](https://github.com/lobinuxsoft/game-progress-tracker/compare/v0.3.1...v0.4.0) (2026-04-10)
+
+
+### Features
+
+* add sorting by HLTB duration (main, extras, completionist) ([50ec6c8](https://github.com/lobinuxsoft/game-progress-tracker/commit/50ec6c858a8154f07df8378e23f414ee918ff250))
+* add Steam favorites filter and HowLongToBeat duration integration ([075b2e8](https://github.com/lobinuxsoft/game-progress-tracker/commit/075b2e8ae2f2c7a9057e7d0879c638106f1306f8))
+* Steam favorites filter + HowLongToBeat duration ([6a19871](https://github.com/lobinuxsoft/game-progress-tracker/commit/6a198718cd2a7dcf0853e6d59dcf334f28f870ef))
+* Steam favorites, HLTB duration & sorting ([ec28e55](https://github.com/lobinuxsoft/game-progress-tracker/commit/ec28e5592dec2e60501fd094d9203373dde8d729))
+
+
+### Bug Fixes
+
+* collapse nested if to satisfy clippy collapsible_if lint ([8eafe2a](https://github.com/lobinuxsoft/game-progress-tracker/commit/8eafe2a9e6a6887577422674f502159097e38410))
+
 ## [0.3.1](https://github.com/lobinuxsoft/game-progress-tracker/compare/v0.3.0...v0.3.1) (2026-04-09)
 
 
