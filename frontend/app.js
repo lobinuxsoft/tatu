@@ -5,7 +5,7 @@ const { getVersion } = window.__TAURI__.app;
 // --- State ---
 let G = [], NS = [], completed = new Set(), completedNS = new Set(), achProgress = {};
 let tog = { game: true, mp: false, tool: false, demo: false }, sf = "all", q = "";
-let favorites = new Set(), hltbCache = {};
+let favorites = new Set(), hltbCache = {}, sortMode = "alpha";
 let panelOpen = false, panelGameId = null;
 let loadingTasks = new Set();
 function updateGlobalLoading() {
@@ -58,8 +58,10 @@ function renderSteam() {
   document.getElementById("cFav").textContent = "(" + favCount + ")";
   document.getElementById("tabSteamCount").textContent = "(" + G.length + ")";
 
+  document.querySelectorAll("#sortRow .sbtn").forEach(b => b.classList.toggle("active", b.dataset.sort === sortMode));
+
   let comp = 0, vis = 0, hrs = 0;
-  const groups = {}, gs = {};
+  const filtered = [];
   G.forEach(g => {
     const cat = gCat(g), chk = completed.has(g.id);
     if (!tog[cat]) return;
@@ -69,48 +71,80 @@ function renderSteam() {
     if (sf === "unplayed" && (g.hours > 0 || chk)) return;
     if (sf === "favorites" && !favorites.has(g.id)) return;
     vis++; if (chk) comp++; hrs += g.hours;
-    const L = gLetter(g.name);
-    if (!groups[L]) { groups[L] = []; gs[L] = { t: 0, d: 0 }; }
-    groups[L].push({ ...g, chk }); gs[L].t++; if (chk) gs[L].d++;
+    filtered.push({ ...g, chk });
   });
 
-  const AL = ["#","A","B","C","D","E","F","G","H","I","J","K","L","M","N","O","P","Q","R","S","T","U","V","W","X","Y","Z"];
-  nav.innerHTML = AL.map(l => `<a href="#g-${l}" class="${groups[l]?'hl':''}">${l}</a>`).join("");
+  const hltbField = sortMode === "main" ? "main_hours" : sortMode === "extra" ? "extra_hours" : sortMode === "comp" ? "completionist_hours" : null;
+  const sortByDuration = hltbField !== null;
+
+  if (sortByDuration) {
+    filtered.sort((a, b) => {
+      const ha = hltbCache[a.id] ? (hltbCache[a.id][hltbField] || 0) : -1;
+      const hb = hltbCache[b.id] ? (hltbCache[b.id][hltbField] || 0) : -1;
+      if (ha === -1 && hb === -1) return a.name.localeCompare(b.name);
+      if (ha === -1) return 1;
+      if (hb === -1) return 1;
+      return ha - hb;
+    });
+  }
+
   content.innerHTML = "";
 
-  Object.keys(groups).sort((a,b) => a==="#"?-1:b==="#"?1:a.localeCompare(b)).forEach(L => {
-    const gg = groups[L], st = gs[L], pct = st.t ? Math.round(st.d/st.t*100) : 0;
-    const sec = document.createElement("div");
-    sec.className = "letter-group"; sec.id = "g-" + L;
+  function buildRow(g) {
+    const img = g.icon ? `<img src="https://media.steampowered.com/steamcommunity/public/images/apps/${g.id}/${g.icon}.jpg" loading="lazy">` : "";
+    const h = g.hours > 0 ? g.hours + "h" : "\u2014";
+    let tagsHtml = "";
+    if (g.tag) tagsHtml += `<span class="tag ${TC[g.tag]}">${TL[g.tag]}</span>`;
+    if (g.achievements > 0) {
+      const ap = achProgress[g.id];
+      if (ap) {
+        const apPct = ap[1] ? Math.round(ap[0] / ap[1] * 100) : 0;
+        tagsHtml += `<span class="mini-ach-bar">\u{1F3C6} ${ap[0]}/${ap[1]} <span class="mini-ach-track"><span class="mini-ach-fill" style="width:${apPct}%"></span></span></span>`;
+      } else {
+        tagsHtml += `<span class="tag tag-ach">\u{1F3C6} ${g.achievements}</span>`;
+      }
+    }
+    if (g.has_cards) tagsHtml += `<span class="tag tag-cards">\u{1F0CF} Cromos</span>`;
+    if (g.genres && g.genres.length) g.genres.forEach(x => { tagsHtml += `<span class="tag tag-genre">${esc(x)}</span>`; });
+    const hl = hltbCache[g.id];
+    if (hl) {
+      if (hl.main_hours > 0) tagsHtml += `<span class="tag tag-genre">\u{1F552} Historia: ${hl.main_hours}h</span>`;
+      if (hl.extra_hours > 0) tagsHtml += `<span class="tag tag-ach">\u{1F552} Main+Extra: ${hl.extra_hours}h</span>`;
+      if (hl.completionist_hours > 0) tagsHtml += `<span class="tag tag-cards">\u{1F552} 100%: ${hl.completionist_hours}h</span>`;
+    }
+    const tagsRow = tagsHtml ? `<div class="tags">${tagsHtml}</div>` : "";
+    return `<tr class="${g.chk?'done':''}"><td><input type="checkbox" data-id="${g.id}" data-list="steam" ${g.chk?'checked':''}></td><td><div class="game-cell"><span class="gn">${img}${esc(g.name)}</span>${tagsRow}</div></td><td>${h}</td></tr>`;
+  }
+
+  if (sortByDuration) {
+    nav.innerHTML = "";
     let rows = "";
-    gg.forEach(g => {
-      const img = g.icon ? `<img src="https://media.steampowered.com/steamcommunity/public/images/apps/${g.id}/${g.icon}.jpg" loading="lazy">` : "";
-      const h = g.hours > 0 ? g.hours + "h" : "\u2014";
-      let tagsHtml = "";
-      if (g.tag) tagsHtml += `<span class="tag ${TC[g.tag]}">${TL[g.tag]}</span>`;
-      if (g.achievements > 0) {
-        const ap = achProgress[g.id];
-        if (ap) {
-          const apPct = ap[1] ? Math.round(ap[0] / ap[1] * 100) : 0;
-          tagsHtml += `<span class="mini-ach-bar">\u{1F3C6} ${ap[0]}/${ap[1]} <span class="mini-ach-track"><span class="mini-ach-fill" style="width:${apPct}%"></span></span></span>`;
-        } else {
-          tagsHtml += `<span class="tag tag-ach">\u{1F3C6} ${g.achievements}</span>`;
-        }
-      }
-      if (g.has_cards) tagsHtml += `<span class="tag tag-cards">\u{1F0CF} Cromos</span>`;
-      if (g.genres && g.genres.length) g.genres.forEach(x => { tagsHtml += `<span class="tag tag-genre">${esc(x)}</span>`; });
-      const hl = hltbCache[g.id];
-      if (hl) {
-        if (hl.main_hours > 0) tagsHtml += `<span class="tag tag-genre">\u{1F552} Historia: ${hl.main_hours}h</span>`;
-        if (hl.extra_hours > 0) tagsHtml += `<span class="tag tag-ach">\u{1F552} Main+Extra: ${hl.extra_hours}h</span>`;
-        if (hl.completionist_hours > 0) tagsHtml += `<span class="tag tag-cards">\u{1F552} 100%: ${hl.completionist_hours}h</span>`;
-      }
-      const tagsRow = tagsHtml ? `<div class="tags">${tagsHtml}</div>` : "";
-      rows += `<tr class="${g.chk?'done':''}"><td><input type="checkbox" data-id="${g.id}" data-list="steam" ${g.chk?'checked':''}></td><td><div class="game-cell"><span class="gn">${img}${esc(g.name)}</span>${tagsRow}</div></td><td>${h}</td></tr>`;
+    filtered.forEach(g => { rows += buildRow(g); });
+    if (rows) {
+      const sec = document.createElement("div");
+      sec.className = "letter-group";
+      sec.innerHTML = `<table><thead><tr><th></th><th>Juego</th><th>Horas</th></tr></thead><tbody>${rows}</tbody></table>`;
+      content.appendChild(sec);
+    }
+  } else {
+    const groups = {}, gs = {};
+    filtered.forEach(g => {
+      const L = gLetter(g.name);
+      if (!groups[L]) { groups[L] = []; gs[L] = { t: 0, d: 0 }; }
+      groups[L].push(g); gs[L].t++; if (g.chk) gs[L].d++;
     });
-    sec.innerHTML = `<div class="letter-header"><div class="letter-big">${L}</div><div class="letter-info">${st.d}/${st.t}</div><div class="letter-bar"><div class="letter-bar-fill" style="width:${pct}%"></div></div></div><table><thead><tr><th></th><th>Juego</th><th>Horas</th></tr></thead><tbody>${rows}</tbody></table>`;
-    content.appendChild(sec);
-  });
+    const AL = ["#","A","B","C","D","E","F","G","H","I","J","K","L","M","N","O","P","Q","R","S","T","U","V","W","X","Y","Z"];
+    nav.innerHTML = AL.map(l => `<a href="#g-${l}" class="${groups[l]?'hl':''}">${l}</a>`).join("");
+    Object.keys(groups).sort((a,b) => a==="#"?-1:b==="#"?1:a.localeCompare(b)).forEach(L => {
+      const gg = groups[L], st = gs[L], pct = st.t ? Math.round(st.d/st.t*100) : 0;
+      const sec = document.createElement("div");
+      sec.className = "letter-group"; sec.id = "g-" + L;
+      let rows = "";
+      gg.forEach(g => { rows += buildRow(g); });
+      sec.innerHTML = `<div class="letter-header"><div class="letter-big">${L}</div><div class="letter-info">${st.d}/${st.t}</div><div class="letter-bar"><div class="letter-bar-fill" style="width:${pct}%"></div></div></div><table><thead><tr><th></th><th>Juego</th><th>Horas</th></tr></thead><tbody>${rows}</tbody></table>`;
+      content.appendChild(sec);
+    });
+  }
 
   if (vis === 0 && G.length > 0) content.innerHTML = '<div class="loading" style="color:#8b949e">No hay juegos con estos filtros.</div>';
   const pct = vis ? Math.round(comp/vis*100) : 0;
@@ -543,7 +577,8 @@ document.getElementById("syncBtn").addEventListener("click", () => {
 });
 document.getElementById("nsSyncBtn").addEventListener("click", doSyncNonSteam);
 document.getElementById("catRow").addEventListener("click", e => { const b = e.target.closest(".tbtn"); if (!b) return; tog[b.dataset.t] = !tog[b.dataset.t]; renderSteam(); });
-document.getElementById("statusRow").addEventListener("click", e => { const b = e.target.closest(".sbtn"); if (!b) return; document.querySelectorAll(".sbtn").forEach(x => x.classList.remove("active")); b.classList.add("active"); sf = b.dataset.s; renderSteam(); });
+document.getElementById("statusRow").addEventListener("click", e => { const b = e.target.closest(".sbtn"); if (!b) return; document.querySelectorAll("#statusRow .sbtn").forEach(x => x.classList.remove("active")); b.classList.add("active"); sf = b.dataset.s; renderSteam(); });
+document.getElementById("sortRow").addEventListener("click", e => { const b = e.target.closest(".sbtn"); if (!b) return; sortMode = b.dataset.sort; renderSteam(); });
 document.addEventListener("change", async e => {
   if (e.target.type === "checkbox" && e.target.dataset.id) {
     const id = parseInt(e.target.dataset.id, 10);
