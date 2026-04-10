@@ -1,4 +1,5 @@
 mod achievements;
+mod hltb;
 mod inventory;
 mod shortcuts;
 mod state;
@@ -36,6 +37,7 @@ fn get_state(state: State<'_, SharedState>) -> Result<serde_json::Value, String>
         "steam_api_key": s.steam_api_key,
         "steam_id": s.steam_id,
         "ach_progress": ach_progress,
+        "hltb_cache": s.hltb_cache,
     }))
 }
 
@@ -239,6 +241,44 @@ fn save_completed_nonsteam(
     Ok(())
 }
 
+#[tauri::command]
+async fn search_hltb(
+    app_id: u64,
+    game_name: String,
+    state: State<'_, SharedState>,
+) -> Result<Option<hltb::HltbResult>, String> {
+    // Check cache first.
+    {
+        let s = state.lock().map_err(|e| e.to_string())?;
+        if let Some(cached) = s.hltb_cache.get(&app_id) {
+            return Ok(Some(cached.clone()));
+        }
+    }
+
+    let name = game_name.clone();
+    let result = tokio::task::spawn_blocking(move || hltb::search(&name))
+        .await
+        .map_err(|e| e.to_string())??;
+
+    let best = result.into_iter().next();
+
+    if let Some(ref entry) = best {
+        let mut s = state.lock().map_err(|e| e.to_string())?;
+        s.hltb_cache.insert(app_id, entry.clone());
+        s.save();
+    }
+
+    Ok(best)
+}
+
+#[tauri::command]
+fn get_steam_favorites(state: State<'_, SharedState>) -> Result<Vec<u64>, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    let steam_id = s.steam_id.clone();
+    drop(s);
+    steam::get_steam_favorites(&steam_id)
+}
+
 fn now_epoch() -> String {
     let dur = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -265,6 +305,8 @@ pub fn run() {
             detect_steam_id,
             save_completed,
             save_completed_nonsteam,
+            get_steam_favorites,
+            search_hltb,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

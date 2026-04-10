@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use crate::achievements::GameAchievements;
+use crate::hltb::HltbResult;
 use crate::inventory::GameCards;
 use crate::shortcuts::NonSteamGame;
 use crate::steam::Game;
@@ -25,6 +26,9 @@ pub struct AppState {
     pub achievement_cache: HashMap<u64, GameAchievements>,
     #[serde(default)]
     pub cards_cache: HashMap<u64, GameCards>,
+    /// HLTB duration cache, keyed by Steam app ID.
+    #[serde(default)]
+    pub hltb_cache: HashMap<u64, HltbResult>,
 }
 
 impl AppState {
