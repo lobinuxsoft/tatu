@@ -1,4 +1,5 @@
 mod achievements;
+mod drm;
 mod hltb;
 mod inventory;
 mod shortcuts;
@@ -222,6 +223,34 @@ fn detect_steam_id() -> Option<String> {
     steam::detect_steam_id()
 }
 
+/// DRM info cache TTL: 30 days. DRM rarely changes after release.
+const DRM_CACHE_TTL_SECS: u64 = 60 * 60 * 24 * 30;
+
+#[tauri::command]
+async fn get_game_drm(app_id: u64, state: State<'_, SharedState>) -> Result<drm::DrmInfo, String> {
+    {
+        let s = state.lock().map_err(|e| e.to_string())?;
+        if let Some(cached) = s.drm_cache.get(&app_id) {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            if now.saturating_sub(cached.fetched_at) < DRM_CACHE_TTL_SECS {
+                return Ok(cached.clone());
+            }
+        }
+    }
+
+    let info = tokio::task::spawn_blocking(move || drm::fetch_drm_info(app_id))
+        .await
+        .map_err(|e| e.to_string())??;
+
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    s.drm_cache.insert(app_id, info.clone());
+    s.save();
+    Ok(info)
+}
+
 #[tauri::command]
 fn save_completed(completed: Vec<u64>, state: State<'_, SharedState>) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
@@ -307,6 +336,7 @@ pub fn run() {
             save_completed_nonsteam,
             get_steam_favorites,
             search_hltb,
+            get_game_drm,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

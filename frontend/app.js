@@ -301,10 +301,12 @@ async function loadGameDetails(gameId) {
     }
     html += `<div class="detail-info-row"><span class="detail-info-label">Horas</span><span class="detail-info-value">${g.hours > 0 ? g.hours + "h" : "Sin jugar"}</span></div>`;
     html += `<div id="dpHltb" class="detail-info-row"><span class="detail-info-label">Duracion (HLTB)</span><span class="detail-info-value" style="color:#6e7681">Buscando...</span></div>`;
+    html += `<div id="dpDrm" class="detail-info-row"><span class="detail-info-label">DRM</span><span class="detail-info-value" style="color:#6e7681">Consultando...</span></div>`;
 
     if (!html) html = `<div class="ach-empty">No hay detalles disponibles.</div>`;
     infoEl.innerHTML = html;
     loadHltb(g.name, gameId);
+    loadDrm(gameId);
 
     // Dynamically add Cromos tab if details reveal has_cards and tab doesn't exist yet.
     if (g.has_cards && !document.getElementById("dpCromos")) {
@@ -442,6 +444,36 @@ async function loadCards(gameId) {
       if (panel) panel.innerHTML = `<div class="ach-empty">Este juego no tiene cromos.</div>`;
     } else {
       if (panel) panel.innerHTML = `<div class="ach-empty">Error al cargar cromos: ${esc(errStr)}</div>`;
+    }
+  }
+}
+
+function renderDrmBadge(info) {
+  if (!info || !info.status) return `<span class="tag tag-drm-unknown">Desconocido</span>`;
+  const k = info.status.kind;
+  if (k === "drm_free") return `<span class="tag tag-drm-free">DRM-Free</span>`;
+  if (k === "steam_only") return `<span class="tag tag-drm-steam">Solo Steam</span>`;
+  if (k === "third_party") {
+    const vendors = (info.status.vendors || []).map(v => esc(v)).join(", ");
+    return `<span class="tag tag-drm-third">DRM 3ros: ${vendors || "desconocido"}</span>`;
+  }
+  return `<span class="tag tag-drm-unknown">Desconocido</span>`;
+}
+
+async function loadDrm(gameId) {
+  try {
+    const info = await invoke("get_game_drm", { appId: gameId });
+    if (panelGameId !== gameId) return;
+    const el = document.getElementById("dpDrm");
+    if (!el) return;
+    const badge = renderDrmBadge(info);
+    const title = info && info.notes ? ` title="${esc(info.notes)}"` : "";
+    el.innerHTML = `<span class="detail-info-label">DRM</span><span class="detail-info-value"${title}>${badge}</span>`;
+  } catch (e) {
+    const el = document.getElementById("dpDrm");
+    if (el) {
+      el.querySelector(".detail-info-value").textContent = "Error";
+      el.querySelector(".detail-info-value").style.color = "#f85149";
     }
   }
 }

@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use crate::achievements::GameAchievements;
+use crate::drm::DrmInfo;
 use crate::hltb::HltbResult;
 use crate::inventory::GameCards;
 use crate::shortcuts::NonSteamGame;
@@ -29,6 +30,9 @@ pub struct AppState {
     /// HLTB duration cache, keyed by Steam app ID.
     #[serde(default)]
     pub hltb_cache: HashMap<u64, HltbResult>,
+    /// DRM classification cache, keyed by Steam app ID.
+    #[serde(default)]
+    pub drm_cache: HashMap<u64, DrmInfo>,
 }
 
 impl AppState {
