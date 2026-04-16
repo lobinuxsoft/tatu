@@ -5,7 +5,7 @@ const { getVersion } = window.__TAURI__.app;
 // --- State ---
 let G = [], NS = [], completed = new Set(), completedNS = new Set(), achProgress = {};
 let tog = { game: true, mp: false, tool: false, demo: false }, sf = "all", q = "";
-let favorites = new Set(), hltbCache = {}, sortMode = "alpha";
+let favorites = new Set(), hltbCache = {}, drmCache = {}, sortMode = "alpha";
 let panelOpen = false, panelGameId = null;
 let loadingTasks = new Set();
 function updateGlobalLoading() {
@@ -113,7 +113,8 @@ function renderSteam() {
       if (hl.completionist_hours > 0) tagsHtml += `<span class="tag tag-cards">\u{1F552} 100%: ${hl.completionist_hours}h</span>`;
     }
     const tagsRow = tagsHtml ? `<div class="tags">${tagsHtml}</div>` : "";
-    return `<tr class="${g.chk?'done':''}"><td><input type="checkbox" data-id="${g.id}" data-list="steam" ${g.chk?'checked':''}></td><td><div class="game-cell"><span class="gn">${img}${esc(g.name)}</span>${tagsRow}</div></td><td>${h}</td></tr>`;
+    const drmInline = renderDrmInlineBadge(drmCache[g.id]);
+    return `<tr class="${g.chk?'done':''}"><td><input type="checkbox" data-id="${g.id}" data-list="steam" ${g.chk?'checked':''}></td><td><div class="game-cell"><span class="gn">${img}${esc(g.name)}${drmInline}</span>${tagsRow}</div></td><td>${h}</td></tr>`;
   }
 
   if (sortByDuration) {
@@ -199,6 +200,89 @@ async function doSync() {
     renderSteam();
   } catch (e) { document.getElementById("syncInfo").textContent = "Error: " + e; }
   finally { btn.disabled = false; btn.textContent = "Sincronizar"; }
+}
+
+async function openImportModal() {
+  const overlay = document.getElementById("importOverlay");
+  const list = document.getElementById("importList");
+  const result = document.getElementById("importResult");
+  result.innerHTML = "";
+  list.innerHTML = '<div class="loading"><div class="spinner"></div><br>Leyendo colecciones...</div>';
+  overlay.classList.remove("hidden");
+
+  try {
+    const collections = await invoke("list_steam_collections");
+    const usable = (collections || [])
+      .filter(c => c.name && c.name.trim() && c.added && c.added.length > 0)
+      .sort((a, b) => b.added.length - a.added.length);
+
+    if (usable.length === 0) {
+      list.innerHTML = `<div class="loading" style="color:#8b949e">No se encontraron colecciones con juegos.</div>`;
+      return;
+    }
+
+    let html = "";
+    for (const c of usable) {
+      html += `<div class="collection-row" data-name="${esc(c.name)}"><span class="collection-name">${esc(c.name)}</span><span class="collection-count">${c.added.length} juegos</span></div>`;
+    }
+    list.innerHTML = html;
+
+    list.onclick = async e => {
+      const row = e.target.closest(".collection-row");
+      if (!row || row.classList.contains("disabled")) return;
+      const name = row.dataset.name;
+      list.querySelectorAll(".collection-row").forEach(r => r.classList.add("disabled"));
+      result.innerHTML = `<div class="import-result" style="color:#8b949e">Importando "${esc(name)}"...</div>`;
+      try {
+        const [matched, unknown] = await invoke("import_completed_from_collection", { collectionName: name });
+        const state = await invoke("get_state");
+        completed = new Set(state.completed || []);
+        renderSteam();
+        const msg = `\u2713 ${matched} juegos marcados como completados desde "${esc(name)}".`
+          + (unknown > 0 ? ` ${unknown} juegos de la colección no están en tu librería (ocultos o removidos).` : "");
+        result.innerHTML = `<div class="import-result import-result-ok">${msg}</div>`;
+      } catch (err) {
+        result.innerHTML = `<div class="import-result import-result-err">Error: ${esc(String(err))}</div>`;
+        list.querySelectorAll(".collection-row").forEach(r => r.classList.remove("disabled"));
+      }
+    };
+  } catch (e) {
+    list.innerHTML = `<div class="import-result import-result-err">Error: ${esc(String(e))}</div>`;
+  }
+}
+
+function closeImportModal() {
+  document.getElementById("importOverlay").classList.add("hidden");
+}
+
+async function doFetchAllDrm() {
+  const btn = document.getElementById("drmBtn");
+  const info = document.getElementById("syncInfo");
+  btn.disabled = true; btn.textContent = "Cargando DRM...";
+  const prevInfo = info.textContent;
+
+  const unlisten = await listen("drm_progress", e => {
+    const p = e.payload || {};
+    info.textContent = `DRM ${p.current}/${p.total}`;
+    if (p.app_id && p.info) {
+      drmCache[p.app_id] = p.info;
+      renderSteam();
+    }
+  });
+  const unlistenDone = await listen("drm_done", e => {
+    const p = e.payload || {};
+    info.textContent = prevInfo || `DRM cargado para ${p.total} juegos`;
+    btn.disabled = false; btn.textContent = "Cargar DRM";
+    unlisten(); unlistenDone();
+  });
+
+  try {
+    await invoke("fetch_all_drm");
+  } catch (e) {
+    info.textContent = "Error DRM: " + e;
+    btn.disabled = false; btn.textContent = "Cargar DRM";
+    unlisten(); unlistenDone();
+  }
 }
 
 async function doSyncNonSteam() {
@@ -448,27 +532,65 @@ async function loadCards(gameId) {
   }
 }
 
-function renderDrmBadge(info) {
-  if (!info || !info.status) return `<span class="tag tag-drm-unknown">Desconocido</span>`;
+function drmStatusLabel(info) {
+  if (!info || !info.status) return { icon: "", label: "DRM: Desconocido", cls: "tag-drm-unknown" };
   const k = info.status.kind;
-  if (k === "drm_free") return `<span class="tag tag-drm-free">DRM-Free</span>`;
-  if (k === "steam_only") return `<span class="tag tag-drm-steam">Solo Steam</span>`;
+  if (k === "drm_free") return { icon: "\u{1F513}", label: "DRM: Ninguno", cls: "tag-drm-free" };
+  if (k === "steam_only") return { icon: "\u{1F6E1}", label: "DRM: Solo Steam", cls: "tag-drm-steam" };
   if (k === "third_party") {
     const vendors = (info.status.vendors || []).map(v => esc(v)).join(", ");
-    return `<span class="tag tag-drm-third">DRM 3ros: ${vendors || "desconocido"}</span>`;
+    return { icon: "\u{1F512}", label: "DRM: " + (vendors || "desconocido"), cls: "tag-drm-third" };
   }
-  return `<span class="tag tag-drm-unknown">Desconocido</span>`;
+  return { icon: "", label: "DRM: Desconocido", cls: "tag-drm-unknown" };
+}
+
+function drmImpactTooltip(info) {
+  if (!info) return "";
+  const impact = info.affects_steam_copy
+    ? "[Afecta tu copia de Steam] "
+    : (info.status && info.status.kind === "drm_free" ? "[Tu copia de Steam es libre] " : "");
+  const explanation = info.explanation || info.notes || "";
+  return impact + explanation;
+}
+
+function renderDrmBadge(info) {
+  const { icon, label, cls } = drmStatusLabel(info);
+  const inner = icon ? `${icon} ${label}` : label;
+  return `<span class="tag ${cls}">${inner}</span>`;
+}
+
+function renderDrmInlineBadge(info) {
+  if (!info || !info.status) return "";
+  const k = info.status.kind;
+  if (k === "unknown") return "";
+  const { icon, label, cls } = drmStatusLabel(info);
+  const tip = drmImpactTooltip(info);
+  const tipAttr = tip ? ` title="${esc(tip)}"` : "";
+  return `<span class="drm-inline tag ${cls}"${tipAttr}>${icon} ${label}</span>`;
+}
+
+function renderDrmExplanation(info) {
+  if (!info) return "";
+  const affects = info.affects_steam_copy;
+  const cls = affects ? "drm-impact-warn" : (info.status && info.status.kind === "drm_free" ? "drm-impact-ok" : "drm-impact-muted");
+  const heading = affects
+    ? "\u26A0 Afecta tu copia de Steam"
+    : (info.status && info.status.kind === "drm_free" ? "\u2705 Tu copia de Steam es libre de DRM" : "\u2139 Impacto desconocido");
+  const text = info.explanation || info.notes || "";
+  return `<div class="drm-impact ${cls}"><div class="drm-impact-heading">${heading}</div><div class="drm-impact-text">${esc(text)}</div></div>`;
 }
 
 async function loadDrm(gameId) {
   try {
     const info = await invoke("get_game_drm", { appId: gameId });
+    drmCache[gameId] = info;
+    renderSteam();
     if (panelGameId !== gameId) return;
     const el = document.getElementById("dpDrm");
     if (!el) return;
     const badge = renderDrmBadge(info);
-    const title = info && info.notes ? ` title="${esc(info.notes)}"` : "";
-    el.innerHTML = `<span class="detail-info-label">DRM</span><span class="detail-info-value"${title}>${badge}</span>`;
+    const explanation = renderDrmExplanation(info);
+    el.innerHTML = `<span class="detail-info-label">DRM</span><div class="detail-info-value drm-detail-value">${badge}${explanation}</div>`;
   } catch (e) {
     const el = document.getElementById("dpDrm");
     if (el) {
@@ -579,7 +701,7 @@ document.getElementById("saveSettingsBtn").addEventListener("click", async () =>
 async function init() {
   try {
     const data = await invoke("get_state");
-    G = data.games || []; completed = new Set(data.completed || []); achProgress = data.ach_progress || {}; hltbCache = data.hltb_cache || {};
+    G = data.games || []; completed = new Set(data.completed || []); achProgress = data.ach_progress || {}; hltbCache = data.hltb_cache || {}; drmCache = data.drm_cache || {};
     NS = data.non_steam || []; completedNS = new Set(data.completed_nonsteam || []);
     loadSettingsUI(data.steam_api_key, data.steam_id);
     if (!data.steam_id) {
@@ -608,6 +730,10 @@ document.getElementById("syncBtn").addEventListener("click", () => {
   doSync();
 });
 document.getElementById("nsSyncBtn").addEventListener("click", doSyncNonSteam);
+document.getElementById("drmBtn").addEventListener("click", doFetchAllDrm);
+document.getElementById("importBtn").addEventListener("click", openImportModal);
+document.getElementById("importClose").addEventListener("click", closeImportModal);
+document.getElementById("importOverlay").addEventListener("click", e => { if (e.target.id === "importOverlay") closeImportModal(); });
 document.getElementById("catRow").addEventListener("click", e => { const b = e.target.closest(".tbtn"); if (!b) return; tog[b.dataset.t] = !tog[b.dataset.t]; renderSteam(); });
 document.getElementById("statusRow").addEventListener("click", e => { const b = e.target.closest(".sbtn"); if (!b) return; document.querySelectorAll("#statusRow .sbtn").forEach(x => x.classList.remove("active")); b.classList.add("active"); sf = b.dataset.s; renderSteam(); });
 document.getElementById("sortRow").addEventListener("click", e => { const b = e.target.closest(".sbtn"); if (!b) return; sortMode = b.dataset.sort; renderSteam(); });
