@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Game Progress Tracker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Orbitron:wght@500;700;900&family=Outfit:wght@400;500;600;700&family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -90,7 +93,19 @@
   <!-- SETTINGS TAB -->
   <div class="tab-panel" id="panel-settings">
     <div style="max-width:500px; margin: 0 auto;">
-      <h2 style="color:#58a6ff; font-size:1.2rem; margin-bottom:1rem;">Configuración de Steam</h2>
+      <h2 style="color:var(--accent); font-size:1.2rem; margin-bottom:1rem;">Apariencia</h2>
+      <div style="margin-bottom:1.5rem;">
+        <label style="display:block; font-size:0.8rem; color:var(--fg-dim); margin-bottom:0.3rem;">Tema visual</label>
+        <select id="themeSelect" class="theme-select">
+          <option value="cyberpunk">Cyberpunk — magenta + cyan neon</option>
+          <option value="steamdeck">Steam Deck — verde ácido + negros</option>
+          <option value="heroic">Heroic — violeta suave (dark moderno)</option>
+          <option value="playnite">Playnite — azul profundo + dorado</option>
+        </select>
+        <p style="font-size:0.7rem; color:var(--fg-ghost); margin-top:0.3rem;">El tema se guarda localmente y se aplica al abrir la app.</p>
+      </div>
+
+      <h2 style="color:var(--accent); font-size:1.2rem; margin-bottom:1rem;">Configuración de Steam</h2>
 
       <div style="margin-bottom:1.2rem;">
         <label style="display:block; font-size:0.8rem; color:#8b949e; margin-bottom:0.3rem;">Steam API Key</label>

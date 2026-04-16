@@ -1,5 +1,5 @@
 .tags { display: flex; flex-wrap: wrap; gap: 0.25rem; margin-top: 0.25rem; }
-.tag { display: inline-block; font-size: 0.6rem; padding: 0.1rem 0.35rem; border-radius: var(--r-sm); font-weight: 600; line-height: 1.4; }
+.tag { font-family: var(--font-display); display: inline-block; font-size: 0.6rem; padding: 0.12rem 0.5rem; border-radius: var(--r-sm); font-weight: 700; line-height: 1.4; letter-spacing: var(--display-tracking); text-transform: var(--display-transform); }
 .tag-tool { background: var(--purple-bg); color: var(--fg); }
 .tag-mp { background: var(--accent-strong); color: var(--fg); }
 .tag-demo { background: var(--warning-border); color: var(--fg); }
@@ -12,7 +12,7 @@
 .tag-drm-steam { background: var(--accent-bg); color: var(--accent); border: 1px solid var(--accent-strong); }
 .tag-drm-third { background: var(--danger-bg-strong); color: var(--danger); border: 1px solid var(--danger-border); }
 .tag-drm-unknown { background: var(--bg-3); color: var(--fg-dim); border: 1px solid var(--border); }
-.drm-inline { margin-left: 0.5rem; vertical-align: middle; font-size: 0.65rem; }
+.drm-inline { font-family: var(--font-display); margin-left: 0.5rem; vertical-align: middle; font-size: 0.6rem; letter-spacing: var(--display-tracking); text-transform: var(--display-transform); }
 .mini-ach-bar { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.65rem; color: var(--fg-dim); }
 .mini-ach-track { width: 60px; height: 8px; background: var(--bg-3); border-radius: var(--r-sm); overflow: hidden; display: inline-block; border: 1px solid var(--border); }
 .mini-ach-fill { height: 100%; background: linear-gradient(90deg, var(--success-border), var(--success-strong)); border-radius: var(--r-sm); display: block; min-width: 2px; }
