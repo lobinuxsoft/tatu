@@ -1,0 +1,23 @@
+.controls { display: flex; gap: 0.5rem; margin-bottom: 0.7rem; flex-wrap: wrap; align-items: center; }
+.search { flex: 1; min-width: 200px; padding: 0.5rem 0.75rem; background: #161b22; border: 1px solid #30363d; border-radius: 6px; color: #e6edf3; font-size: 0.9rem; outline: none; }
+.search:focus { border-color: #58a6ff; }
+.search::placeholder { color: #484f58; }
+.filter-section { margin-bottom: 0.5rem; display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center; }
+.filter-label { font-size: 0.75rem; color: #6e7681; margin-right: 0.2rem; min-width: 60px; }
+.tbtn { padding: 0.32rem 0.6rem; background: #21262d; border: 1px solid #30363d; border-radius: 6px; color: #6e7681; cursor: pointer; font-size: 0.78rem; transition: all 0.15s; user-select: none; display: inline-flex; align-items: center; gap: 0.3rem; }
+.tbtn:hover { background: #30363d; color: #c9d1d9; }
+.tbtn .cnt { opacity: 0.6; font-size: 0.68rem; }
+.tbtn.on[data-t="game"] { background: #238636; border-color: #2ea043; color: #fff; }
+.tbtn.on[data-t="mp"] { background: #1f6feb; border-color: #388bfd; color: #fff; }
+.tbtn.on[data-t="tool"] { background: #6e40c9; border-color: #8957e5; color: #fff; }
+.tbtn.on[data-t="demo"] { background: #9e6a03; border-color: #d29922; color: #fff; }
+.sbtn { padding: 0.32rem 0.6rem; background: #21262d; border: 1px solid #30363d; border-radius: 6px; color: #6e7681; cursor: pointer; font-size: 0.78rem; transition: all 0.15s; user-select: none; }
+.sbtn:hover { background: #30363d; color: #c9d1d9; }
+.sbtn.active { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+.pbtn { padding: 0.32rem 0.6rem; background: #21262d; border: 1px solid #30363d; border-radius: 6px; color: #6e7681; cursor: pointer; font-size: 0.78rem; transition: all 0.15s; user-select: none; display: inline-flex; align-items: center; gap: 0.25rem; }
+.pbtn:hover { background: #30363d; color: #c9d1d9; }
+.pbtn.active { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+.letter-nav { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-bottom: 1rem; justify-content: center; }
+.letter-nav a { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; background: #21262d; border: 1px solid #30363d; border-radius: 6px; color: #484f58; text-decoration: none; font-size: 0.78rem; font-weight: 600; transition: all 0.15s; }
+.letter-nav a:hover { background: #30363d; color: #e6edf3; }
+.letter-nav a.hl { color: #58a6ff; }
