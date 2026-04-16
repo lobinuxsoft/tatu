@@ -1,5 +1,48 @@
 # Changelog
 
+## [0.5.0](https://github.com/lobinuxsoft/game-progress-tracker/compare/v0.4.0...v0.5.0) (2026-04-16)
+
+
+### Features
+
+* classify game preservability (Goldberg / GOG / DRM removal) ([4eae205](https://github.com/lobinuxsoft/game-progress-tracker/commit/4eae205483ea371b6384351a1a9a97a486275ae7))
+* classify game preservability (Goldberg / GOG / DRM removal) ([8527c17](https://github.com/lobinuxsoft/game-progress-tracker/commit/8527c1751c91c2b98e1cc4bf0a4091e2cb1bef33)), closes [#28](https://github.com/lobinuxsoft/game-progress-tracker/issues/28)
+* **css:** apply Cyberpunk palette + theme switcher (4 themes) ([afcc978](https://github.com/lobinuxsoft/game-progress-tracker/commit/afcc978f8a0e81d7314cda5854b1af29fce6689d))
+* **css:** apply Cyberpunk palette + theme switcher (4 themes) ([471e0f6](https://github.com/lobinuxsoft/game-progress-tracker/commit/471e0f61e2de3b89b113c2f3ca952e9227266a01)), closes [#46](https://github.com/lobinuxsoft/game-progress-tracker/issues/46)
+* detect DRM status for Steam games ([8ea27bb](https://github.com/lobinuxsoft/game-progress-tracker/commit/8ea27bbffa393b5fd8a838c7013e302b5bb6a56a))
+* detect DRM status for Steam games ([6e34698](https://github.com/lobinuxsoft/game-progress-tracker/commit/6e3469840cdff7f127b35950e44bf6713b94fea1)), closes [#25](https://github.com/lobinuxsoft/game-progress-tracker/issues/25)
+* refine DRM classification and add Steam collection import ([a880dcd](https://github.com/lobinuxsoft/game-progress-tracker/commit/a880dcd23d69e7947b2820905f72615d90dd1e75))
+* rotate state.json backups with atomic writes ([27ee2b8](https://github.com/lobinuxsoft/game-progress-tracker/commit/27ee2b815dbd6217cb44541b2c76ef025063fd30))
+* rotate state.json backups with atomic writes ([3c4cd41](https://github.com/lobinuxsoft/game-progress-tracker/commit/3c4cd4192e78d0792f01dedc39222e060d9af273)), closes [#30](https://github.com/lobinuxsoft/game-progress-tracker/issues/30)
+* track game disk size (libraryfolders.vdf + appinfo.vdf) ([b87fa16](https://github.com/lobinuxsoft/game-progress-tracker/commit/b87fa16e89fa434b6636b63b343eddcb23aff1b0))
+* track game disk size (libraryfolders.vdf + appinfo.vdf) ([5b266e6](https://github.com/lobinuxsoft/game-progress-tracker/commit/5b266e6dcab032f7d6288b3f0f14646c26facf1d)), closes [#26](https://github.com/lobinuxsoft/game-progress-tracker/issues/26)
+
+
+### Bug Fixes
+
+* use sort_by_key to satisfy clippy::unnecessary_sort_by ([88df1d2](https://github.com/lobinuxsoft/game-progress-tracker/commit/88df1d29d4401730b8167d80ca9c4057ea04d7a5))
+
+
+### Refactoring
+
+* **css:** introduce design tokens + add Cyberpunk redesign previews ([bc00138](https://github.com/lobinuxsoft/game-progress-tracker/commit/bc00138119b98bd31c0de5a920dfa91ba45000e7))
+* **css:** introduce design tokens for visual redesign ([90d209e](https://github.com/lobinuxsoft/game-progress-tracker/commit/90d209ee1ca5ce651f6eef5f07a78bbe5babf1c8)), closes [#44](https://github.com/lobinuxsoft/game-progress-tracker/issues/44)
+* organize styles.css (215 lines) into section files ([9462972](https://github.com/lobinuxsoft/game-progress-tracker/commit/946297262320a380bc6cf2d4109191ce8a14c888))
+* organize styles.css into section files ([ebbd7a6](https://github.com/lobinuxsoft/game-progress-tracker/commit/ebbd7a6b7f4572d09531bf52738da6c79b23633c)), closes [#38](https://github.com/lobinuxsoft/game-progress-tracker/issues/38)
+* split drm.rs (509 lines) into drm/ sub-modules ([cc2f1bd](https://github.com/lobinuxsoft/game-progress-tracker/commit/cc2f1bd1d24eb4b79578220352ad9a6169f3cccd))
+* split drm.rs (509 lines) into drm/ sub-modules ([1b76c20](https://github.com/lobinuxsoft/game-progress-tracker/commit/1b76c20fefdbcf4be348526cf28ea9a638920423)), closes [#36](https://github.com/lobinuxsoft/game-progress-tracker/issues/36)
+* split frontend/app.js (842 lines) into ES modules ([33b0e44](https://github.com/lobinuxsoft/game-progress-tracker/commit/33b0e44064144ec5fa9e8155802aff9bd8702a08))
+* split frontend/app.js into ES modules ([3b27a6b](https://github.com/lobinuxsoft/game-progress-tracker/commit/3b27a6b922bb478fe90744e63b9d3bb648205c77)), closes [#34](https://github.com/lobinuxsoft/game-progress-tracker/issues/34)
+* split lib.rs (504 lines) into commands/ sub-modules ([03dda80](https://github.com/lobinuxsoft/game-progress-tracker/commit/03dda8010e7ddd2212e9837821bdccc2b472201e))
+* split lib.rs (504 lines) into commands/ sub-modules ([3e4be07](https://github.com/lobinuxsoft/game-progress-tracker/commit/3e4be07079c643865d1f61d4e3d30d8a0a0934b3)), closes [#35](https://github.com/lobinuxsoft/game-progress-tracker/issues/35)
+* split steam.rs (357 lines) into steam/ sub-modules ([303db55](https://github.com/lobinuxsoft/game-progress-tracker/commit/303db553658645ef0c9bfa9a54f086d5c0d50371))
+* split steam.rs (357 lines) into steam/ sub-modules ([b409e76](https://github.com/lobinuxsoft/game-progress-tracker/commit/b409e767d71e28c54d308e4d7899073a86743b96)), closes [#37](https://github.com/lobinuxsoft/game-progress-tracker/issues/37)
+
+
+### Documentation
+
+* add Cyberpunk redesign reference previews ([0f9f454](https://github.com/lobinuxsoft/game-progress-tracker/commit/0f9f4548ae743c0059c2f452ebf0c32b844d7eb3))
+
 ## [0.4.0](https://github.com/lobinuxsoft/game-progress-tracker/compare/v0.3.1...v0.4.0) (2026-04-10)
 
 
