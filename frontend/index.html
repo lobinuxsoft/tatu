@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Game Progress Tracker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Orbitron:wght@500;700;900&family=Outfit:wght@400;500;600;700&family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -23,6 +26,9 @@
   <div class="tab-panel active" id="panel-steam">
     <div class="sync-bar">
       <span class="sync-info" id="syncInfo"></span>
+      <button class="sync-btn" id="sizeBtn" title="Escanea libraryfolders.vdf y registra el tamaño en disco de cada juego instalado.">Escanear tamaño</button>
+      <button class="sync-btn" id="importBtn" title="Importa una colección de Steam como juegos completados (por ejemplo: TERMINADOS).">Importar colección</button>
+      <button class="sync-btn" id="drmBtn" title="Consulta DRM (Steam Store + PCGamingWiki) para todos los juegos sin caché. Tarda ~1s por juego.">Cargar DRM</button>
       <button class="sync-btn" id="syncBtn">Sincronizar</button>
     </div>
     <div class="stats">
@@ -30,6 +36,7 @@
       <div class="stat"><div class="stat-value c2" id="sPend">0</div><div class="stat-label">Pendientes</div></div>
       <div class="stat"><div class="stat-value c3" id="sHours">0</div><div class="stat-label">Horas jugadas</div></div>
       <div class="stat"><div class="stat-value c4" id="sVis">0</div><div class="stat-label">Mostrando</div></div>
+      <div class="stat"><div class="stat-value c5" id="sSize">&mdash;</div><div class="stat-label">Tamaño (filtro)</div></div>
     </div>
     <div class="progress-wrap"><div class="progress-bar" id="pBar"></div><div class="progress-text" id="pText">0%</div></div>
     <div class="controls"><input type="text" class="search" id="search" placeholder="Buscar juego o género..." autocomplete="off"></div>
@@ -55,6 +62,16 @@
       <button class="sbtn" data-sort="extra">&#128338; Main+Extra</button>
       <button class="sbtn" data-sort="comp">&#128338; 100%</button>
     </div>
+    <div class="filter-section" id="presRow">
+      <span class="filter-label">Preservación:</span>
+      <button class="pbtn active" data-p="all">Todos</button>
+      <button class="pbtn" data-p="trivial" title="Sin DRM: copia directa">&#128190; Trivial</button>
+      <button class="pbtn" data-p="easy" title="Solo Steam: compatible con Goldberg">&#128736; Easy</button>
+      <button class="pbtn" data-p="alternative" title="Disponible DRM-free en GOG">&#127873; GOG</button>
+      <button class="pbtn" data-p="removed" title="DRM removido oficialmente">&#128167; Removido</button>
+      <button class="pbtn" data-p="hard" title="DRM embebido activo">&#129521; Difícil</button>
+      <button class="pbtn" data-p="unknown" title="Sin datos suficientes">? Desconocido</button>
+    </div>
     <div class="letter-nav" id="lNav"></div>
     <div id="content"><div class="loading"><div class="spinner"></div><br>Cargando librería...</div></div>
   </div>
@@ -76,7 +93,19 @@
   <!-- SETTINGS TAB -->
   <div class="tab-panel" id="panel-settings">
     <div style="max-width:500px; margin: 0 auto;">
-      <h2 style="color:#58a6ff; font-size:1.2rem; margin-bottom:1rem;">Configuración de Steam</h2>
+      <h2 style="color:var(--accent); font-size:1.2rem; margin-bottom:1rem;">Apariencia</h2>
+      <div style="margin-bottom:1.5rem;">
+        <label style="display:block; font-size:0.8rem; color:var(--fg-dim); margin-bottom:0.3rem;">Tema visual</label>
+        <select id="themeSelect" class="theme-select">
+          <option value="cyberpunk">Cyberpunk — magenta + cyan neon</option>
+          <option value="steamdeck">Steam Deck — verde ácido + negros</option>
+          <option value="heroic">Heroic — violeta suave (dark moderno)</option>
+          <option value="playnite">Playnite — azul profundo + dorado</option>
+        </select>
+        <p style="font-size:0.7rem; color:var(--fg-ghost); margin-top:0.3rem;">El tema se guarda localmente y se aplica al abrir la app.</p>
+      </div>
+
+      <h2 style="color:var(--accent); font-size:1.2rem; margin-bottom:1rem;">Configuración de Steam</h2>
 
       <div style="margin-bottom:1.2rem;">
         <label style="display:block; font-size:0.8rem; color:#8b949e; margin-bottom:0.3rem;">Steam API Key</label>
@@ -115,12 +144,23 @@
 </div>
 
 <div class="global-loading hidden" id="globalLoading"><div class="spinner"></div><div class="global-loading-text">Cargando...</div></div>
+<div class="modal-overlay hidden" id="importOverlay">
+  <div class="modal" id="importModal">
+    <div class="modal-header">
+      <h3>Importar colección de Steam como completados</h3>
+      <button class="modal-close" id="importClose">&times;</button>
+    </div>
+    <p class="modal-hint">Los juegos de la colección elegida se agregarán al set de completados (no reemplaza los actuales). Solo cuentan los juegos presentes en tu librería sincronizada.</p>
+    <div id="importList"><div class="loading"><div class="spinner"></div><br>Leyendo colecciones...</div></div>
+    <div id="importResult"></div>
+  </div>
+</div>
 <div class="detail-overlay" id="detailOverlay"></div>
 <div class="detail-panel" id="detailPanel">
   <button class="detail-close" id="detailClose">&times;</button>
   <div id="detailContent"></div>
 </div>
 
-<script src="app.js"></script>
+<script type="module" src="app.js"></script>
 </body>
 </html>

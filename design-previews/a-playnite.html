@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>A · Playnite-like — Design Preview</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a1929;
+    --bg-2: #0f2238;
+    --bg-3: #132c48;
+    --border: #1e3a5f;
+    --border-hl: #2a5288;
+    --fg: #e1e9f2;
+    --fg-dim: #8ba1bb;
+    --fg-muted: #5d7494;
+    --accent: #58a6ff;
+    --accent-2: #4dd0e1;
+    --gold: #d4a017;
+    --green: #4ade80;
+    --red: #f87171;
+    --orange: #fb923c;
+    --purple: #a78bfa;
+    --shadow: 0 2px 12px rgba(0,0,0,0.4);
+    --shadow-hover: 0 4px 20px rgba(88,166,255,0.15);
+    --r-sm: 6px;
+    --r: 10px;
+    --r-lg: 14px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--fg); padding: 1.5rem; min-height: 100vh; letter-spacing: -0.01em; }
+  .container { max-width: 1000px; margin: 0 auto; }
+  header { padding-bottom: 1rem; margin-bottom: 1rem; border-bottom: 1px solid var(--border); }
+  h1 { font-size: 1.6rem; font-weight: 700; color: var(--accent); letter-spacing: -0.02em; }
+  .subtitle { color: var(--fg-dim); font-size: 0.85rem; margin-top: 0.2rem; }
+  .tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 1rem; }
+  .tab { padding: 0.7rem 1.2rem; color: var(--fg-muted); cursor: pointer; font-size: 0.9rem; font-weight: 500; border-bottom: 2px solid transparent; margin-bottom: -1px; transition: all 0.15s; }
+  .tab:hover { color: var(--fg-dim); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tab span { font-size: 0.7rem; color: var(--fg-muted); margin-left: 0.3rem; }
+  .sync-bar { display: flex; gap: 0.5rem; justify-content: center; margin-bottom: 1rem; flex-wrap: wrap; }
+  .btn { padding: 0.45rem 0.9rem; background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--r-sm); color: var(--accent); font-size: 0.8rem; font-weight: 500; cursor: pointer; transition: all 0.15s; }
+  .btn:hover { background: var(--bg-3); border-color: var(--border-hl); }
+  .btn-primary { background: linear-gradient(180deg, var(--accent), #1f6feb); border-color: #1f6feb; color: #fff; box-shadow: 0 1px 3px rgba(31,111,235,0.3); }
+  .stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.7rem; margin-bottom: 1rem; }
+  .stat { background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--r); padding: 0.8rem 0.6rem; text-align: center; }
+  .stat-value { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.02em; }
+  .stat-label { font-size: 0.65rem; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.06em; margin-top: 0.2rem; font-weight: 500; }
+  .c1 { color: var(--green); } .c2 { color: var(--gold); } .c3 { color: var(--purple); } .c4 { color: var(--accent); } .c5 { color: var(--accent-2); }
+  .progress-wrap { background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--r); height: 28px; overflow: hidden; position: relative; margin-bottom: 1rem; }
+  .progress-bar { height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent-2)); transition: width 0.4s; }
+  .progress-text { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 0.78rem; font-weight: 600; text-shadow: 0 1px 2px rgba(0,0,0,0.6); }
+  .search { width: 100%; padding: 0.55rem 0.85rem; background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--r-sm); color: var(--fg); font-size: 0.88rem; margin-bottom: 0.7rem; font-family: inherit; }
+  .search:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(88,166,255,0.15); }
+  .filter-row { display: flex; gap: 0.35rem; align-items: center; margin-bottom: 0.45rem; flex-wrap: wrap; }
+  .filter-label { font-size: 0.72rem; color: var(--fg-muted); min-width: 90px; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 500; }
+  .chip { padding: 0.3rem 0.65rem; background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--r-sm); color: var(--fg-muted); font-size: 0.75rem; font-weight: 500; cursor: pointer; transition: all 0.15s; font-family: inherit; }
+  .chip:hover { background: var(--bg-3); color: var(--fg-dim); }
+  .chip.on-game { background: var(--green); border-color: var(--green); color: #0a1929; }
+  .chip.on-mp { background: var(--accent); border-color: var(--accent); color: #0a1929; }
+  .chip.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .card { background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--r); margin-bottom: 0.5rem; padding: 0.7rem 1rem; display: flex; align-items: center; gap: 0.8rem; transition: all 0.15s; cursor: pointer; }
+  .card:hover { border-color: var(--border-hl); box-shadow: var(--shadow-hover); transform: translateY(-1px); }
+  .card.done { background: linear-gradient(90deg, rgba(74,222,128,0.06), transparent); border-color: rgba(74,222,128,0.25); }
+  .check { width: 20px; height: 20px; border: 2px solid var(--border-hl); border-radius: 4px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .check.on { background: var(--green); border-color: var(--green); color: #0a1929; font-weight: 700; font-size: 0.75rem; }
+  .game-icon { width: 28px; height: 28px; border-radius: 4px; background: linear-gradient(135deg, #1f6feb, #4dd0e1); flex-shrink: 0; }
+  .game-info { flex: 1; min-width: 0; }
+  .game-name { font-weight: 600; font-size: 0.92rem; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+  .done .game-name { text-decoration: line-through; color: var(--fg-muted); }
+  .tags { display: flex; gap: 0.3rem; margin-top: 0.35rem; flex-wrap: wrap; }
+  .tag { font-size: 0.62rem; padding: 0.1rem 0.45rem; border-radius: 3px; font-weight: 600; letter-spacing: 0.01em; }
+  .tag-genre { background: var(--border); color: var(--fg-dim); }
+  .tag-ach { background: rgba(74,222,128,0.15); color: var(--green); border: 1px solid rgba(74,222,128,0.4); }
+  .tag-size { background: rgba(77,208,225,0.12); color: var(--accent-2); border: 1px solid rgba(77,208,225,0.3); }
+  .tag-size-est { background: rgba(93,116,148,0.15); color: var(--fg-muted); border: 1px dashed var(--fg-muted); }
+  .tag-hltb { background: rgba(167,139,250,0.15); color: var(--purple); border: 1px solid rgba(167,139,250,0.35); }
+  .drm-inline { padding: 0.12rem 0.5rem; border-radius: 3px; font-size: 0.62rem; font-weight: 600; letter-spacing: 0.01em; }
+  .drm-free { background: rgba(74,222,128,0.15); color: var(--green); border: 1px solid rgba(74,222,128,0.4); }
+  .drm-steam { background: rgba(88,166,255,0.15); color: var(--accent); border: 1px solid rgba(88,166,255,0.4); }
+  .drm-third { background: rgba(248,113,113,0.15); color: var(--red); border: 1px solid rgba(248,113,113,0.4); }
+  .hours { color: var(--fg-dim); font-size: 0.82rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .detail-panel { background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 1.2rem; margin-top: 1.5rem; box-shadow: var(--shadow); }
+  .detail-header { display: flex; gap: 1rem; align-items: flex-start; margin-bottom: 1rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border); }
+  .detail-header-img { width: 120px; height: 56px; border-radius: var(--r-sm); background: linear-gradient(135deg, #58a6ff, #a78bfa); flex-shrink: 0; }
+  .detail-title { font-size: 1.15rem; font-weight: 700; letter-spacing: -0.01em; }
+  .detail-meta { color: var(--fg-dim); font-size: 0.8rem; margin-top: 0.3rem; }
+  .detail-row { display: flex; gap: 0.5rem; margin-bottom: 0.6rem; font-size: 0.82rem; align-items: center; }
+  .detail-label { color: var(--fg-muted); min-width: 85px; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 500; }
+  .impact-block { background: rgba(74,222,128,0.08); border-left: 3px solid var(--green); padding: 0.6rem 0.8rem; border-radius: var(--r-sm); margin-top: 0.4rem; }
+  .impact-heading { color: var(--green); font-weight: 600; font-size: 0.8rem; margin-bottom: 0.2rem; }
+  .impact-text { color: var(--fg-dim); font-size: 0.72rem; line-height: 1.5; }
+  .pres-alt { background: rgba(88,166,255,0.08); border-left: 3px solid var(--accent); padding: 0.6rem 0.8rem; border-radius: var(--r-sm); margin-top: 0.5rem; }
+  .pres-alt .impact-heading { color: var(--accent); }
+  .gog-link { color: var(--accent); font-weight: 600; font-size: 0.78rem; margin-top: 0.4rem; display: inline-block; }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>Game Progress Tracker</h1>
+    <div class="subtitle">570 juegos Steam + 0 Non-Steam</div>
+  </header>
+  <div class="tabs">
+    <div class="tab active">Steam <span>(570)</span></div>
+    <div class="tab">Non-Steam <span>(0)</span></div>
+    <div class="tab" style="margin-left:auto">Settings</div>
+  </div>
+  <div class="sync-bar">
+    <button class="btn">Escanear tamaño</button>
+    <button class="btn">Importar colección</button>
+    <button class="btn">Cargar DRM</button>
+    <button class="btn btn-primary">Sincronizar</button>
+  </div>
+  <div class="stats">
+    <div class="stat"><div class="stat-value c1">82</div><div class="stat-label">Completados</div></div>
+    <div class="stat"><div class="stat-value c2">488</div><div class="stat-label">Pendientes</div></div>
+    <div class="stat"><div class="stat-value c3">1.8k</div><div class="stat-label">Horas</div></div>
+    <div class="stat"><div class="stat-value c4">570</div><div class="stat-label">Mostrando</div></div>
+    <div class="stat"><div class="stat-value c5">4.2 TB</div><div class="stat-label">Tamaño</div></div>
+  </div>
+  <div class="progress-wrap"><div class="progress-bar" style="width:14%"></div><div class="progress-text">14% (82/570)</div></div>
+  <input class="search" placeholder="Buscar juego o género...">
+  <div class="filter-row"><span class="filter-label">Categoría</span><button class="chip on-game">Juegos (506)</button><button class="chip">Multiplayer (44)</button><button class="chip">Herramientas (11)</button><button class="chip">Demos (9)</button></div>
+  <div class="filter-row"><span class="filter-label">Estado</span><button class="chip active">Todos</button><button class="chip">Pendientes</button><button class="chip">Completados</button><button class="chip">Favoritos (33)</button></div>
+  <div class="filter-row"><span class="filter-label">Preservación</span><button class="chip active">Todos</button><button class="chip">💾 Trivial</button><button class="chip">🛠 Easy</button><button class="chip">🎁 GOG</button><button class="chip">💧 Removido</button><button class="chip">🧱 Difícil</button></div>
+
+  <div style="margin-top: 1rem"></div>
+
+  <div class="card done">
+    <div class="check on">✓</div>
+    <div class="game-icon"></div>
+    <div class="game-info">
+      <div class="game-name">The Witcher 3: Wild Hunt <span class="drm-inline drm-free">🔓 DRM: Ninguno</span></div>
+      <div class="tags"><span class="tag tag-genre">RPG</span><span class="tag tag-genre">Open World</span><span class="tag tag-ach">🏆 78/78</span><span class="tag tag-size-est">💾 ~89 GB</span><span class="tag tag-hltb">🕒 Historia: 51h</span></div>
+    </div>
+    <div class="hours">156h</div>
+  </div>
+
+  <div class="card">
+    <div class="check"></div>
+    <div class="game-icon" style="background: linear-gradient(135deg, #a78bfa, #f87171)"></div>
+    <div class="game-info">
+      <div class="game-name">Hogwarts Legacy <span class="drm-inline drm-third">🔒 DRM: Denuvo</span></div>
+      <div class="tags"><span class="tag tag-genre">Action</span><span class="tag tag-genre">RPG</span><span class="tag tag-ach">🏆 45/49</span><span class="tag tag-size-est">💾 ~88 GB</span></div>
+    </div>
+    <div class="hours">32h</div>
+  </div>
+
+  <div class="card">
+    <div class="check"></div>
+    <div class="game-icon" style="background: linear-gradient(135deg, #fb923c, #d4a017)"></div>
+    <div class="game-info">
+      <div class="game-name">Cyberpunk 2077 <span class="drm-inline drm-third">🔒 DRM: Denuvo</span></div>
+      <div class="tags"><span class="tag tag-genre">RPG</span><span class="tag tag-genre">Cyberpunk</span><span class="tag tag-size-est">💾 ~109 GB</span></div>
+    </div>
+    <div class="hours">256h</div>
+  </div>
+
+  <div class="card done">
+    <div class="check on">✓</div>
+    <div class="game-icon" style="background: linear-gradient(135deg, #4ade80, #d4a017)"></div>
+    <div class="game-info">
+      <div class="game-name">Stardew Valley <span class="drm-inline drm-free">🔓 DRM: Ninguno</span></div>
+      <div class="tags"><span class="tag tag-genre">Indie</span><span class="tag tag-genre">Farming</span><span class="tag tag-ach">🏆 40/40</span><span class="tag tag-size">💾 1.2 GB</span></div>
+    </div>
+    <div class="hours">89h</div>
+  </div>
+
+  <div class="card">
+    <div class="check"></div>
+    <div class="game-icon" style="background: linear-gradient(135deg, #1f6feb, #4dd0e1)"></div>
+    <div class="game-info">
+      <div class="game-name">Dota 2 <span class="drm-inline drm-steam">🛡 DRM: Solo Steam</span></div>
+      <div class="tags"><span class="tag tag-genre">MOBA</span><span class="tag tag-genre">Free</span><span class="tag tag-size">💾 54 GB</span></div>
+    </div>
+    <div class="hours">—</div>
+  </div>
+
+  <div class="detail-panel">
+    <div class="detail-header">
+      <div class="detail-header-img"></div>
+      <div>
+        <div class="detail-title">Cyberpunk 2077</div>
+        <div class="detail-meta">CD Projekt Red · <span style="background:#4ade80;color:#0a1929;padding:1px 6px;border-radius:4px;font-size:0.72rem;font-weight:700">86</span> Metacritic</div>
+      </div>
+    </div>
+    <div class="detail-row"><span class="detail-label">Horas</span><span>256h jugadas</span></div>
+    <div class="detail-row"><span class="detail-label">Tamaño</span><span class="tag tag-size-est">💾 ~109 GB</span></div>
+    <div class="detail-row">
+      <span class="detail-label">DRM</span>
+      <div style="flex:1">
+        <span class="drm-inline drm-third">🔒 DRM: Denuvo</span>
+        <div class="impact-block" style="background:rgba(248,113,113,0.08); border-color:var(--red)">
+          <div class="impact-heading" style="color:var(--red)">⚠ Afecta tu copia de Steam</div>
+          <div class="impact-text">Tu copia de Steam está afectada por: Denuvo. Estos DRMs están embebidos en el binario y funcionan en TODOS los releases, no solo donde los compraste.</div>
+        </div>
+        <div class="pres-alt">
+          <div class="impact-heading">ℹ Disponible DRM-free en GOG</div>
+          <div class="impact-text">Alternativa oficial y legal sin DRM. Considerá comprarlo/reclamarlo en GOG para una copia portable y preservable.</div>
+          <a class="gog-link" href="#">🔗 Buscar en GOG →</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

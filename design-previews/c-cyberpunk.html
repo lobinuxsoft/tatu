@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>C · Cyberpunk / Synthwave — Design Preview</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0015;
+    --bg-2: #140026;
+    --bg-3: #1c0535;
+    --bg-4: #2a0d4f;
+    --border: #3d1564;
+    --border-hl: #5e2a8f;
+    --fg: #f0e6ff;
+    --fg-dim: #c4a9e8;
+    --fg-muted: #8268a8;
+    --magenta: #ff00ff;
+    --cyan: #00ffff;
+    --purple: #b026ff;
+    --pink: #ff2b7f;
+    --yellow: #ffd60a;
+    --green: #00ff9d;
+    --red: #ff3864;
+    --glow-m: 0 0 16px rgba(255,0,255,0.5), 0 0 4px rgba(255,0,255,0.8);
+    --glow-c: 0 0 16px rgba(0,255,255,0.5), 0 0 4px rgba(0,255,255,0.8);
+    --glow-p: 0 0 12px rgba(176,38,255,0.6);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Rajdhani', system-ui, sans-serif; background: var(--bg); background-image: radial-gradient(ellipse at top, rgba(176,38,255,0.15), transparent 60%), radial-gradient(ellipse at bottom, rgba(255,0,255,0.08), transparent 60%); color: var(--fg); padding: 1.5rem; min-height: 100vh; letter-spacing: 0.02em; }
+  .container { max-width: 1000px; margin: 0 auto; }
+  header { padding-bottom: 1rem; margin-bottom: 1rem; border-bottom: 1px solid var(--border); position: relative; }
+  header::after { content: ''; position: absolute; bottom: -1px; left: 0; right: 0; height: 1px; background: linear-gradient(90deg, transparent, var(--magenta), var(--cyan), transparent); box-shadow: 0 0 8px var(--magenta); }
+  h1 { font-family: 'Orbitron', sans-serif; font-size: 1.8rem; font-weight: 900; text-transform: uppercase; letter-spacing: 0.08em; background: linear-gradient(135deg, var(--magenta), var(--cyan)); -webkit-background-clip: text; background-clip: text; color: transparent; text-shadow: 0 0 20px rgba(255,0,255,0.4); }
+  .subtitle { color: var(--fg-dim); font-size: 0.85rem; margin-top: 0.4rem; text-transform: uppercase; letter-spacing: 0.15em; font-weight: 500; }
+  .tabs { display: flex; gap: 0.2rem; margin-bottom: 1.2rem; }
+  .tab { padding: 0.6rem 1.3rem; color: var(--fg-muted); cursor: pointer; font-family: 'Orbitron', sans-serif; font-size: 0.78rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; background: var(--bg-2); border: 1px solid var(--border); clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px)); transition: all 0.15s; }
+  .tab:hover { background: var(--bg-3); color: var(--fg-dim); }
+  .tab.active { background: var(--bg-3); color: var(--cyan); border-color: var(--cyan); box-shadow: var(--glow-c); }
+  .tab span { opacity: 0.6; font-weight: 500; margin-left: 0.3rem; }
+  .sync-bar { display: flex; gap: 0.4rem; justify-content: center; margin-bottom: 1.2rem; flex-wrap: wrap; }
+  .btn { padding: 0.55rem 1.1rem; background: var(--bg-2); border: 1px solid var(--magenta); color: var(--magenta); font-family: 'Orbitron', sans-serif; font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; cursor: pointer; transition: all 0.15s; clip-path: polygon(6px 0, 100% 0, calc(100% - 6px) 100%, 0 100%); }
+  .btn:hover { background: rgba(255,0,255,0.15); color: #fff; box-shadow: var(--glow-m); }
+  .btn-primary { background: linear-gradient(135deg, var(--magenta), var(--cyan)); border: none; color: var(--bg); box-shadow: var(--glow-m); }
+  .stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.5rem; margin-bottom: 1rem; }
+  .stat { background: var(--bg-2); border: 1px solid var(--border); padding: 0.8rem 0.5rem; text-align: center; position: relative; clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px)); }
+  .stat-value { font-family: 'Orbitron', sans-serif; font-size: 1.5rem; font-weight: 900; letter-spacing: -0.02em; }
+  .stat-label { font-size: 0.6rem; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.15em; margin-top: 0.3rem; font-weight: 700; }
+  .c1 { color: var(--green); text-shadow: 0 0 10px rgba(0,255,157,0.5); }
+  .c2 { color: var(--yellow); text-shadow: 0 0 10px rgba(255,214,10,0.5); }
+  .c3 { color: var(--pink); text-shadow: 0 0 10px rgba(255,43,127,0.5); }
+  .c4 { color: var(--cyan); text-shadow: 0 0 10px rgba(0,255,255,0.5); }
+  .c5 { color: var(--magenta); text-shadow: 0 0 10px rgba(255,0,255,0.5); }
+  .progress-wrap { background: var(--bg-2); border: 1px solid var(--border); height: 24px; overflow: hidden; position: relative; margin-bottom: 1rem; }
+  .progress-bar { height: 100%; background: linear-gradient(90deg, var(--magenta), var(--cyan)); box-shadow: 0 0 12px rgba(255,0,255,0.6); transition: width 0.4s; }
+  .progress-text { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-family: 'Orbitron', sans-serif; font-size: 0.72rem; font-weight: 700; color: #fff; text-shadow: 0 0 4px rgba(0,0,0,0.9); letter-spacing: 0.1em; }
+  .search { width: 100%; padding: 0.6rem 0.9rem; background: var(--bg-2); border: 1px solid var(--border); color: var(--fg); font-size: 0.9rem; margin-bottom: 0.7rem; font-family: inherit; letter-spacing: 0.02em; }
+  .search:focus { outline: none; border-color: var(--cyan); box-shadow: var(--glow-c); }
+  .filter-row { display: flex; gap: 0.3rem; align-items: center; margin-bottom: 0.4rem; flex-wrap: wrap; }
+  .filter-label { font-family: 'Orbitron', sans-serif; font-size: 0.65rem; color: var(--fg-muted); min-width: 105px; text-transform: uppercase; letter-spacing: 0.15em; font-weight: 700; }
+  .chip { padding: 0.3rem 0.75rem; background: var(--bg-2); border: 1px solid var(--border); color: var(--fg-muted); font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; cursor: pointer; transition: all 0.15s; font-family: inherit; }
+  .chip:hover { background: var(--bg-3); color: var(--fg-dim); border-color: var(--border-hl); }
+  .chip.on-game { background: rgba(0,255,157,0.15); border-color: var(--green); color: var(--green); box-shadow: 0 0 8px rgba(0,255,157,0.3); }
+  .chip.active { background: rgba(0,255,255,0.1); border-color: var(--cyan); color: var(--cyan); box-shadow: var(--glow-c); }
+  .card { background: var(--bg-2); border: 1px solid var(--border); margin-bottom: 0.45rem; padding: 0.75rem 1rem; display: flex; align-items: center; gap: 0.8rem; transition: all 0.15s; cursor: pointer; position: relative; }
+  .card:hover { border-color: var(--magenta); box-shadow: var(--glow-m); }
+  .card.done { background: linear-gradient(90deg, rgba(0,255,157,0.08), transparent); border-left: 2px solid var(--green); }
+  .check { width: 20px; height: 20px; border: 2px solid var(--border-hl); display: flex; align-items: center; justify-content: center; flex-shrink: 0; background: var(--bg); }
+  .check.on { background: var(--green); border-color: var(--green); color: var(--bg); font-weight: 900; box-shadow: 0 0 8px rgba(0,255,157,0.5); }
+  .game-icon { width: 28px; height: 28px; background: linear-gradient(135deg, var(--magenta), var(--cyan)); flex-shrink: 0; }
+  .game-info { flex: 1; min-width: 0; }
+  .game-name { font-weight: 700; font-size: 0.95rem; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; letter-spacing: 0.01em; }
+  .done .game-name { text-decoration: line-through; color: var(--fg-muted); }
+  .tags { display: flex; gap: 0.3rem; margin-top: 0.35rem; flex-wrap: wrap; }
+  .tag { font-size: 0.6rem; padding: 0.12rem 0.5rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; font-family: 'Orbitron', sans-serif; }
+  .tag-genre { background: var(--bg-3); color: var(--fg-dim); border: 1px solid var(--border); }
+  .tag-ach { background: rgba(0,255,157,0.1); color: var(--green); border: 1px solid var(--green); }
+  .tag-size { background: rgba(0,255,255,0.1); color: var(--cyan); border: 1px solid var(--cyan); }
+  .tag-size-est { background: transparent; color: var(--fg-muted); border: 1px dashed var(--fg-muted); }
+  .tag-hltb { background: rgba(255,43,127,0.1); color: var(--pink); border: 1px solid var(--pink); }
+  .drm-inline { padding: 0.15rem 0.55rem; font-family: 'Orbitron', sans-serif; font-size: 0.6rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; }
+  .drm-free { background: rgba(0,255,157,0.12); color: var(--green); border: 1px solid var(--green); box-shadow: 0 0 6px rgba(0,255,157,0.4); }
+  .drm-steam { background: rgba(0,255,255,0.12); color: var(--cyan); border: 1px solid var(--cyan); box-shadow: 0 0 6px rgba(0,255,255,0.4); }
+  .drm-third { background: rgba(255,56,100,0.15); color: var(--red); border: 1px solid var(--red); box-shadow: 0 0 6px rgba(255,56,100,0.4); }
+  .hours { color: var(--fg-dim); font-family: 'Orbitron', sans-serif; font-size: 0.78rem; font-variant-numeric: tabular-nums; white-space: nowrap; font-weight: 700; }
+  .detail-panel { background: var(--bg-2); border: 1px solid var(--border); padding: 1.2rem; margin-top: 1.5rem; position: relative; clip-path: polygon(0 0, calc(100% - 20px) 0, 100% 20px, 100% 100%, 20px 100%, 0 calc(100% - 20px)); }
+  .detail-panel::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; background: linear-gradient(90deg, var(--magenta), var(--cyan)); box-shadow: 0 0 10px var(--magenta); }
+  .detail-header { display: flex; gap: 1rem; align-items: flex-start; margin-bottom: 1rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border); }
+  .detail-header-img { width: 120px; height: 56px; background: linear-gradient(135deg, var(--magenta), var(--cyan)); flex-shrink: 0; box-shadow: var(--glow-m); }
+  .detail-title { font-family: 'Orbitron', sans-serif; font-size: 1.3rem; font-weight: 900; letter-spacing: 0.05em; text-transform: uppercase; background: linear-gradient(135deg, var(--magenta), var(--cyan)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .detail-meta { color: var(--fg-dim); font-size: 0.8rem; margin-top: 0.3rem; }
+  .detail-row { display: flex; gap: 0.5rem; margin-bottom: 0.6rem; font-size: 0.85rem; align-items: center; }
+  .detail-label { font-family: 'Orbitron', sans-serif; color: var(--fg-muted); min-width: 95px; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.12em; font-weight: 700; }
+  .impact-block { padding: 0.7rem 0.9rem; margin-top: 0.4rem; border-left: 3px solid; position: relative; }
+  .impact-warn { background: rgba(255,56,100,0.08); border-color: var(--red); }
+  .impact-warn .impact-heading { color: var(--red); }
+  .impact-heading { font-family: 'Orbitron', sans-serif; font-weight: 700; font-size: 0.78rem; margin-bottom: 0.25rem; text-transform: uppercase; letter-spacing: 0.08em; }
+  .impact-text { color: var(--fg-dim); font-size: 0.8rem; line-height: 1.5; }
+  .pres-alt { background: rgba(0,255,255,0.08); border-color: var(--cyan); padding: 0.7rem 0.9rem; margin-top: 0.5rem; border-left: 3px solid; }
+  .pres-alt .impact-heading { color: var(--cyan); }
+  .gog-link { color: var(--cyan); font-family: 'Orbitron', sans-serif; font-weight: 700; font-size: 0.75rem; margin-top: 0.5rem; display: inline-block; text-transform: uppercase; letter-spacing: 0.08em; text-shadow: 0 0 6px rgba(0,255,255,0.5); }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <h1>Game Progress Tracker</h1>
+    <div class="subtitle">570 · Steam · 0 · Non-Steam</div>
+  </header>
+  <div class="tabs">
+    <div class="tab active">Steam <span>(570)</span></div>
+    <div class="tab">Non-Steam <span>(0)</span></div>
+    <div class="tab" style="margin-left:auto">Settings</div>
+  </div>
+  <div class="sync-bar">
+    <button class="btn">Escanear tamaño</button>
+    <button class="btn">Importar colección</button>
+    <button class="btn">Cargar DRM</button>
+    <button class="btn btn-primary">Sincronizar</button>
+  </div>
+  <div class="stats">
+    <div class="stat"><div class="stat-value c1">82</div><div class="stat-label">Completados</div></div>
+    <div class="stat"><div class="stat-value c2">488</div><div class="stat-label">Pendientes</div></div>
+    <div class="stat"><div class="stat-value c3">1.8k</div><div class="stat-label">Horas</div></div>
+    <div class="stat"><div class="stat-value c4">570</div><div class="stat-label">Mostrando</div></div>
+    <div class="stat"><div class="stat-value c5">4.2 TB</div><div class="stat-label">Tamaño</div></div>
+  </div>
+  <div class="progress-wrap"><div class="progress-bar" style="width:14%"></div><div class="progress-text">14% · 82 / 570</div></div>
+  <input class="search" placeholder="BUSCAR JUEGO O GÉNERO...">
+  <div class="filter-row"><span class="filter-label">Categoría</span><button class="chip on-game">Juegos (506)</button><button class="chip">Multiplayer (44)</button><button class="chip">Herramientas (11)</button><button class="chip">Demos (9)</button></div>
+  <div class="filter-row"><span class="filter-label">Estado</span><button class="chip active">Todos</button><button class="chip">Pendientes</button><button class="chip">Completados</button><button class="chip">Favoritos (33)</button></div>
+  <div class="filter-row"><span class="filter-label">Preservación</span><button class="chip active">Todos</button><button class="chip">💾 Trivial</button><button class="chip">🛠 Easy</button><button class="chip">🎁 GOG</button><button class="chip">💧 Removido</button><button class="chip">🧱 Difícil</button></div>
+
+  <div style="margin-top: 1rem"></div>
+
+  <div class="card done">
+    <div class="check on">✓</div>
+    <div class="game-icon"></div>
+    <div class="game-info">
+      <div class="game-name">The Witcher 3: Wild Hunt <span class="drm-inline drm-free">🔓 DRM: Ninguno</span></div>
+      <div class="tags"><span class="tag tag-genre">RPG</span><span class="tag tag-genre">Open World</span><span class="tag tag-ach">🏆 78/78</span><span class="tag tag-size-est">💾 ~89 GB</span><span class="tag tag-hltb">🕒 Historia: 51h</span></div>
+    </div>
+    <div class="hours">156h</div>
+  </div>
+
+  <div class="card">
+    <div class="check"></div>
+    <div class="game-icon" style="background: linear-gradient(135deg, var(--purple), var(--red))"></div>
+    <div class="game-info">
+      <div class="game-name">Hogwarts Legacy <span class="drm-inline drm-third">🔒 DRM: Denuvo</span></div>
+      <div class="tags"><span class="tag tag-genre">Action</span><span class="tag tag-genre">RPG</span><span class="tag tag-ach">🏆 45/49</span><span class="tag tag-size-est">💾 ~88 GB</span></div>
+    </div>
+    <div class="hours">32h</div>
+  </div>
+
+  <div class="card">
+    <div class="check"></div>
+    <div class="game-icon" style="background: linear-gradient(135deg, var(--yellow), var(--pink))"></div>
+    <div class="game-info">
+      <div class="game-name">Cyberpunk 2077 <span class="drm-inline drm-third">🔒 DRM: Denuvo</span></div>
+      <div class="tags"><span class="tag tag-genre">RPG</span><span class="tag tag-genre">Cyberpunk</span><span class="tag tag-size-est">💾 ~109 GB</span></div>
+    </div>
+    <div class="hours">256h</div>
+  </div>
+
+  <div class="card done">
+    <div class="check on">✓</div>
+    <div class="game-icon" style="background: linear-gradient(135deg, var(--green), var(--yellow))"></div>
+    <div class="game-info">
+      <div class="game-name">Stardew Valley <span class="drm-inline drm-free">🔓 DRM: Ninguno</span></div>
+      <div class="tags"><span class="tag tag-genre">Indie</span><span class="tag tag-genre">Farming</span><span class="tag tag-ach">🏆 40/40</span><span class="tag tag-size">💾 1.2 GB</span></div>
+    </div>
+    <div class="hours">89h</div>
+  </div>
+
+  <div class="card">
+    <div class="check"></div>
+    <div class="game-icon" style="background: linear-gradient(135deg, var(--cyan), var(--green))"></div>
+    <div class="game-info">
+      <div class="game-name">Dota 2 <span class="drm-inline drm-steam">🛡 DRM: Solo Steam</span></div>
+      <div class="tags"><span class="tag tag-genre">MOBA</span><span class="tag tag-genre">Free</span><span class="tag tag-size">💾 54 GB</span></div>
+    </div>
+    <div class="hours">—</div>
+  </div>
+
+  <div class="detail-panel">
+    <div class="detail-header">
+      <div class="detail-header-img"></div>
+      <div>
+        <div class="detail-title">Cyberpunk 2077</div>
+        <div class="detail-meta">CD Projekt Red · <span style="background:var(--green);color:var(--bg);padding:1px 6px;font-family:'Orbitron';font-size:0.7rem;font-weight:900">86</span> METACRITIC</div>
+      </div>
+    </div>
+    <div class="detail-row"><span class="detail-label">Horas</span><span>256h</span></div>
+    <div class="detail-row"><span class="detail-label">Tamaño</span><span class="tag tag-size-est">💾 ~109 GB</span></div>
+    <div class="detail-row">
+      <span class="detail-label">DRM</span>
+      <div style="flex:1">
+        <span class="drm-inline drm-third">🔒 DRM: Denuvo</span>
+        <div class="impact-block impact-warn">
+          <div class="impact-heading">⚠ Afecta tu copia de Steam</div>
+          <div class="impact-text">Tu copia está afectada por: Denuvo. Embebido en el binario, funciona en TODOS los releases.</div>
+        </div>
+        <div class="pres-alt">
+          <div class="impact-heading">ℹ Disponible DRM-free en GOG</div>
+          <div class="impact-text">Alternativa oficial. Considerá comprarlo en GOG para una copia portable.</div>
+          <a class="gog-link" href="#">🔗 BUSCAR EN GOG →</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

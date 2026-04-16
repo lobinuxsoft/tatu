@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -81,7 +79,7 @@ pub fn fetch_games(api_key: &str, steam_id: &str) -> Result<Vec<Game>, String> {
         })
         .collect();
 
-    games.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    games.sort_by_key(|g| g.name.to_lowercase());
     Ok(games)
 }
 
@@ -158,111 +156,6 @@ pub fn fetch_details_for(games: &mut [Game], on_progress: impl Fn(usize, usize))
         on_progress(i + 1, total);
         std::thread::sleep(std::time::Duration::from_millis(300));
     }
-}
-
-/// Detect Steam ID from the local Steam client's loginusers.vdf.
-/// Returns the most recently used account's Steam ID (17-digit numeric).
-pub fn detect_steam_id() -> Option<String> {
-    let vdf_path = steam_install_dir()?.join("config/loginusers.vdf");
-    let content = std::fs::read_to_string(&vdf_path).ok()?;
-
-    let mut best_id: Option<String> = None;
-    let mut best_timestamp: u64 = 0;
-    let mut current_id: Option<String> = None;
-
-    for line in content.lines() {
-        let trimmed = line.trim().trim_matches('"');
-        // Steam IDs are 17-digit numbers starting with 7656119.
-        if trimmed.len() == 17 && trimmed.starts_with("7656119") && trimmed.parse::<u64>().is_ok() {
-            current_id = Some(trimmed.to_string());
-        }
-        if let Some(ref id) = current_id
-            && (line.contains("\"Timestamp\"") || line.contains("\"timestamp\""))
-        {
-            let ts: u64 = line
-                .split('"')
-                .filter(|s| s.parse::<u64>().is_ok())
-                .filter_map(|s| s.parse().ok())
-                .next()
-                .unwrap_or(0);
-            if ts > best_timestamp {
-                best_timestamp = ts;
-                best_id = Some(id.clone());
-            }
-        }
-    }
-
-    // If only one account and no timestamp matched, return it.
-    best_id.or(current_id)
-}
-
-/// Read the user's Steam favorites from the local cloud storage file.
-/// Converts the 64-bit Steam ID to a 32-bit account ID to locate the
-/// correct userdata folder, then parses the cloud storage JSON.
-pub fn get_steam_favorites(steam_id: &str) -> Result<Vec<u64>, String> {
-    let steam_dir = steam_install_dir().ok_or("Steam install directory not found")?;
-    let id64: u64 = steam_id.parse().map_err(|_| "Invalid Steam ID format")?;
-    // Convert SteamID64 to account ID (userdata folder name).
-    let account_id = id64 - 76561197960265728;
-
-    let cloud_path = steam_dir
-        .join("userdata")
-        .join(account_id.to_string())
-        .join("config/cloudstorage/cloud-storage-namespace-1.json");
-
-    let content = std::fs::read_to_string(&cloud_path)
-        .map_err(|e| format!("Cannot read cloud storage: {e}"))?;
-
-    let entries: Vec<serde_json::Value> =
-        serde_json::from_str(&content).map_err(|e| format!("Cannot parse cloud storage: {e}"))?;
-
-    for entry in &entries {
-        // Each entry is a 2-element array: [key_string, object].
-        let arr = match entry.as_array() {
-            Some(a) if a.len() == 2 => a,
-            _ => continue,
-        };
-        let obj = match arr[1].as_object() {
-            Some(o) => o,
-            None => continue,
-        };
-        let key = obj.get("key").and_then(|v| v.as_str()).unwrap_or("");
-        if key != "user-collections.favorite" {
-            continue;
-        }
-        let value_str = obj.get("value").and_then(|v| v.as_str()).unwrap_or("");
-        let value: serde_json::Value = serde_json::from_str(value_str)
-            .map_err(|e| format!("Cannot parse favorites value: {e}"))?;
-        let added = value["added"]
-            .as_array()
-            .ok_or("No 'added' array in favorites")?;
-        return Ok(added.iter().filter_map(|v| v.as_u64()).collect());
-    }
-
-    Ok(vec![])
-}
-
-fn steam_install_dir() -> Option<PathBuf> {
-    // Linux: ~/.local/share/Steam or ~/.steam/steam
-    if let Some(home) = dirs::home_dir() {
-        let primary = home.join(".local/share/Steam");
-        if primary.exists() {
-            return Some(primary);
-        }
-        let alt = home.join(".steam/steam");
-        if alt.exists() {
-            return Some(alt);
-        }
-    }
-    // Windows: C:\Program Files (x86)\Steam
-    #[cfg(target_os = "windows")]
-    {
-        let win_path = PathBuf::from(r"C:\Program Files (x86)\Steam");
-        if win_path.exists() {
-            return Some(win_path);
-        }
-    }
-    None
 }
 
 fn classify(id: u64, name: &str) -> String {

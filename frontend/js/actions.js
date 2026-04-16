@@ -1,0 +1,83 @@
+import { invoke, listen } from "./tauri.js";
+import { state } from "./state.js";
+import { formatBytes } from "./utils.js";
+import { renderSteam } from "./render/steam.js";
+import { renderNonSteam } from "./render/nonsteam.js";
+
+export async function doSync() {
+  const btn = document.getElementById("syncBtn");
+  btn.disabled = true; btn.textContent = "Sincronizando...";
+  try {
+    state.G = await invoke("sync_steam");
+    document.getElementById("subtitle").textContent = state.G.length + " juegos Steam + " + state.NS.length + " Non-Steam";
+    document.getElementById("syncInfo").textContent = `Sincronizado \u2014 ${state.G.length} juegos`;
+    renderSteam();
+  } catch (e) {
+    document.getElementById("syncInfo").textContent = "Error: " + e;
+  } finally {
+    btn.disabled = false; btn.textContent = "Sincronizar";
+  }
+}
+
+export async function doSyncNonSteam() {
+  const btn = document.getElementById("nsSyncBtn");
+  btn.disabled = true; btn.textContent = "Leyendo...";
+  try {
+    state.NS = await invoke("sync_nonsteam");
+    document.getElementById("nsSyncInfo").textContent = `${state.NS.length} juegos Non-Steam encontrados`;
+    renderNonSteam();
+  } catch (e) {
+    document.getElementById("nsSyncInfo").textContent = "Error: " + e;
+  } finally {
+    btn.disabled = false; btn.textContent = "Leer shortcuts.vdf";
+  }
+}
+
+export async function doScanSizes() {
+  const btn = document.getElementById("sizeBtn");
+  const info = document.getElementById("syncInfo");
+  btn.disabled = true; btn.textContent = "Escaneando...";
+  try {
+    const scanned = await invoke("scan_sizes");
+    for (const s of scanned) { state.sizeCache[s.app_id] = s; }
+    const installedCount = scanned.filter(s => s.source && s.source.kind === "local_manifest").length;
+    const appinfoCount = scanned.filter(s => s.source && s.source.kind === "appinfo").length;
+    const totalBytes = scanned.reduce((sum, s) => sum + (s.bytes || 0), 0);
+    info.textContent = `Escaneo: ${installedCount} instalados + ${appinfoCount} vía appinfo.vdf (upper bound). Total: ${formatBytes(totalBytes)}.`;
+    renderSteam();
+  } catch (e) {
+    info.textContent = "Error al escanear tamaño: " + e;
+  } finally {
+    btn.disabled = false; btn.textContent = "Escanear tamaño";
+  }
+}
+
+export async function doFetchAllDrm() {
+  const btn = document.getElementById("drmBtn");
+  const info = document.getElementById("syncInfo");
+  btn.disabled = true; btn.textContent = "Cargando DRM...";
+  const prevInfo = info.textContent;
+
+  const unlisten = await listen("drm_progress", e => {
+    const p = e.payload || {};
+    info.textContent = `DRM ${p.current}/${p.total}`;
+    if (p.app_id && p.info) {
+      state.drmCache[p.app_id] = p.info;
+      renderSteam();
+    }
+  });
+  const unlistenDone = await listen("drm_done", e => {
+    const p = e.payload || {};
+    info.textContent = prevInfo || `DRM cargado para ${p.total} juegos`;
+    btn.disabled = false; btn.textContent = "Cargar DRM";
+    unlisten(); unlistenDone();
+  });
+
+  try {
+    await invoke("fetch_all_drm");
+  } catch (e) {
+    info.textContent = "Error DRM: " + e;
+    btn.disabled = false; btn.textContent = "Cargar DRM";
+    unlisten(); unlistenDone();
+  }
+}

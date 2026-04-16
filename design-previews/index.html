@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Game Progress Tracker — Design Previews</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: system-ui, sans-serif; background: #0d1117; color: #c9d1d9; padding: 3rem 2rem; min-height: 100vh; }
+  .wrap { max-width: 900px; margin: 0 auto; }
+  h1 { color: #58a6ff; font-size: 2rem; margin-bottom: 0.4rem; }
+  p.sub { color: #8b949e; margin-bottom: 2rem; font-size: 0.95rem; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 1.2rem; }
+  a.card { display: block; background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 1.2rem 1.3rem; text-decoration: none; color: inherit; transition: border-color 0.15s, transform 0.15s; }
+  a.card:hover { border-color: #58a6ff; transform: translateY(-2px); }
+  a.card h2 { font-size: 1.1rem; margin-bottom: 0.4rem; }
+  a.card .meta { color: #8b949e; font-size: 0.8rem; margin-bottom: 0.8rem; }
+  a.card .swatch { display: flex; gap: 0.3rem; margin-bottom: 0.8rem; }
+  a.card .swatch span { width: 28px; height: 28px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.1); }
+  a.card .desc { color: #c9d1d9; font-size: 0.85rem; line-height: 1.5; }
+  a.card.a h2 { color: #58a6ff; }
+  a.card.b h2 { color: #39ff88; }
+  a.card.c h2 { color: #ff00ff; }
+  a.card.d h2 { color: #a78bfa; }
+  footer { margin-top: 3rem; color: #484f58; font-size: 0.8rem; text-align: center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Design Previews</h1>
+  <p class="sub">Abrí cada opción y comparalas con la tool real. Cada archivo es standalone — no necesitan servidor.</p>
+
+  <div class="grid">
+    <a class="card a" href="a-playnite.html">
+      <div class="swatch"><span style="background:#0a1929"></span><span style="background:#1f6feb"></span><span style="background:#58a6ff"></span><span style="background:#d4a017"></span></div>
+      <h2>A · Playnite-like</h2>
+      <div class="meta">Elegante · data-heavy · profesional</div>
+      <div class="desc">Azul profundo + acentos cyan + dorado sutil. Tipografía Inter. Cards con bordes finos y sombras difusas. Vibe de app profesional tipo Linear o JetBrains.</div>
+    </a>
+    <a class="card b" href="b-steamdeck.html">
+      <div class="swatch"><span style="background:#000"></span><span style="background:#0b0e14"></span><span style="background:#39ff88"></span><span style="background:#1a9fff"></span></div>
+      <h2>B · Steam Deck OS</h2>
+      <div class="meta">Gaming oficial · verde neón · negros profundos</div>
+      <div class="desc">Negros hasta #000, verde ácido como color de acción, azul SteamUI secundario. Bordes marcados, badges con glow. Inspirado en SteamOS 3.</div>
+    </a>
+    <a class="card c" href="c-cyberpunk.html">
+      <div class="swatch"><span style="background:#0a0015"></span><span style="background:#ff00ff"></span><span style="background:#00ffff"></span><span style="background:#6b00d9"></span></div>
+      <h2>C · Cyberpunk / Synthwave</h2>
+      <div class="meta">Agresivo · alto contraste · nocturno</div>
+      <div class="desc">Magenta + cyan neón sobre negros azulados. Glows fuertes, tipografía Orbitron. Impacto visual pero cansa en sesiones largas.</div>
+    </a>
+    <a class="card d" href="d-heroic.html">
+      <div class="swatch"><span style="background:#1a1f2e"></span><span style="background:#2d3349"></span><span style="background:#a78bfa"></span><span style="background:#56d4ba"></span></div>
+      <h2>D · Heroic / Moderno</h2>
+      <div class="meta">Suave · confortable · ideal para uso largo</div>
+      <div class="desc">Gris-azul medio tipo Discord / Obsidian / Raycast. Violetas + cyan cálido. El más usable para sesiones largas. Mi voto personal.</div>
+    </a>
+  </div>
+
+  <footer>Abrí cualquiera con doble-click. Todos tienen el mismo contenido (header / stats / filtros / lista de juegos / detail panel) para comparar 1:1.</footer>
+</div>
+</body>
+</html>
