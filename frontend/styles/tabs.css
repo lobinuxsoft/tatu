@@ -1,7 +1,7 @@
-.tabs { display: flex; gap: 0; margin-bottom: 1.2rem; border-bottom: 2px solid #21262d; }
-.tab { padding: 0.6rem 1.2rem; cursor: pointer; color: #8b949e; font-size: 0.9rem; font-weight: 600; border-bottom: 2px solid transparent; margin-bottom: -2px; transition: all 0.15s; user-select: none; }
-.tab:hover { color: #c9d1d9; }
-.tab.active { color: #58a6ff; border-bottom-color: #58a6ff; }
+.tabs { display: flex; gap: 0; margin-bottom: 1.2rem; border-bottom: 2px solid var(--border-subtle); }
+.tab { padding: 0.6rem 1.2rem; cursor: pointer; color: var(--fg-dim); font-size: 0.9rem; font-weight: 600; border-bottom: 2px solid transparent; margin-bottom: -2px; transition: all var(--t-fast); user-select: none; }
+.tab:hover { color: var(--fg-strong); }
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
 .tab .tab-count { font-size: 0.7rem; opacity: 0.6; margin-left: 0.3rem; }
 .tab-panel { display: none; }
 .tab-panel.active { display: block; }
