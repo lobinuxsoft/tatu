@@ -5,7 +5,7 @@ const { getVersion } = window.__TAURI__.app;
 // --- State ---
 let G = [], NS = [], completed = new Set(), completedNS = new Set(), achProgress = {};
 let tog = { game: true, mp: false, tool: false, demo: false }, sf = "all", q = "";
-let favorites = new Set(), hltbCache = {}, drmCache = {}, sortMode = "alpha";
+let favorites = new Set(), hltbCache = {}, drmCache = {}, sortMode = "alpha", pf = "all";
 let panelOpen = false, panelGameId = null;
 let loadingTasks = new Set();
 function updateGlobalLoading() {
@@ -70,6 +70,11 @@ function renderSteam() {
     if (sf === "pending" && chk) return;
     if (sf === "unplayed" && (g.hours > 0 || chk)) return;
     if (sf === "favorites" && !favorites.has(g.id)) return;
+    if (pf !== "all") {
+      const info = drmCache[g.id];
+      const k = info && info.preservability ? info.preservability.kind : "unknown";
+      if (k !== pf) return;
+    }
     vis++; if (chk) comp++; hrs += g.hours;
     filtered.push({ ...g, chk });
   });
@@ -580,6 +585,35 @@ function renderDrmExplanation(info) {
   return `<div class="drm-impact ${cls}"><div class="drm-impact-heading">${heading}</div><div class="drm-impact-text">${esc(text)}</div></div>`;
 }
 
+function preservabilityInfo(info) {
+  if (!info || !info.preservability || !info.preservability.kind) {
+    return { key: "unknown", heading: "? Preservabilidad desconocida", cls: "pres-unknown", icon: "\u2753", label: "Desconocido" };
+  }
+  const k = info.preservability.kind;
+  if (k === "trivial") return { key: "trivial", heading: "\u2705 Preservación trivial", cls: "pres-trivial", icon: "\u{1F4BE}", label: "Trivial" };
+  if (k === "easy") return { key: "easy", heading: "\u2705 Compatible con Goldberg Emulator", cls: "pres-easy", icon: "\u{1F6E0}", label: "Easy (Goldberg)" };
+  if (k === "alternative") return { key: "alternative", heading: "\u2139 Disponible DRM-free en GOG", cls: "pres-alternative", icon: "\u{1F381}", label: "Alternativa GOG" };
+  if (k === "removed") return { key: "removed", heading: "\u2705 DRM removido oficialmente", cls: "pres-removed", icon: "\u{1F4A7}", label: "DRM removido" };
+  if (k === "hard") return { key: "hard", heading: "\u26A0 Preservación compleja", cls: "pres-hard", icon: "\u{1F9F1}", label: "Difícil" };
+  return { key: "unknown", heading: "? Preservabilidad desconocida", cls: "pres-unknown", icon: "\u2753", label: "Desconocido" };
+}
+
+function gogSearchUrl(name) {
+  return "https://www.gog.com/en/games?query=" + encodeURIComponent(name || "");
+}
+
+function renderPreservabilityBlock(info, gameName) {
+  if (!info) return "";
+  const p = preservabilityInfo(info);
+  const hint = info.preservability_hint || "";
+  let extra = "";
+  if (p.key === "alternative" && gameName) {
+    const url = gogSearchUrl(gameName);
+    extra = `<div class="pres-action"><a href="${esc(url)}" onclick="event.preventDefault(); window.__TAURI__.opener.openUrl('${esc(url)}');">\u{1F517} Buscar en GOG</a></div>`;
+  }
+  return `<div class="pres-block ${p.cls}"><div class="pres-heading">${p.heading}</div><div class="pres-text">${esc(hint)}</div>${extra}</div>`;
+}
+
 async function loadDrm(gameId) {
   try {
     const info = await invoke("get_game_drm", { appId: gameId });
@@ -588,9 +622,12 @@ async function loadDrm(gameId) {
     if (panelGameId !== gameId) return;
     const el = document.getElementById("dpDrm");
     if (!el) return;
+    const game = G.find(x => x.id === gameId);
+    const gameName = game ? game.name : "";
     const badge = renderDrmBadge(info);
     const explanation = renderDrmExplanation(info);
-    el.innerHTML = `<span class="detail-info-label">DRM</span><div class="detail-info-value drm-detail-value">${badge}${explanation}</div>`;
+    const preservation = renderPreservabilityBlock(info, gameName);
+    el.innerHTML = `<span class="detail-info-label">DRM</span><div class="detail-info-value drm-detail-value">${badge}${explanation}${preservation}</div>`;
   } catch (e) {
     const el = document.getElementById("dpDrm");
     if (el) {
@@ -737,6 +774,7 @@ document.getElementById("importOverlay").addEventListener("click", e => { if (e.
 document.getElementById("catRow").addEventListener("click", e => { const b = e.target.closest(".tbtn"); if (!b) return; tog[b.dataset.t] = !tog[b.dataset.t]; renderSteam(); });
 document.getElementById("statusRow").addEventListener("click", e => { const b = e.target.closest(".sbtn"); if (!b) return; document.querySelectorAll("#statusRow .sbtn").forEach(x => x.classList.remove("active")); b.classList.add("active"); sf = b.dataset.s; renderSteam(); });
 document.getElementById("sortRow").addEventListener("click", e => { const b = e.target.closest(".sbtn"); if (!b) return; sortMode = b.dataset.sort; renderSteam(); });
+document.getElementById("presRow").addEventListener("click", e => { const b = e.target.closest(".pbtn"); if (!b) return; document.querySelectorAll("#presRow .pbtn").forEach(x => x.classList.remove("active")); b.classList.add("active"); pf = b.dataset.p; renderSteam(); });
 document.addEventListener("change", async e => {
   if (e.target.type === "checkbox" && e.target.dataset.id) {
     const id = parseInt(e.target.dataset.id, 10);

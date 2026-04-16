@@ -16,6 +16,27 @@ pub enum DrmStatus {
     Unknown,
 }
 
+/// Preservability level: how feasible is it to keep a playable copy of the
+/// game independent of Steam?
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Preservability {
+    /// No DRM: copying the install folder is enough.
+    Trivial,
+    /// Only Steam wrapper DRM: Goldberg Steam Emu + Steamless cover it.
+    Easy,
+    /// Game is sold DRM-free on GOG (official legal alternative).
+    Alternative,
+    /// Publisher removed the DRM post-launch: the current Steam release is
+    /// already preservable without extra tools.
+    Removed { removed_vendors: Vec<String> },
+    /// Third-party DRM active without a documented clean path.
+    Hard,
+    /// Insufficient data.
+    #[default]
+    Unknown,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DrmInfo {
     pub status: DrmStatus,
@@ -30,6 +51,20 @@ pub struct DrmInfo {
     /// Human-readable explanation (Spanish) about Steam copy impact.
     #[serde(default)]
     pub explanation: String,
+    /// Preservability classification (Goldberg compatibility, GOG alt, DRM removal).
+    #[serde(default)]
+    pub preservability: Preservability,
+    /// Human-readable hint (Spanish) for the preservability level.
+    #[serde(default)]
+    pub preservability_hint: String,
+    /// Raw PCGamingWiki Available_from tokens (stores), retained so the
+    /// classifier can be re-run offline without a fresh API call.
+    #[serde(default)]
+    pub stores: Vec<String>,
+    /// Raw PCGamingWiki Removed_DRM tokens (DRMs the publisher removed
+    /// post-launch), retained for re-classification and user visibility.
+    #[serde(default)]
+    pub removed_drm: Vec<String>,
 }
 
 /// Raw data fetched from upstream sources before merging.
@@ -264,6 +299,9 @@ fn merge(raw: RawDrm) -> DrmInfo {
         _ => "none",
     };
 
+    let preservability = classify_preservability(&raw, &status);
+    let preservability_hint = preservability_hint(&preservability);
+
     DrmInfo {
         status,
         notes: notes_parts.join(" | "),
@@ -271,6 +309,83 @@ fn merge(raw: RawDrm) -> DrmInfo {
         fetched_at: now_secs(),
         affects_steam_copy,
         explanation,
+        preservability,
+        preservability_hint,
+        stores: raw.pcgw_stores,
+        removed_drm: raw.pcgw_removed,
+    }
+}
+
+/// Classify how feasible preservation of a Steam copy is, given the DRM
+/// status and the raw PCGamingWiki data (stores availability and removed DRMs).
+/// Priority when status is ThirdParty:
+/// 1. GOG availability — buying / redeeming on GOG is the cleanest legal path.
+/// 2. Removed DRM — the publisher already removed heavy DRM from the current release.
+/// 3. Otherwise Hard — no documented clean path.
+fn classify_preservability(raw: &RawDrm, status: &DrmStatus) -> Preservability {
+    match status {
+        DrmStatus::DrmFree => Preservability::Trivial,
+        DrmStatus::SteamOnly => Preservability::Easy,
+        DrmStatus::ThirdParty { vendors: _ } => {
+            // GOG is DRM-free by store policy: if the game is sold on GOG,
+            // there is an official legal preservation path regardless of the
+            // Steam release's DRM.
+            if raw.pcgw_stores.iter().any(|s| is_gog_store(s)) {
+                return Preservability::Alternative;
+            }
+
+            // Any baked-in DRM officially removed post-launch?
+            let mut removed_vendors: Vec<String> = Vec::new();
+            for r in &raw.pcgw_removed {
+                for v in detect_baked_in_vendors(r) {
+                    if !removed_vendors.contains(&v) {
+                        removed_vendors.push(v);
+                    }
+                }
+            }
+            if !removed_vendors.is_empty() {
+                return Preservability::Removed { removed_vendors };
+            }
+
+            Preservability::Hard
+        }
+        DrmStatus::Unknown => Preservability::Unknown,
+    }
+}
+
+fn is_gog_store(s: &str) -> bool {
+    let l = s.trim().to_lowercase();
+    l == "gog.com" || l == "gog" || l.starts_with("gog ")
+}
+
+/// Spanish human-readable hint describing the preservability level and the
+/// concrete action the user can take.
+fn preservability_hint(pres: &Preservability) -> String {
+    match pres {
+        Preservability::Trivial => "Preservación trivial: el juego no tiene DRM. Copiá la carpeta \
+            de steamapps/common/<juego> a otro disco. No requiere herramientas."
+            .into(),
+        Preservability::Easy => "Compatible con Goldberg Emulator: el juego solo usa el wrapper de \
+            Steam DRM. Con Goldberg (reemplazo de steam_api.dll) más Steamless (si tiene SteamStub) \
+            corre offline sin el cliente de Steam."
+            .into(),
+        Preservability::Alternative => "Disponible DRM-free en GOG: alternativa oficial y legal \
+            sin DRM. Considerá comprarlo/reclamarlo en GOG para tener una copia portable y \
+            preservable sin depender de Steam."
+            .into(),
+        Preservability::Removed { removed_vendors } => format!(
+            "DRM removido oficialmente: el publisher removió {} de la versión actual. La copia de \
+             Steam ya es directamente preservable sin DRM activo.",
+            removed_vendors.join(", ")
+        ),
+        Preservability::Hard => "Preservación compleja: el juego tiene DRM embebido activo sin \
+            alternativa limpia documentada. Requeriría un crack específico del vendor — fuera del \
+            alcance de esta herramienta."
+            .into(),
+        Preservability::Unknown => "Preservabilidad desconocida: sin datos suficientes para \
+            clasificar. Puede variar desde trivial hasta compleja — refrescá los datos de DRM o \
+            consultá manualmente en PCGamingWiki."
+            .into(),
     }
 }
 
