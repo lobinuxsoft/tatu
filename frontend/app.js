@@ -7,6 +7,9 @@ import { installGogLinkHandler } from "./js/panel/drm_view.js";
 import { openImportModal, closeImportModal } from "./js/modals/import.js";
 import { doSync, doSyncNonSteam, doScanSizes, doFetchAllDrm } from "./js/actions.js";
 import { loadSettingsUI, checkConfigWarning, installSettingsHandlers } from "./js/settings.js";
+import { initTheme, installThemeSwitcher } from "./js/themes.js";
+
+initTheme();
 
 async function init() {
   try {
@@ -139,6 +142,7 @@ document.addEventListener("keydown", e => {
 });
 
 installSettingsHandlers();
+installThemeSwitcher();
 installGogLinkHandler();
 
 getVersion().then(v => { document.getElementById("appVersion").textContent = "v" + v; });

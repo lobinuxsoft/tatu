@@ -1,6 +1,6 @@
 .letter-group { margin-bottom: 1.5rem; }
 .letter-header { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.5rem; padding: 0.4rem 0; }
-.letter-big { font-size: 2rem; font-weight: 800; color: var(--accent); width: 50px; text-align: center; flex-shrink: 0; }
+.letter-big { font-family: var(--font-display); font-size: 2rem; font-weight: 900; color: var(--accent); width: 50px; text-align: center; flex-shrink: 0; text-shadow: var(--glow-subtle); }
 .letter-info { font-size: 0.75rem; color: var(--fg-dim); }
 .letter-bar { flex: 1; height: 6px; background: var(--bg-3); border-radius: var(--r-sm); overflow: hidden; max-width: 200px; }
 .letter-bar-fill { height: 100%; background: var(--success-strong); border-radius: var(--r-sm); transition: width var(--t-slow); }
@@ -14,7 +14,7 @@ tbody tr.done { background: var(--done-row-bg); }
 tbody tr.done .gn { text-decoration: line-through; color: var(--fg-muted); }
 td { padding: 0.4rem 0.5rem; font-size: 0.88rem; }
 td:nth-child(1) { text-align: center; }
-td:nth-child(3) { text-align: center; color: var(--fg-dim); font-size: 0.82rem; }
+td:nth-child(3) { font-family: var(--font-display); text-align: center; color: var(--fg-dim); font-size: 0.78rem; font-weight: 600; font-variant-numeric: tabular-nums; }
 .gn { color: var(--fg); display: flex; align-items: center; gap: 0.5rem; }
 .gn img { width: 20px; height: 20px; border-radius: var(--r-sm); flex-shrink: 0; }
 input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; accent-color: var(--success-strong); }

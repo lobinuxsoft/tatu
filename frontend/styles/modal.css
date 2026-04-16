@@ -2,7 +2,7 @@
 .modal-overlay.hidden { display: none; }
 .modal { background: var(--bg); border: 1px solid var(--border); border-radius: var(--r); width: min(520px, 90vw); max-height: 80vh; overflow: auto; padding: 1rem 1.2rem; }
 .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
-.modal-header h3 { color: var(--accent); font-size: 1rem; margin: 0; }
+.modal-header h3 { font-family: var(--font-display); color: var(--accent); font-size: 1rem; margin: 0; text-transform: var(--display-transform); letter-spacing: var(--display-tracking); font-weight: 700; }
 .modal-close { background: transparent; border: none; color: var(--fg-dim); font-size: 1.4rem; cursor: pointer; line-height: 1; }
 .modal-close:hover { color: var(--fg); }
 .modal-hint { color: var(--fg-dim); font-size: 0.78rem; margin: 0.3rem 0 0.8rem; }

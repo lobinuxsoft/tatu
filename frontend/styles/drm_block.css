@@ -1,6 +1,6 @@
 .drm-detail-value { flex: 1; display: flex; flex-direction: column; gap: 0.5rem; }
 .drm-impact { padding: 0.5rem 0.7rem; border-radius: var(--r-sm); font-size: 0.72rem; line-height: 1.4; border-left: 3px solid; }
-.drm-impact-heading { font-weight: 600; margin-bottom: 0.25rem; font-size: 0.78rem; }
+.drm-impact-heading { font-family: var(--font-display); font-weight: 700; margin-bottom: 0.25rem; font-size: 0.78rem; text-transform: var(--display-transform); letter-spacing: var(--display-tracking); }
 .drm-impact-text { color: var(--fg-dim); }
 .drm-impact-warn { background: var(--danger-bg); border-color: var(--danger); }
 .drm-impact-warn .drm-impact-heading { color: var(--danger); }
@@ -9,7 +9,7 @@
 .drm-impact-muted { background: var(--bg-2); border-color: var(--border-muted); }
 .drm-impact-muted .drm-impact-heading { color: var(--fg-dim); }
 .pres-block { padding: 0.5rem 0.7rem; border-radius: var(--r-sm); font-size: 0.72rem; line-height: 1.4; border-left: 3px solid; }
-.pres-heading { font-weight: 600; margin-bottom: 0.25rem; font-size: 0.78rem; }
+.pres-heading { font-family: var(--font-display); font-weight: 700; margin-bottom: 0.25rem; font-size: 0.78rem; text-transform: var(--display-transform); letter-spacing: var(--display-tracking); }
 .pres-text { color: var(--fg-dim); }
 .pres-action { margin-top: 0.4rem; }
 .pres-action a { color: var(--accent); cursor: pointer; text-decoration: none; font-weight: 600; }
