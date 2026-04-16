@@ -228,7 +228,20 @@ fn detect_steam_id() -> Option<String> {
 const DRM_CACHE_TTL_SECS: u64 = 60 * 60 * 24 * 30;
 
 /// Throttle between PCGamingWiki / Steam Store requests during bulk DRM sync.
-const DRM_BULK_DELAY_MS: u64 = 1500;
+const DRM_BULK_DELAY_MS: u64 = 1000;
+
+/// A cached DrmInfo is considered stale if its TTL expired or if it is a
+/// pre-feature record that predates the preservability classifier (detected
+/// by the hint being empty while status was successfully classified).
+fn drm_cache_is_stale(cached: &drm::DrmInfo, now: u64) -> bool {
+    if now.saturating_sub(cached.fetched_at) >= DRM_CACHE_TTL_SECS {
+        return true;
+    }
+    if cached.preservability_hint.is_empty() && !matches!(cached.status, drm::DrmStatus::Unknown) {
+        return true;
+    }
+    false
+}
 
 #[tauri::command]
 fn fetch_all_drm(app: tauri::AppHandle, state: State<'_, SharedState>) -> Result<(), String> {
@@ -243,7 +256,7 @@ fn fetch_all_drm(app: tauri::AppHandle, state: State<'_, SharedState>) -> Result
         .filter(|g| {
             s.drm_cache
                 .get(&g.id)
-                .map(|cached| now.saturating_sub(cached.fetched_at) >= DRM_CACHE_TTL_SECS)
+                .map(|cached| drm_cache_is_stale(cached, now))
                 .unwrap_or(true)
         })
         .map(|g| g.id)
@@ -291,7 +304,7 @@ async fn get_game_drm(app_id: u64, state: State<'_, SharedState>) -> Result<drm:
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs();
-            if now.saturating_sub(cached.fetched_at) < DRM_CACHE_TTL_SECS {
+            if !drm_cache_is_stale(cached, now) {
                 return Ok(cached.clone());
             }
         }

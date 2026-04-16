@@ -43,6 +43,9 @@ h1 { font-size: 1.8rem; color: #58a6ff; margin-bottom: 0.3rem; }
 .sbtn { padding: 0.32rem 0.6rem; background: #21262d; border: 1px solid #30363d; border-radius: 6px; color: #6e7681; cursor: pointer; font-size: 0.78rem; transition: all 0.15s; user-select: none; }
 .sbtn:hover { background: #30363d; color: #c9d1d9; }
 .sbtn.active { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+.pbtn { padding: 0.32rem 0.6rem; background: #21262d; border: 1px solid #30363d; border-radius: 6px; color: #6e7681; cursor: pointer; font-size: 0.78rem; transition: all 0.15s; user-select: none; display: inline-flex; align-items: center; gap: 0.25rem; }
+.pbtn:hover { background: #30363d; color: #c9d1d9; }
+.pbtn.active { background: #1f6feb; border-color: #1f6feb; color: #fff; }
 .letter-nav { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-bottom: 1rem; justify-content: center; }
 .letter-nav a { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; background: #21262d; border: 1px solid #30363d; border-radius: 6px; color: #484f58; text-decoration: none; font-size: 0.78rem; font-weight: 600; transition: all 0.15s; }
 .letter-nav a:hover { background: #30363d; color: #e6edf3; }
@@ -88,6 +91,24 @@ input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; accent-colo
 .drm-impact-ok .drm-impact-heading { color: #3fb950; }
 .drm-impact-muted { background: #1f2428; border-color: #484f58; }
 .drm-impact-muted .drm-impact-heading { color: #8b949e; }
+.pres-block { padding: 0.5rem 0.7rem; border-radius: 4px; font-size: 0.72rem; line-height: 1.4; border-left: 3px solid; }
+.pres-heading { font-weight: 600; margin-bottom: 0.25rem; font-size: 0.78rem; }
+.pres-text { color: #8b949e; }
+.pres-action { margin-top: 0.4rem; }
+.pres-action a { color: #58a6ff; cursor: pointer; text-decoration: none; font-weight: 600; }
+.pres-action a:hover { text-decoration: underline; }
+.pres-trivial { background: #1a2a1f; border-color: #3fb950; }
+.pres-trivial .pres-heading { color: #3fb950; }
+.pres-easy { background: #162a28; border-color: #39c0a9; }
+.pres-easy .pres-heading { color: #56d4ba; }
+.pres-alternative { background: #162540; border-color: #58a6ff; }
+.pres-alternative .pres-heading { color: #58a6ff; }
+.pres-removed { background: #1e2f1e; border-color: #56b659; }
+.pres-removed .pres-heading { color: #56b659; }
+.pres-hard { background: #2a1a1a; border-color: #f85149; }
+.pres-hard .pres-heading { color: #f85149; }
+.pres-unknown { background: #1f2428; border-color: #484f58; }
+.pres-unknown .pres-heading { color: #8b949e; }
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.65); display: flex; align-items: center; justify-content: center; z-index: 100; }
 .modal-overlay.hidden { display: none; }
 .modal { background: #0d1117; border: 1px solid #30363d; border-radius: 6px; width: min(520px, 90vw); max-height: 80vh; overflow: auto; padding: 1rem 1.2rem; }
