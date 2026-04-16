@@ -1,10 +1,103 @@
+:root {
+  /* ---------- Background layers (from darkest to most elevated) ---------- */
+  --bg: #0d1117;
+  --bg-panel: #161b22;
+  --bg-2: #1c2129;
+  --bg-3: #21262d;
+  --bg-hover: #30363d;
+
+  /* ---------- Borders ---------- */
+  --border: #30363d;
+  --border-subtle: #21262d;
+  --border-muted: #484f58;
+
+  /* ---------- Foreground (text) ---------- */
+  --fg: #e6edf3;
+  --fg-strong: #c9d1d9;
+  --fg-dim: #8b949e;
+  --fg-muted: #6e7681;
+  --fg-ghost: #484f58;
+
+  /* ---------- Brand / accent (blue — primary interactive color) ---------- */
+  --accent: #58a6ff;
+  --accent-strong: #1f6feb;
+  --accent-bright: #388bfd;
+  --accent-bg: #162540;
+
+  /* ---------- Semantic: success (green) ---------- */
+  --success: #3fb950;
+  --success-strong: #2ea043;
+  --success-border: #238636;
+  --success-bg: #1a3a2a;
+  --success-bg-soft: #1a2a1f;
+  --success-alt: #56b659;
+  --success-alt-bg: #1e2f1e;
+
+  /* ---------- Semantic: warning (yellow / gold) ---------- */
+  --warning: #d29922;
+  --warning-border: #9e6a03;
+  --warning-bg: #2a2315;
+  --warning-bg-soft: #1c1208;
+  --warning-bg-foil: #1c1a15;
+
+  /* ---------- Semantic: danger (red) ---------- */
+  --danger: #f85149;
+  --danger-border: #da3633;
+  --danger-bg: #2a1a1a;
+  --danger-bg-strong: #3a1a1a;
+
+  /* ---------- Semantic: info / size (teal cyan) ---------- */
+  --info: #56d4ba;
+  --info-border: #2e7a76;
+  --info-bg: #16252a;
+  --info-alt: #39c0a9;
+  --info-alt-bg: #162a28;
+
+  /* ---------- Secondary: purple (stat highlights, tool category) ---------- */
+  --purple: #bc8cff;
+  --purple-strong: #8957e5;
+  --purple-bg: #6e40c9;
+
+  /* ---------- Metacritic score colors ---------- */
+  --mc-green: #6c3;
+  --mc-yellow: #fc3;
+  --mc-red: #f00;
+
+  /* ---------- Translucent overlays & misc backgrounds ---------- */
+  --overlay-light: rgba(0, 0, 0, 0.5);
+  --overlay: rgba(0, 0, 0, 0.6);
+  --overlay-modal: rgba(0, 0, 0, 0.65);
+  --overlay-close-hover: rgba(0, 0, 0, 0.7);
+  --overlay-text-shadow: rgba(0, 0, 0, 0.8);
+  --loading-overlay: rgba(14, 17, 23, 0.88);
+  --detail-gradient-end: rgba(22, 27, 34, 0.95);
+  --done-row-bg: rgba(46, 160, 67, 0.07);
+
+  /* ---------- Radii ---------- */
+  --r-sm: 3px;
+  --r: 6px;
+  --r-lg: 8px;
+  --r-xl: 12px;
+
+  /* ---------- Transitions ---------- */
+  --t-fast: 0.15s;
+  --t-mid: 0.2s;
+  --t-slow: 0.3s;
+  --t-slower: 0.4s;
+
+  /* ---------- Typography (swapped by the Cyberpunk PR) ---------- */
+  --font-body: 'Segoe UI', system-ui, sans-serif;
+  --font-display: 'Segoe UI', system-ui, sans-serif;
+}
+
+/* ---------- Element resets & layout ---------- */
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0e1117; color: #c9d1d9; min-height: 100vh; padding: 1.5rem 1rem; }
+body { font-family: var(--font-body); background: var(--bg); color: var(--fg-strong); min-height: 100vh; padding: 1.5rem 1rem; }
 .container { max-width: 960px; margin: 0 auto; }
-header { text-align: center; margin-bottom: 1rem; padding-bottom: 1rem; border-bottom: 1px solid #21262d; }
-h1 { font-size: 1.8rem; color: #58a6ff; margin-bottom: 0.3rem; }
-.subtitle { color: #8b949e; font-size: 0.9rem; }
-footer { text-align: center; margin-top: 1.5rem; padding-top: 0.8rem; border-top: 1px solid #21262d; color: #484f58; font-size: 0.75rem; }
+header { text-align: center; margin-bottom: 1rem; padding-bottom: 1rem; border-bottom: 1px solid var(--border-subtle); }
+h1 { font-size: 1.8rem; color: var(--accent); margin-bottom: 0.3rem; }
+.subtitle { color: var(--fg-dim); font-size: 0.9rem; }
+footer { text-align: center; margin-top: 1.5rem; padding-top: 0.8rem; border-top: 1px solid var(--border-subtle); color: var(--fg-ghost); font-size: 0.75rem; }
 @media (max-width: 600px) {
   td, th { padding: 0.3rem; font-size: 0.8rem; }
   .letter-big { font-size: 1.5rem; width: 36px; }
