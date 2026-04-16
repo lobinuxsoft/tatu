@@ -81,7 +81,7 @@ pub fn fetch_games(api_key: &str, steam_id: &str) -> Result<Vec<Game>, String> {
         })
         .collect();
 
-    games.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    games.sort_by_key(|g| g.name.to_lowercase());
     Ok(games)
 }
 
@@ -291,7 +291,7 @@ pub fn find_steam_collection_by_name(
         .find(|c| c.name.trim().to_lowercase() == target))
 }
 
-fn steam_install_dir() -> Option<PathBuf> {
+pub(crate) fn steam_install_dir() -> Option<PathBuf> {
     // Linux: ~/.local/share/Steam or ~/.steam/steam
     if let Some(home) = dirs::home_dir() {
         let primary = home.join(".local/share/Steam");

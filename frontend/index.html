@@ -23,8 +23,9 @@
   <div class="tab-panel active" id="panel-steam">
     <div class="sync-bar">
       <span class="sync-info" id="syncInfo"></span>
+      <button class="sync-btn" id="sizeBtn" title="Escanea libraryfolders.vdf y registra el tamaño en disco de cada juego instalado.">Escanear tamaño</button>
       <button class="sync-btn" id="importBtn" title="Importa una colección de Steam como juegos completados (por ejemplo: TERMINADOS).">Importar colección</button>
-      <button class="sync-btn" id="drmBtn" title="Consulta DRM (Steam Store + PCGamingWiki) para todos los juegos sin caché. Tarda ~1.5s por juego.">Cargar DRM</button>
+      <button class="sync-btn" id="drmBtn" title="Consulta DRM (Steam Store + PCGamingWiki) para todos los juegos sin caché. Tarda ~1s por juego.">Cargar DRM</button>
       <button class="sync-btn" id="syncBtn">Sincronizar</button>
     </div>
     <div class="stats">
@@ -32,6 +33,7 @@
       <div class="stat"><div class="stat-value c2" id="sPend">0</div><div class="stat-label">Pendientes</div></div>
       <div class="stat"><div class="stat-value c3" id="sHours">0</div><div class="stat-label">Horas jugadas</div></div>
       <div class="stat"><div class="stat-value c4" id="sVis">0</div><div class="stat-label">Mostrando</div></div>
+      <div class="stat"><div class="stat-value c5" id="sSize">&mdash;</div><div class="stat-label">Tamaño (filtro)</div></div>
     </div>
     <div class="progress-wrap"><div class="progress-bar" id="pBar"></div><div class="progress-text" id="pText">0%</div></div>
     <div class="controls"><input type="text" class="search" id="search" placeholder="Buscar juego o género..." autocomplete="off"></div>
