@@ -291,7 +291,7 @@ pub fn find_steam_collection_by_name(
         .find(|c| c.name.trim().to_lowercase() == target))
 }
 
-fn steam_install_dir() -> Option<PathBuf> {
+pub(crate) fn steam_install_dir() -> Option<PathBuf> {
     // Linux: ~/.local/share/Steam or ~/.steam/steam
     if let Some(home) = dirs::home_dir() {
         let primary = home.join(".local/share/Steam");

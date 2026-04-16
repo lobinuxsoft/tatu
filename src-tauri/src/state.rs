@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::achievements::GameAchievements;
+use crate::disk::DiskSize;
 use crate::drm::DrmInfo;
 use crate::hltb::HltbResult;
 use crate::inventory::GameCards;
@@ -36,6 +37,9 @@ pub struct AppState {
     /// DRM classification cache, keyed by Steam app ID.
     #[serde(default)]
     pub drm_cache: HashMap<u64, DrmInfo>,
+    /// Disk size cache (installed + previously measured), keyed by Steam app ID.
+    #[serde(default)]
+    pub size_cache: HashMap<u64, DiskSize>,
 }
 
 impl AppState {

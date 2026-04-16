@@ -5,7 +5,7 @@ const { getVersion } = window.__TAURI__.app;
 // --- State ---
 let G = [], NS = [], completed = new Set(), completedNS = new Set(), achProgress = {};
 let tog = { game: true, mp: false, tool: false, demo: false }, sf = "all", q = "";
-let favorites = new Set(), hltbCache = {}, drmCache = {}, sortMode = "alpha", pf = "all";
+let favorites = new Set(), hltbCache = {}, drmCache = {}, sizeCache = {}, sortMode = "alpha", pf = "all";
 let panelOpen = false, panelGameId = null;
 let loadingTasks = new Set();
 function updateGlobalLoading() {
@@ -34,6 +34,13 @@ function fmtDate(epoch) {
   return new Date(epoch * 1000).toLocaleDateString("es-AR", { day: "numeric", month: "short", year: "numeric" });
 }
 function mcColor(score) { return score >= 75 ? "mc-green" : score >= 50 ? "mc-yellow" : "mc-red"; }
+function formatBytes(n) {
+  if (!n || n < 0) return "\u2014";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0, v = n;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  return (v < 10 && i >= 2 ? v.toFixed(1) : Math.round(v)) + " " + units[i];
+}
 
 // --- Tabs ---
 document.querySelector(".tabs").addEventListener("click", e => {
@@ -60,7 +67,7 @@ function renderSteam() {
 
   document.querySelectorAll("#sortRow .sbtn").forEach(b => b.classList.toggle("active", b.dataset.sort === sortMode));
 
-  let comp = 0, vis = 0, hrs = 0;
+  let comp = 0, vis = 0, hrs = 0, bytes = 0;
   const filtered = [];
   G.forEach(g => {
     const cat = gCat(g), chk = completed.has(g.id);
@@ -76,6 +83,7 @@ function renderSteam() {
       if (k !== pf) return;
     }
     vis++; if (chk) comp++; hrs += g.hours;
+    if (sizeCache[g.id]) bytes += sizeCache[g.id].bytes;
     filtered.push({ ...g, chk });
   });
 
@@ -116,6 +124,16 @@ function renderSteam() {
       if (hl.main_hours > 0) tagsHtml += `<span class="tag tag-genre">\u{1F552} Historia: ${hl.main_hours}h</span>`;
       if (hl.extra_hours > 0) tagsHtml += `<span class="tag tag-ach">\u{1F552} Main+Extra: ${hl.extra_hours}h</span>`;
       if (hl.completionist_hours > 0) tagsHtml += `<span class="tag tag-cards">\u{1F552} 100%: ${hl.completionist_hours}h</span>`;
+    }
+    const sz = sizeCache[g.id];
+    if (sz && sz.bytes > 0) {
+      const isAppinfo = sz.source && sz.source.kind === "appinfo";
+      const cls = isAppinfo ? "tag-size-estimate" : "tag-size";
+      const tip = isAppinfo
+        ? "Upper bound estimado desde appinfo.vdf (suma de depots)"
+        : "Tamaño exacto en disco (libraryfolders.vdf)";
+      const prefix = isAppinfo ? "~" : "";
+      tagsHtml += `<span class="tag ${cls}" title="${esc(tip)}">\u{1F4BE} ${prefix}${formatBytes(sz.bytes)}</span>`;
     }
     const tagsRow = tagsHtml ? `<div class="tags">${tagsHtml}</div>` : "";
     const drmInline = renderDrmInlineBadge(drmCache[g.id]);
@@ -158,6 +176,7 @@ function renderSteam() {
   document.getElementById("sPend").textContent = vis - comp;
   document.getElementById("sHours").textContent = Math.round(hrs).toLocaleString();
   document.getElementById("sVis").textContent = vis;
+  document.getElementById("sSize").textContent = bytes > 0 ? formatBytes(bytes) : "\u2014";
   document.getElementById("pBar").style.width = pct + "%";
   document.getElementById("pText").textContent = pct + "% (" + comp + "/" + vis + ")";
 }
@@ -258,6 +277,25 @@ async function openImportModal() {
 
 function closeImportModal() {
   document.getElementById("importOverlay").classList.add("hidden");
+}
+
+async function doScanSizes() {
+  const btn = document.getElementById("sizeBtn");
+  const info = document.getElementById("syncInfo");
+  btn.disabled = true; btn.textContent = "Escaneando...";
+  try {
+    const scanned = await invoke("scan_sizes");
+    for (const s of scanned) { sizeCache[s.app_id] = s; }
+    const installedCount = scanned.filter(s => s.source && s.source.kind === "local_manifest").length;
+    const appinfoCount = scanned.filter(s => s.source && s.source.kind === "appinfo").length;
+    const totalBytes = scanned.reduce((sum, s) => sum + (s.bytes || 0), 0);
+    info.textContent = `Escaneo: ${installedCount} instalados + ${appinfoCount} vía appinfo.vdf (upper bound). Total: ${formatBytes(totalBytes)}.`;
+    renderSteam();
+  } catch (e) {
+    info.textContent = "Error al escanear tamaño: " + e;
+  } finally {
+    btn.disabled = false; btn.textContent = "Escanear tamaño";
+  }
 }
 
 async function doFetchAllDrm() {
@@ -738,7 +776,7 @@ document.getElementById("saveSettingsBtn").addEventListener("click", async () =>
 async function init() {
   try {
     const data = await invoke("get_state");
-    G = data.games || []; completed = new Set(data.completed || []); achProgress = data.ach_progress || {}; hltbCache = data.hltb_cache || {}; drmCache = data.drm_cache || {};
+    G = data.games || []; completed = new Set(data.completed || []); achProgress = data.ach_progress || {}; hltbCache = data.hltb_cache || {}; drmCache = data.drm_cache || {}; sizeCache = data.size_cache || {};
     NS = data.non_steam || []; completedNS = new Set(data.completed_nonsteam || []);
     loadSettingsUI(data.steam_api_key, data.steam_id);
     if (!data.steam_id) {
@@ -768,6 +806,7 @@ document.getElementById("syncBtn").addEventListener("click", () => {
 });
 document.getElementById("nsSyncBtn").addEventListener("click", doSyncNonSteam);
 document.getElementById("drmBtn").addEventListener("click", doFetchAllDrm);
+document.getElementById("sizeBtn").addEventListener("click", doScanSizes);
 document.getElementById("importBtn").addEventListener("click", openImportModal);
 document.getElementById("importClose").addEventListener("click", closeImportModal);
 document.getElementById("importOverlay").addEventListener("click", e => { if (e.target.id === "importOverlay") closeImportModal(); });
