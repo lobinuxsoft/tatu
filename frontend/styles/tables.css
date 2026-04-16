@@ -1,0 +1,22 @@
+.letter-group { margin-bottom: 1.5rem; }
+.letter-header { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.5rem; padding: 0.4rem 0; }
+.letter-big { font-size: 2rem; font-weight: 800; color: #58a6ff; width: 50px; text-align: center; flex-shrink: 0; }
+.letter-info { font-size: 0.75rem; color: #8b949e; }
+.letter-bar { flex: 1; height: 6px; background: #21262d; border-radius: 3px; overflow: hidden; max-width: 200px; }
+.letter-bar-fill { height: 100%; background: #2ea043; border-radius: 3px; transition: width 0.3s; }
+table { width: 100%; border-collapse: collapse; background: #161b22; border-radius: 8px; overflow: hidden; border: 1px solid #21262d; }
+thead th { background: #1c2129; padding: 0.5rem; text-align: left; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.04em; color: #8b949e; border-bottom: 1px solid #21262d; }
+thead th:nth-child(1) { width: 36px; text-align: center; }
+thead th:nth-child(3) { text-align: center; width: 70px; }
+tbody tr { border-bottom: 1px solid #1c2129; transition: background 0.1s; cursor: pointer; }
+tbody tr:hover { background: #1c2129; }
+tbody tr.done { background: rgba(46,160,67,0.07); }
+tbody tr.done .gn { text-decoration: line-through; color: #6e7681; }
+td { padding: 0.4rem 0.5rem; font-size: 0.88rem; }
+td:nth-child(1) { text-align: center; }
+td:nth-child(3) { text-align: center; color: #8b949e; font-size: 0.82rem; }
+.gn { color: #e6edf3; display: flex; align-items: center; gap: 0.5rem; }
+.gn img { width: 20px; height: 20px; border-radius: 3px; flex-shrink: 0; }
+input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; accent-color: #2ea043; }
+.game-cell { display: flex; flex-direction: column; gap: 0.15rem; }
+.exe-path { font-size: 0.65rem; color: #484f58; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 500px; }

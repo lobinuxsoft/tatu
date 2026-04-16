@@ -1,0 +1,12 @@
+.stats { display: flex; justify-content: center; gap: 1.5rem; margin-bottom: 1.2rem; flex-wrap: wrap; }
+.stat { text-align: center; }
+.stat-value { font-size: 1.5rem; font-weight: 700; }
+.stat-value.c1 { color: #2ea043; }
+.stat-value.c2 { color: #d29922; }
+.stat-value.c3 { color: #bc8cff; }
+.stat-value.c4 { color: #58a6ff; }
+.stat-value.c5 { color: #56d4ba; }
+.stat-label { font-size: 0.7rem; color: #8b949e; text-transform: uppercase; letter-spacing: 0.04em; }
+.progress-wrap { margin: 0 0 1.2rem; background: #161b22; border-radius: 8px; overflow: hidden; height: 26px; position: relative; border: 1px solid #21262d; }
+.progress-bar { height: 100%; background: linear-gradient(90deg, #238636, #2ea043); transition: width 0.4s; border-radius: 8px; }
+.progress-text { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 0.8rem; font-weight: 600; color: #e6edf3; text-shadow: 0 1px 3px rgba(0,0,0,0.8); }

@@ -1,0 +1,12 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0e1117; color: #c9d1d9; min-height: 100vh; padding: 1.5rem 1rem; }
+.container { max-width: 960px; margin: 0 auto; }
+header { text-align: center; margin-bottom: 1rem; padding-bottom: 1rem; border-bottom: 1px solid #21262d; }
+h1 { font-size: 1.8rem; color: #58a6ff; margin-bottom: 0.3rem; }
+.subtitle { color: #8b949e; font-size: 0.9rem; }
+footer { text-align: center; margin-top: 1.5rem; padding-top: 0.8rem; border-top: 1px solid #21262d; color: #484f58; font-size: 0.75rem; }
+@media (max-width: 600px) {
+  td, th { padding: 0.3rem; font-size: 0.8rem; }
+  .letter-big { font-size: 1.5rem; width: 36px; }
+  .letter-nav a { width: 26px; height: 26px; font-size: 0.68rem; }
+}
