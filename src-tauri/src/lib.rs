@@ -1,4 +1,5 @@
 mod achievements;
+mod drm;
 mod hltb;
 mod inventory;
 mod shortcuts;
@@ -38,6 +39,7 @@ fn get_state(state: State<'_, SharedState>) -> Result<serde_json::Value, String>
         "steam_id": s.steam_id,
         "ach_progress": ach_progress,
         "hltb_cache": s.hltb_cache,
+        "drm_cache": s.drm_cache,
     }))
 }
 
@@ -222,6 +224,89 @@ fn detect_steam_id() -> Option<String> {
     steam::detect_steam_id()
 }
 
+/// DRM info cache TTL: 30 days. DRM rarely changes after release.
+const DRM_CACHE_TTL_SECS: u64 = 60 * 60 * 24 * 30;
+
+/// Throttle between PCGamingWiki / Steam Store requests during bulk DRM sync.
+const DRM_BULK_DELAY_MS: u64 = 1500;
+
+#[tauri::command]
+fn fetch_all_drm(app: tauri::AppHandle, state: State<'_, SharedState>) -> Result<(), String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let pending: Vec<u64> = s
+        .games
+        .iter()
+        .filter(|g| {
+            s.drm_cache
+                .get(&g.id)
+                .map(|cached| now.saturating_sub(cached.fetched_at) >= DRM_CACHE_TTL_SECS)
+                .unwrap_or(true)
+        })
+        .map(|g| g.id)
+        .collect();
+    drop(s);
+
+    let app_clone = app.clone();
+    std::thread::spawn(move || {
+        let total = pending.len();
+        for (i, app_id) in pending.iter().enumerate() {
+            let info = match drm::fetch_drm_info(*app_id) {
+                Ok(v) => v,
+                Err(_) => {
+                    let _ = app_clone.emit(
+                        "drm_progress",
+                        serde_json::json!({ "current": i + 1, "total": total }),
+                    );
+                    std::thread::sleep(std::time::Duration::from_millis(DRM_BULK_DELAY_MS));
+                    continue;
+                }
+            };
+            let state: tauri::State<'_, SharedState> = app_clone.state();
+            if let Ok(mut s) = state.lock() {
+                s.drm_cache.insert(*app_id, info.clone());
+                s.save();
+            }
+            let _ = app_clone.emit(
+                "drm_progress",
+                serde_json::json!({ "current": i + 1, "total": total, "app_id": app_id, "info": info }),
+            );
+            std::thread::sleep(std::time::Duration::from_millis(DRM_BULK_DELAY_MS));
+        }
+        let _ = app_clone.emit("drm_done", serde_json::json!({ "total": total }));
+    });
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn get_game_drm(app_id: u64, state: State<'_, SharedState>) -> Result<drm::DrmInfo, String> {
+    {
+        let s = state.lock().map_err(|e| e.to_string())?;
+        if let Some(cached) = s.drm_cache.get(&app_id) {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            if now.saturating_sub(cached.fetched_at) < DRM_CACHE_TTL_SECS {
+                return Ok(cached.clone());
+            }
+        }
+    }
+
+    let info = tokio::task::spawn_blocking(move || drm::fetch_drm_info(app_id))
+        .await
+        .map_err(|e| e.to_string())??;
+
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    s.drm_cache.insert(app_id, info.clone());
+    s.save();
+    Ok(info)
+}
+
 #[tauri::command]
 fn save_completed(completed: Vec<u64>, state: State<'_, SharedState>) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
@@ -279,6 +364,50 @@ fn get_steam_favorites(state: State<'_, SharedState>) -> Result<Vec<u64>, String
     steam::get_steam_favorites(&steam_id)
 }
 
+#[tauri::command]
+fn list_steam_collections(
+    state: State<'_, SharedState>,
+) -> Result<Vec<steam::SteamCollection>, String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    let steam_id = s.steam_id.clone();
+    drop(s);
+    steam::list_steam_collections(&steam_id)
+}
+
+/// Import a Steam collection as completed games. Merges with existing completed
+/// set (does not overwrite). Only imports app IDs present in the user's library.
+/// Returns (matched_count, unknown_count) — games in the collection that are not
+/// in the tracker library (e.g. removed, non-Steam) are reported as unknown.
+#[tauri::command]
+fn import_completed_from_collection(
+    collection_name: String,
+    state: State<'_, SharedState>,
+) -> Result<(usize, usize), String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    let steam_id = s.steam_id.clone();
+    let known_ids: std::collections::HashSet<u64> = s.games.iter().map(|g| g.id).collect();
+    drop(s);
+
+    let found = steam::find_steam_collection_by_name(&steam_id, &collection_name)?
+        .ok_or_else(|| format!("Collection not found: {collection_name}"))?;
+
+    let mut matched = 0usize;
+    let mut unknown = 0usize;
+
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    for app_id in &found.added {
+        if known_ids.contains(app_id) {
+            if s.completed.insert(*app_id) {
+                matched += 1;
+            }
+        } else {
+            unknown += 1;
+        }
+    }
+    s.save();
+    Ok((matched, unknown))
+}
+
 fn now_epoch() -> String {
     let dur = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -307,6 +436,10 @@ pub fn run() {
             save_completed_nonsteam,
             get_steam_favorites,
             search_hltb,
+            get_game_drm,
+            fetch_all_drm,
+            list_steam_collections,
+            import_completed_from_collection,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
