@@ -81,7 +81,7 @@ pub fn fetch_games(api_key: &str, steam_id: &str) -> Result<Vec<Game>, String> {
         })
         .collect();
 
-    games.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    games.sort_by_key(|g| g.name.to_lowercase());
     Ok(games)
 }
 
