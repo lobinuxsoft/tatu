@@ -47,6 +47,8 @@ pub fn run() {
             commands::cheat_cmd::cheat_status,
             commands::cheat_cmd::cheat_freeze_toggle,
             commands::cheat_cmd::cheat_freeze_status,
+            commands::ce_cmd::ce_install_status,
+            commands::ce_cmd::ce_install_trigger,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
