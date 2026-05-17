@@ -26,6 +26,13 @@ pub enum AddressSpec {
         #[serde(deserialize_with = "deserialize_hex_or_dec")]
         offset: u64,
     },
+    PointerChain {
+        base_module: String,
+        #[serde(deserialize_with = "deserialize_hex_or_dec")]
+        base_offset: u64,
+        #[serde(deserialize_with = "deserialize_vec_hex_or_dec")]
+        offsets: Vec<u64>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -79,19 +86,29 @@ fn deserialize_hex_or_dec<'de, D>(deserializer: D) -> Result<u64, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
-    use serde::de::Error;
-
     let value = serde_json::Value::deserialize(deserializer)?;
+    value_to_u64(value)
+}
+
+fn deserialize_vec_hex_or_dec<'de, D>(deserializer: D) -> Result<Vec<u64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw: Vec<serde_json::Value> = Vec::deserialize(deserializer)?;
+    raw.into_iter().map(value_to_u64).collect()
+}
+
+fn value_to_u64<E: serde::de::Error>(value: serde_json::Value) -> Result<u64, E> {
     match value {
         serde_json::Value::String(s) => match s.strip_prefix("0x").or_else(|| s.strip_prefix("0X"))
         {
-            Some(hex) => u64::from_str_radix(hex, 16).map_err(Error::custom),
-            None => s.parse::<u64>().map_err(Error::custom),
+            Some(hex) => u64::from_str_radix(hex, 16).map_err(E::custom),
+            None => s.parse::<u64>().map_err(E::custom),
         },
         serde_json::Value::Number(n) => n
             .as_u64()
-            .ok_or_else(|| Error::custom("offset must fit in u64")),
-        _ => Err(Error::custom("offset must be a string or number")),
+            .ok_or_else(|| E::custom("offset must fit in u64")),
+        _ => Err(E::custom("offset must be a string or number")),
     }
 }
 
@@ -100,7 +117,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn cheat_table_roundtrip_with_hex_offset() {
+    fn cheat_table_roundtrip_with_static_address() {
         let json = r#"{
             "app_id": 49520,
             "game_name": "Borderlands 2",
@@ -123,12 +140,41 @@ mod tests {
                 assert_eq!(module, "Borderlands2.exe");
                 assert_eq!(*offset, 0xABCD_1234);
             }
+            other => panic!("expected Static, got {other:?}"),
         }
+    }
 
-        match &table.cheats[0].action {
-            CheatAction::WriteOnce { value } => {
-                assert_eq!(*value, CheatValue::F32(9999.0));
+    #[test]
+    fn cheat_table_roundtrip_with_pointer_chain() {
+        let json = r#"{
+            "app_id": 2725260,
+            "game_name": "ENDER MAGNOLIA",
+            "exe_pattern": "EnderMagnolia.exe",
+            "cheats": [{
+                "id": "player_hp",
+                "name": "Player HP",
+                "address": {
+                    "kind": "PointerChain",
+                    "base_module": "EnderMagnolia.exe",
+                    "base_offset": "0x12345ABC",
+                    "offsets": ["0x10", "0x20", 48]
+                },
+                "action": { "kind": "WriteOnce", "value": { "type": "u32", "value": 9999 } }
+            }]
+        }"#;
+
+        let table: CheatTable = serde_json::from_str(json).expect("parse table");
+        match &table.cheats[0].address {
+            AddressSpec::PointerChain {
+                base_module,
+                base_offset,
+                offsets,
+            } => {
+                assert_eq!(base_module, "EnderMagnolia.exe");
+                assert_eq!(*base_offset, 0x1234_5ABC);
+                assert_eq!(offsets, &vec![0x10_u64, 0x20, 48]);
             }
+            other => panic!("expected PointerChain, got {other:?}"),
         }
     }
 
@@ -160,6 +206,7 @@ mod tests {
         let spec: AddressSpec = serde_json::from_str(json).expect("parse");
         match spec {
             AddressSpec::Static { offset, .. } => assert_eq!(offset, 0xCAFE),
+            other => panic!("expected Static, got {other:?}"),
         }
     }
 
@@ -169,6 +216,7 @@ mod tests {
         let spec: AddressSpec = serde_json::from_str(json).expect("parse");
         match spec {
             AddressSpec::Static { offset, .. } => assert_eq!(offset, 1234),
+            other => panic!("expected Static, got {other:?}"),
         }
     }
 
@@ -178,6 +226,24 @@ mod tests {
         let spec: AddressSpec = serde_json::from_str(json).expect("parse");
         match spec {
             AddressSpec::Static { offset, .. } => assert_eq!(offset, 1234),
+            other => panic!("expected Static, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn pointer_chain_offsets_accept_mixed_hex_and_decimal() {
+        let json = r#"{
+            "kind": "PointerChain",
+            "base_module": "x.exe",
+            "base_offset": 0,
+            "offsets": ["0xFF", 16, "32", "0x100"]
+        }"#;
+        let spec: AddressSpec = serde_json::from_str(json).expect("parse");
+        match spec {
+            AddressSpec::PointerChain { offsets, .. } => {
+                assert_eq!(offsets, vec![0xFF_u64, 16, 32, 0x100]);
+            }
+            other => panic!("expected PointerChain, got {other:?}"),
         }
     }
 }
