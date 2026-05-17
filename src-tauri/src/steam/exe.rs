@@ -43,7 +43,9 @@ pub fn detect_game_exe(app_id: &str) -> Result<String, String> {
     }
     let steam = steam_install_dir().ok_or_else(|| "Steam install dir not found".to_string())?;
     let install_path = find_install_path(&steam, app_id)?;
-    let exes = enumerate_exes(&install_path, 2);
+    // UE games bury the shipping exe at <Game>/Binaries/Win64/<Game>-Win64-Shipping.exe
+    // (depth 3 from install root). Depth 5 leaves margin for engines that nest deeper.
+    let exes = enumerate_exes(&install_path, 5);
     if exes.is_empty() {
         return Err(format!("no .exe files under {}", install_path.display()));
     }
