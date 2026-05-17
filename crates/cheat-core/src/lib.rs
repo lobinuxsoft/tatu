@@ -1,5 +1,6 @@
 pub mod attach;
 pub mod db;
+pub mod freeze;
 pub mod memory;
 pub mod resolve;
 pub mod types;
@@ -13,6 +14,12 @@ use crate::types::{CheatAction, CheatTable};
 pub enum CheatError {
     #[error("cheat '{0}' not found in table")]
     CheatNotFound(String),
+    #[error("cheat '{cheat_id}' is a {actual} action; this entry point expects {expected}")]
+    ActionMismatch {
+        cheat_id: String,
+        expected: &'static str,
+        actual: &'static str,
+    },
     #[error(transparent)]
     Attach(#[from] AttachError),
     #[error(transparent)]
@@ -28,15 +35,17 @@ pub fn trigger_cheat(table: &CheatTable, cheat_id: &str) -> Result<(), CheatErro
         .find(|c| c.id == cheat_id)
         .ok_or_else(|| CheatError::CheatNotFound(cheat_id.to_string()))?;
 
+    let CheatAction::WriteOnce { value } = &cheat.action else {
+        return Err(CheatError::ActionMismatch {
+            cheat_id: cheat_id.to_string(),
+            expected: "WriteOnce",
+            actual: cheat.action.kind_name(),
+        });
+    };
+
     let attached = find_process_by_exe(&table.exe_pattern)?;
     let address = resolve_address(&cheat.address, &attached)?;
-
-    match &cheat.action {
-        CheatAction::WriteOnce { value } => {
-            memory::write_bytes(attached.pid, address, &value.to_le_bytes())?;
-        }
-    }
-
+    memory::write_bytes(attached.pid, address, &value.to_le_bytes())?;
     Ok(())
 }
 
@@ -65,5 +74,34 @@ mod tests {
         assert!(!is_process_running(
             "definitely-not-real-process-xyzzy-99999-cheat-core-test"
         ));
+    }
+
+    #[test]
+    fn trigger_cheat_on_freeze_action_errors_with_action_mismatch() {
+        use crate::types::{AddressSpec, Cheat, CheatAction, CheatValue};
+        let table = CheatTable {
+            app_id: 1,
+            game_name: "test".into(),
+            exe_pattern: "irrelevant".into(),
+            cheats: vec![Cheat {
+                id: "frozen".into(),
+                name: "Frozen".into(),
+                description: None,
+                address: AddressSpec::Absolute { address: 0xDEAD },
+                action: CheatAction::Freeze {
+                    value: CheatValue::I32(1),
+                    interval_ms: None,
+                },
+            }],
+        };
+        match trigger_cheat(&table, "frozen") {
+            Err(CheatError::ActionMismatch {
+                expected, actual, ..
+            }) => {
+                assert_eq!(expected, "WriteOnce");
+                assert_eq!(actual, "Freeze");
+            }
+            other => panic!("expected ActionMismatch, got {other:?}"),
+        }
     }
 }

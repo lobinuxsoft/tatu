@@ -1,9 +1,11 @@
 use std::path::PathBuf;
 
 use serde::Serialize;
+use tauri::State;
 
 use cheat_core::db::load_cheat_table;
-use cheat_core::types::{Cheat, CheatAction, CheatValue};
+use cheat_core::freeze::{FreezeKey, FreezeRegistry};
+use cheat_core::types::Cheat;
 use cheat_core::{is_process_running, trigger_cheat};
 
 #[derive(Debug, Serialize)]
@@ -12,6 +14,7 @@ pub struct CheatSummary {
     pub name: String,
     pub description: Option<String>,
     pub value_type: &'static str,
+    pub action_kind: &'static str,
 }
 
 #[derive(Debug, Serialize)]
@@ -53,32 +56,57 @@ pub fn cheat_status(app_id: u64) -> CheatStatus {
     }
 }
 
+#[tauri::command]
+pub fn cheat_freeze_toggle(
+    registry: State<'_, FreezeRegistry>,
+    app_id: u64,
+    cheat_id: String,
+    enabled: bool,
+) -> Result<bool, String> {
+    let key = FreezeKey {
+        app_id,
+        cheat_id: cheat_id.clone(),
+    };
+
+    if !enabled {
+        registry.stop(&key);
+        return Ok(false);
+    }
+
+    let table = load_cheat_table(&cheats_dir(), app_id).map_err(|e| e.to_string())?;
+    registry
+        .start(&table, &cheat_id)
+        .map_err(|e| e.to_string())?;
+    Ok(registry.is_active(&key))
+}
+
+#[tauri::command]
+pub fn cheat_freeze_status(
+    registry: State<'_, FreezeRegistry>,
+    app_id: u64,
+    cheat_id: String,
+) -> bool {
+    let key = FreezeKey { app_id, cheat_id };
+
+    // Auto-cleanup: if the target process is gone, a previously-active
+    // worker has already exited silently but the registry entry lingers.
+    // Reflect reality to the frontend instead of reporting a phantom on.
+    if let Ok(table) = load_cheat_table(&cheats_dir(), key.app_id)
+        && !is_process_running(&table.exe_pattern)
+    {
+        registry.stop(&key);
+        return false;
+    }
+
+    registry.is_active(&key)
+}
+
 fn summarize(cheat: &Cheat) -> CheatSummary {
     CheatSummary {
         id: cheat.id.clone(),
         name: cheat.name.clone(),
         description: cheat.description.clone(),
-        value_type: action_value_type(&cheat.action),
-    }
-}
-
-fn action_value_type(action: &CheatAction) -> &'static str {
-    match action {
-        CheatAction::WriteOnce { value } => value_type_name(value),
-    }
-}
-
-fn value_type_name(value: &CheatValue) -> &'static str {
-    match value {
-        CheatValue::U8(_) => "u8",
-        CheatValue::U16(_) => "u16",
-        CheatValue::U32(_) => "u32",
-        CheatValue::U64(_) => "u64",
-        CheatValue::I8(_) => "i8",
-        CheatValue::I16(_) => "i16",
-        CheatValue::I32(_) => "i32",
-        CheatValue::I64(_) => "i64",
-        CheatValue::F32(_) => "f32",
-        CheatValue::F64(_) => "f64",
+        value_type: cheat.action.value().type_name(),
+        action_kind: cheat.action.kind_name(),
     }
 }

@@ -46,7 +46,33 @@ pub enum AddressSpec {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub enum CheatAction {
-    WriteOnce { value: CheatValue },
+    WriteOnce {
+        value: CheatValue,
+    },
+    /// Continuously re-write `value` at `interval_ms` (default 16ms ≈ 60Hz).
+    /// Required for "hot-write" values the game overwrites every frame
+    /// (HP, mana, position, ammo). One-shot WriteOnce is invisible for
+    /// those because the game restores its own value within a frame.
+    Freeze {
+        value: CheatValue,
+        #[serde(default)]
+        interval_ms: Option<u64>,
+    },
+}
+
+impl CheatAction {
+    pub fn kind_name(&self) -> &'static str {
+        match self {
+            Self::WriteOnce { .. } => "WriteOnce",
+            Self::Freeze { .. } => "Freeze",
+        }
+    }
+
+    pub fn value(&self) -> &CheatValue {
+        match self {
+            Self::WriteOnce { value } | Self::Freeze { value, .. } => value,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -86,6 +112,21 @@ impl CheatValue {
             Self::U16(_) | Self::I16(_) => 2,
             Self::U32(_) | Self::I32(_) | Self::F32(_) => 4,
             Self::U64(_) | Self::I64(_) | Self::F64(_) => 8,
+        }
+    }
+
+    pub fn type_name(&self) -> &'static str {
+        match self {
+            Self::U8(_) => "u8",
+            Self::U16(_) => "u16",
+            Self::U32(_) => "u32",
+            Self::U64(_) => "u64",
+            Self::I8(_) => "i8",
+            Self::I16(_) => "i16",
+            Self::I32(_) => "i32",
+            Self::I64(_) => "i64",
+            Self::F32(_) => "f32",
+            Self::F64(_) => "f64",
         }
     }
 }
@@ -263,5 +304,48 @@ mod tests {
             }
             other => panic!("expected PointerChain, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn freeze_action_roundtrip_with_interval() {
+        let json = r#"{
+            "kind": "Freeze",
+            "value": { "type": "i32", "value": 320 },
+            "interval_ms": 33
+        }"#;
+        let action: CheatAction = serde_json::from_str(json).expect("parse");
+        match action {
+            CheatAction::Freeze { value, interval_ms } => {
+                assert_eq!(value, CheatValue::I32(320));
+                assert_eq!(interval_ms, Some(33));
+            }
+            other => panic!("expected Freeze, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn freeze_action_defaults_interval_to_none() {
+        let json = r#"{ "kind": "Freeze", "value": { "type": "f32", "value": 1600.0 } }"#;
+        let action: CheatAction = serde_json::from_str(json).expect("parse");
+        match action {
+            CheatAction::Freeze { value, interval_ms } => {
+                assert_eq!(value, CheatValue::F32(1600.0));
+                assert_eq!(interval_ms, None);
+            }
+            other => panic!("expected Freeze, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cheat_action_kind_name_matches_serde_tag() {
+        let write_once = CheatAction::WriteOnce {
+            value: CheatValue::I32(1),
+        };
+        let freeze = CheatAction::Freeze {
+            value: CheatValue::I32(1),
+            interval_ms: None,
+        };
+        assert_eq!(write_once.kind_name(), "WriteOnce");
+        assert_eq!(freeze.kind_name(), "Freeze");
     }
 }
