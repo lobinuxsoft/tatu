@@ -33,6 +33,14 @@ pub enum AddressSpec {
         #[serde(deserialize_with = "deserialize_vec_hex_or_dec")]
         offsets: Vec<u64>,
     },
+    /// Raw absolute address. Useful for ad-hoc testing when the address
+    /// is known from an external tool (scanmem, PINCE, debugger). NOT
+    /// stable across game sessions if it points into heap or other ASLR
+    /// regions — prefer PointerChain for persistent cheats.
+    Absolute {
+        #[serde(deserialize_with = "deserialize_hex_or_dec")]
+        address: u64,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -227,6 +235,16 @@ mod tests {
         match spec {
             AddressSpec::Static { offset, .. } => assert_eq!(offset, 1234),
             other => panic!("expected Static, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn absolute_address_roundtrip() {
+        let json = r#"{ "kind": "Absolute", "address": "0x7FFE1234ABCD" }"#;
+        let spec: AddressSpec = serde_json::from_str(json).expect("parse");
+        match spec {
+            AddressSpec::Absolute { address } => assert_eq!(address, 0x7FFE_1234_ABCD),
+            other => panic!("expected Absolute, got {other:?}"),
         }
     }
 

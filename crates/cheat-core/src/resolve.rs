@@ -38,6 +38,7 @@ pub fn resolve_address(
             }
             Ok(current)
         }
+        AddressSpec::Absolute { address } => Ok(*address),
     }
 }
 
@@ -90,6 +91,15 @@ mod tests {
         };
         let result = resolve_address(&spec, &proc);
         assert!(matches!(result, Err(ResolveError::ModuleNotFound(_))));
+    }
+
+    #[test]
+    fn resolve_absolute_returns_address_as_is() {
+        let proc = fake_process("game.exe", 0x140000000);
+        let spec = AddressSpec::Absolute {
+            address: 0x7FFE_1234_ABCD,
+        };
+        assert_eq!(resolve_address(&spec, &proc).unwrap(), 0x7FFE_1234_ABCD);
     }
 
     #[test]
