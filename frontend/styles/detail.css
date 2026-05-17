@@ -64,3 +64,16 @@
 .badge-level { font-size: 0.6rem; color: var(--accent); }
 .badge-xp { font-size: 0.58rem; color: var(--fg-dim); }
 .badge-unlocked-info { font-size: 0.72rem; color: var(--fg-dim); margin-top: 0.3rem; }
+.cheat-status-bar { margin-bottom: 0.8rem; }
+.cheat-pill { display: inline-block; padding: 0.25rem 0.6rem; border-radius: var(--r-lg); font-size: 0.72rem; font-weight: 600; }
+.cheat-pill-on { background: var(--bg-3); color: var(--success-strong); border: 1px solid var(--success-border); }
+.cheat-pill-off { background: var(--bg-3); color: var(--fg-muted); border: 1px solid var(--border); }
+.cheat-list { list-style: none; padding: 0; margin: 0; }
+.cheat-item { display: flex; align-items: center; gap: 0.6rem; padding: 0.6rem 0; border-bottom: 1px solid var(--border-subtle); }
+.cheat-info { flex: 1; min-width: 0; }
+.cheat-name { font-size: 0.85rem; font-weight: 600; color: var(--fg); }
+.cheat-type { display: inline-block; margin-left: 0.4rem; padding: 0.05rem 0.3rem; font-size: 0.65rem; font-weight: 600; color: var(--fg-muted); background: var(--bg-3); border-radius: var(--r-sm); font-family: var(--font-display); }
+.cheat-desc { font-size: 0.72rem; color: var(--fg-dim); margin-top: 0.15rem; }
+.cheat-trigger-btn { background: var(--accent); color: var(--bg-panel); border: none; padding: 0.4rem 0.8rem; border-radius: var(--r); font-family: var(--font-display); font-size: 0.72rem; font-weight: 700; text-transform: var(--display-transform); letter-spacing: var(--display-tracking); cursor: pointer; transition: opacity var(--t-fast); flex-shrink: 0; }
+.cheat-trigger-btn:hover:not(:disabled) { opacity: 0.85; }
+.cheat-trigger-btn:disabled { opacity: 0.35; cursor: not-allowed; }
