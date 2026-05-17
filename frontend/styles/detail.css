@@ -77,3 +77,12 @@
 .cheat-trigger-btn { background: var(--accent); color: var(--bg-panel); border: none; padding: 0.4rem 0.8rem; border-radius: var(--r); font-family: var(--font-display); font-size: 0.72rem; font-weight: 700; text-transform: var(--display-transform); letter-spacing: var(--display-tracking); cursor: pointer; transition: opacity var(--t-fast); flex-shrink: 0; }
 .cheat-trigger-btn:hover:not(:disabled) { opacity: 0.85; }
 .cheat-trigger-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+.cheat-switch { position: relative; display: inline-block; width: 36px; height: 20px; flex-shrink: 0; }
+.cheat-switch input { opacity: 0; width: 0; height: 0; }
+.cheat-switch-slider { position: absolute; inset: 0; background: var(--bg-3); border: 1px solid var(--border); border-radius: 999px; transition: background var(--t-fast), border-color var(--t-fast); cursor: pointer; }
+.cheat-switch-slider::before { content: ""; position: absolute; height: 14px; width: 14px; left: 2px; top: 2px; background: var(--fg-muted); border-radius: 50%; transition: transform var(--t-fast), background var(--t-fast); }
+.cheat-switch input:checked + .cheat-switch-slider { background: var(--accent); border-color: var(--accent); }
+.cheat-switch input:checked + .cheat-switch-slider::before { transform: translateX(16px); background: var(--bg-panel); }
+.cheat-switch input:disabled + .cheat-switch-slider { opacity: 0.35; cursor: not-allowed; }
+.cheat-switch input:disabled + .cheat-switch-slider::before { cursor: not-allowed; }

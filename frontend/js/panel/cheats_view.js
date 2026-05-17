@@ -25,6 +25,15 @@ export async function loadCheats(gameId) {
       return;
     }
 
+    const freezeIds = list.filter(c => c.action_kind === "Freeze").map(c => c.id);
+    const freezeStates = await Promise.all(
+      freezeIds.map(id =>
+        invoke("cheat_freeze_status", { appId: gameId, cheatId: id }).catch(() => false)
+      )
+    );
+    if (state.panelGameId !== gameId) return;
+    const frozen = new Map(freezeIds.map((id, i) => [id, freezeStates[i]]));
+
     const pillCls = status.process_running ? "cheat-pill-on" : "cheat-pill-off";
     const pillTxt = status.process_running ? "\u{1F7E2} Game running" : "\u{1F534} Game not running";
     let html = `<div class="cheat-status-bar"><span class="cheat-pill ${pillCls}">${pillTxt}</span></div>`;
@@ -32,13 +41,16 @@ export async function loadCheats(gameId) {
     for (const c of list) {
       const desc = c.description ? `<div class="cheat-desc">${esc(c.description)}</div>` : "";
       const dis = status.process_running ? "" : "disabled";
+      const control = c.action_kind === "Freeze"
+        ? renderFreezeSwitch(c.id, frozen.get(c.id) === true, dis)
+        : renderTriggerButton(c.id, dis);
       html +=
         `<li class="cheat-item">` +
           `<div class="cheat-info">` +
             `<div class="cheat-name">${esc(c.name)} <span class="cheat-type">${esc(c.value_type)}</span></div>` +
             desc +
           `</div>` +
-          `<button class="cheat-trigger-btn" data-cheat-id="${esc(c.id)}" ${dis}>Trigger</button>` +
+          control +
         `</li>`;
     }
     html += `</ul>`;
@@ -47,10 +59,27 @@ export async function loadCheats(gameId) {
     panel.querySelectorAll(".cheat-trigger-btn").forEach(btn => {
       btn.addEventListener("click", () => triggerCheat(gameId, btn.dataset.cheatId, btn));
     });
+    panel.querySelectorAll(".cheat-switch input").forEach(input => {
+      input.addEventListener("change", () => toggleFreeze(gameId, input.dataset.cheatId, input));
+    });
   } catch (e) {
     if (state.panelGameId !== gameId) return;
     panel.innerHTML = `<div class="ach-empty">Error al cargar cheats: ${esc(String(e))}</div>`;
   }
+}
+
+function renderTriggerButton(cheatId, dis) {
+  return `<button class="cheat-trigger-btn" data-cheat-id="${esc(cheatId)}" ${dis}>Trigger</button>`;
+}
+
+function renderFreezeSwitch(cheatId, checked, dis) {
+  const ch = checked ? "checked" : "";
+  return (
+    `<label class="cheat-switch" title="Freeze">` +
+      `<input type="checkbox" data-cheat-id="${esc(cheatId)}" ${ch} ${dis}>` +
+      `<span class="cheat-switch-slider"></span>` +
+    `</label>`
+  );
 }
 
 async function triggerCheat(gameId, cheatId, btn) {
@@ -72,5 +101,24 @@ async function triggerCheat(gameId, cheatId, btn) {
       btn.disabled = false;
       btn.removeAttribute("title");
     }, 2500);
+  }
+}
+
+async function toggleFreeze(gameId, cheatId, input) {
+  const desired = input.checked;
+  input.disabled = true;
+  try {
+    const actual = await invoke("cheat_freeze_toggle", {
+      appId: gameId,
+      cheatId,
+      enabled: desired,
+    });
+    input.checked = actual === true;
+  } catch (e) {
+    input.checked = !desired;
+    input.title = String(e);
+    setTimeout(() => input.removeAttribute("title"), 2500);
+  } finally {
+    input.disabled = false;
   }
 }
