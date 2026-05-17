@@ -79,20 +79,16 @@ pub fn parse_modules(pid: i32) -> Result<HashMap<String, ModuleRange>, AttachErr
     Ok(by_basename)
 }
 
+// Match only against cmdline[0] — the binary being executed. Matching any arg
+// breaks under Proton/Wine: reaper, srt-bwrap, pv-adverb and the python proton
+// wrapper all carry the target .exe path in their args, but writing to their
+// address spaces fails (the real game lives in a separate Wine process whose
+// cmdline[0] is the Z:\...\target.exe path that Wine sets as argv[0]).
 fn process_matches(proc: &Process, pattern: &str) -> bool {
-    if let Ok(cmdline) = proc.cmdline() {
-        if cmdline.iter().any(|arg| arg.contains(pattern)) {
-            return true;
-        }
-    }
-
-    if let Ok(exe) = proc.exe() {
-        if exe.to_string_lossy().contains(pattern) {
-            return true;
-        }
-    }
-
-    false
+    let Ok(cmdline) = proc.cmdline() else {
+        return false;
+    };
+    cmdline.first().is_some_and(|first| first.contains(pattern))
 }
 
 #[cfg(test)]
