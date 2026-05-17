@@ -40,6 +40,9 @@ pub fn run() {
             commands::collection_cmd::import_completed_from_collection,
             commands::disk_cmd::scan_sizes,
             commands::misc_cmd::detect_steam_id,
+            commands::cheat_cmd::cheat_list,
+            commands::cheat_cmd::cheat_trigger,
+            commands::cheat_cmd::cheat_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
