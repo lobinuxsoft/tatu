@@ -64,6 +64,10 @@
 .badge-level { font-size: 0.6rem; color: var(--accent); }
 .badge-xp { font-size: 0.58rem; color: var(--fg-dim); }
 .badge-unlocked-info { font-size: 0.72rem; color: var(--fg-dim); margin-top: 0.3rem; }
+.cheat-search-bar { margin-bottom: 0.8rem; }
+.cheat-search-btn { background: var(--bg-3); color: var(--fg); border: 1px solid var(--border); padding: 0.4rem 0.8rem; border-radius: var(--r); font-family: var(--font-display); font-size: 0.72rem; font-weight: 700; text-transform: var(--display-transform); letter-spacing: var(--display-tracking); cursor: pointer; transition: background var(--t-fast), border-color var(--t-fast); }
+.cheat-search-btn:hover:not(:disabled) { background: var(--bg-2); border-color: var(--accent); }
+.cheat-search-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .cheat-status-bar { margin-bottom: 0.8rem; }
 .cheat-pill { display: inline-block; padding: 0.25rem 0.6rem; border-radius: var(--r-lg); font-size: 0.72rem; font-weight: 600; }
 .cheat-pill-on { background: var(--bg-3); color: var(--success-strong); border: 1px solid var(--success-border); }

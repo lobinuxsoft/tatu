@@ -15,6 +15,7 @@ regex = "1"
 steam-vdf-parser = "0.1.1"
 cheat-core = { path = "../crates/cheat-core" }
 ce-launcher = { path = "../crates/ce-launcher" }
+urlencoding = "2"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
