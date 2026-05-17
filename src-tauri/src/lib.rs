@@ -10,6 +10,7 @@ mod steam;
 
 use std::sync::Mutex;
 
+use cheat_core::freeze::FreezeRegistry;
 use state::AppState;
 
 pub type SharedState = Mutex<AppState>;
@@ -20,6 +21,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(Mutex::new(app_state))
+        .manage(FreezeRegistry::new())
         .invoke_handler(tauri::generate_handler![
             commands::state_cmd::get_state,
             commands::state_cmd::get_settings,
@@ -43,6 +45,8 @@ pub fn run() {
             commands::cheat_cmd::cheat_list,
             commands::cheat_cmd::cheat_trigger,
             commands::cheat_cmd::cheat_status,
+            commands::cheat_cmd::cheat_freeze_toggle,
+            commands::cheat_cmd::cheat_freeze_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

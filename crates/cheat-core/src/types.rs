@@ -114,6 +114,21 @@ impl CheatValue {
             Self::U64(_) | Self::I64(_) | Self::F64(_) => 8,
         }
     }
+
+    pub fn type_name(&self) -> &'static str {
+        match self {
+            Self::U8(_) => "u8",
+            Self::U16(_) => "u16",
+            Self::U32(_) => "u32",
+            Self::U64(_) => "u64",
+            Self::I8(_) => "i8",
+            Self::I16(_) => "i16",
+            Self::I32(_) => "i32",
+            Self::I64(_) => "i64",
+            Self::F32(_) => "f32",
+            Self::F64(_) => "f64",
+        }
+    }
 }
 
 fn deserialize_hex_or_dec<'de, D>(deserializer: D) -> Result<u64, D::Error>
