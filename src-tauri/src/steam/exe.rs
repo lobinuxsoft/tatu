@@ -45,10 +45,7 @@ pub fn detect_game_exe(app_id: &str) -> Result<String, String> {
     let install_path = find_install_path(&steam, app_id)?;
     let exes = enumerate_exes(&install_path, 2);
     if exes.is_empty() {
-        return Err(format!(
-            "no .exe files under {}",
-            install_path.display()
-        ));
+        return Err(format!("no .exe files under {}", install_path.display()));
     }
     let chosen = pick_main_exe(&exes).ok_or_else(|| {
         format!(
@@ -94,10 +91,12 @@ fn cache_detection(app_id: &str, exe_name: &str) -> std::io::Result<()> {
 }
 
 fn find_install_path(steam_dir: &Path, app_id: &str) -> Result<PathBuf, String> {
-    let libraries = library_paths(steam_dir)
-        .map_err(|e| format!("could not read library list: {e}"))?;
+    let libraries =
+        library_paths(steam_dir).map_err(|e| format!("could not read library list: {e}"))?;
     for lib in libraries {
-        let manifest = lib.join("steamapps").join(format!("appmanifest_{app_id}.acf"));
+        let manifest = lib
+            .join("steamapps")
+            .join(format!("appmanifest_{app_id}.acf"));
         let Ok(text) = fs::read_to_string(&manifest) else {
             continue;
         };
@@ -109,13 +108,15 @@ fn find_install_path(steam_dir: &Path, app_id: &str) -> Result<PathBuf, String> 
             return Ok(game_dir);
         }
     }
-    Err(format!("appmanifest_{app_id}.acf not found in any Steam library"))
+    Err(format!(
+        "appmanifest_{app_id}.acf not found in any Steam library"
+    ))
 }
 
 fn library_paths(steam_dir: &Path) -> Result<Vec<PathBuf>, String> {
     let vdf = steam_dir.join("steamapps").join("libraryfolders.vdf");
-    let content = fs::read_to_string(&vdf)
-        .map_err(|e| format!("cannot read {}: {e}", vdf.display()))?;
+    let content =
+        fs::read_to_string(&vdf).map_err(|e| format!("cannot read {}: {e}", vdf.display()))?;
     Ok(parse_library_paths(&content)
         .into_iter()
         .map(PathBuf::from)
@@ -161,10 +162,7 @@ fn walk_collect(dir: &Path, depth: usize, max_depth: usize, out: &mut Vec<(PathB
 }
 
 fn pick_main_exe(exes: &[(PathBuf, u64)]) -> Option<String> {
-    let filtered: Vec<&(PathBuf, u64)> = exes
-        .iter()
-        .filter(|(p, _)| !is_non_game_exe(p))
-        .collect();
+    let filtered: Vec<&(PathBuf, u64)> = exes.iter().filter(|(p, _)| !is_non_game_exe(p)).collect();
     let pool = if filtered.is_empty() {
         exes.iter().collect::<Vec<_>>()
     } else {
@@ -280,10 +278,7 @@ mod tests {
             (PathBuf::from("/g/UnityCrashHandler64.exe"), 5_000_000),
             (PathBuf::from("/g/vc_redist.x64.exe"), 25_000_000),
         ];
-        assert_eq!(
-            pick_main_exe(&exes),
-            Some("vc_redist.x64.exe".to_string())
-        );
+        assert_eq!(pick_main_exe(&exes), Some("vc_redist.x64.exe".to_string()));
     }
 
     #[test]
@@ -297,11 +292,7 @@ mod tests {
         let root = tmp.path();
         fs::write(root.join("Game.exe"), vec![0u8; 1024]).unwrap();
         fs::create_dir_all(root.join("Engine/Binaries/Win64")).unwrap();
-        fs::write(
-            root.join("Engine/Binaries/Win64/Deep.exe"),
-            vec![0u8; 128],
-        )
-        .unwrap();
+        fs::write(root.join("Engine/Binaries/Win64/Deep.exe"), vec![0u8; 128]).unwrap();
         fs::create_dir_all(root.join("Tools")).unwrap();
         fs::write(root.join("Tools/Helper.exe"), vec![0u8; 256]).unwrap();
 

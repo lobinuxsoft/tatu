@@ -85,8 +85,7 @@ pub fn open_for_game(
         return Err(LaunchError::TableNotFound(table_src));
     }
 
-    let binary =
-        binary_path().map_err(|e| LaunchError::CeNotInstalled(e.to_string()))?;
+    let binary = binary_path().map_err(|e| LaunchError::CeNotInstalled(e.to_string()))?;
     if !binary.is_file() {
         return Err(LaunchError::CeNotInstalled(format!(
             "binary not found at {}",

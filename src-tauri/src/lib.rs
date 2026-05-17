@@ -49,6 +49,8 @@ pub fn run() {
             commands::cheat_cmd::cheat_freeze_status,
             commands::ce_cmd::ce_install_status,
             commands::ce_cmd::ce_install_trigger,
+            commands::ce_cmd::ce_list_tables_for_game,
+            commands::ce_cmd::ce_open_for_game,
             commands::cheat_search_cmd::open_fearless_search,
         ])
         .run(tauri::generate_context!())
