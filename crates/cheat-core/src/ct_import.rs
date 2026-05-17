@@ -80,6 +80,7 @@ fn parse_cheat_entry<R: std::io::BufRead>(
     let mut variable_type: Option<String> = None;
     let mut address: Option<String> = None;
     let mut offsets: Vec<u64> = Vec::new();
+    let mut symbolic_offset: Option<String> = None;
     let mut is_script = false;
     let mut nested: Vec<ImportedEntry> = Vec::new();
     let mut buf = Vec::new();
@@ -91,7 +92,10 @@ fn parse_cheat_entry<R: std::io::BufRead>(
                 b"Description" => description = Some(strip_quotes(&read_text(reader)?)),
                 b"VariableType" => variable_type = Some(read_text(reader)?),
                 b"Address" => address = Some(read_text(reader)?),
-                b"Offsets" => offsets = parse_offsets(reader)?,
+                b"Offsets" => match parse_offsets(reader)? {
+                    Ok(v) => offsets = v,
+                    Err(sym) => symbolic_offset = Some(sym),
+                },
                 b"AssemblerScript" => {
                     is_script = true;
                     skip_to_end(reader, b"AssemblerScript")?;
@@ -142,6 +146,15 @@ fn parse_cheat_entry<R: std::io::BufRead>(
         }));
     };
 
+    if let Some(sym) = symbolic_offset {
+        return Ok(Some(ImportedEntry::Skipped {
+            description: desc,
+            reason: SkipReason::SymbolicAddress(format!(
+                "{addr_str} (offset chain contains '{sym}')"
+            )),
+        }));
+    }
+
     let Some(vtype) = variable_type else {
         return Ok(Some(ImportedEntry::Skipped {
             description: desc,
@@ -183,15 +196,30 @@ fn parse_cheat_entry<R: std::io::BufRead>(
     })))
 }
 
-fn parse_offsets<R: std::io::BufRead>(reader: &mut Reader<R>) -> Result<Vec<u64>, CtImportError> {
+/// Parse a `<Offsets>` element. Returns either the list of u64 offsets,
+/// or the raw text of the first non-numeric offset encountered — those
+/// happen when the CT uses CE script expressions like `[symbol]-4` and
+/// signal that the entry can't be imported without running the parent
+/// AOB script.
+fn parse_offsets<R: std::io::BufRead>(
+    reader: &mut Reader<R>,
+) -> Result<Result<Vec<u64>, String>, CtImportError> {
     let mut out = Vec::new();
+    let mut symbolic_offset: Option<String> = None;
     let mut buf = Vec::new();
     loop {
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(e)) if e.name().as_ref() == b"Offset" => {
                 let text = read_text(reader)?;
-                let parsed = parse_hex_loose(&text)?;
-                out.push(parsed);
+                match parse_hex_loose(&text) {
+                    Ok(v) if symbolic_offset.is_none() => out.push(v),
+                    Ok(_) => {} // already symbolic, keep draining
+                    Err(_) => {
+                        if symbolic_offset.is_none() {
+                            symbolic_offset = Some(text);
+                        }
+                    }
+                }
             }
             Ok(Event::End(e)) if e.name().as_ref() == b"Offsets" => break,
             Ok(Event::Eof) => break,
@@ -205,7 +233,10 @@ fn parse_offsets<R: std::io::BufRead>(reader: &mut Reader<R>) -> Result<Vec<u64>
         }
         buf.clear();
     }
-    Ok(out)
+    Ok(match symbolic_offset {
+        Some(s) => Err(s),
+        None => Ok(out),
+    })
 }
 
 fn read_text<R: std::io::BufRead>(reader: &mut Reader<R>) -> Result<String, CtImportError> {
@@ -282,6 +313,13 @@ fn cheat_value_for_type(vtype: &str) -> Option<CheatValue> {
 fn parse_address_spec(addr: &str, offsets: &[u64]) -> Result<AddressSpec, CtImportError> {
     let trimmed = addr.trim();
 
+    // Any '[...]' or arithmetic on a symbol is CE script-expression
+    // territory (e.g. "[i_base_exp_off]-4"). We can't resolve those
+    // without running the parent AOB script.
+    if trimmed.contains('[') || trimmed.contains(']') || trimmed.contains('-') {
+        return Err(CtImportError::UnsupportedAddressForm(trimmed.to_string()));
+    }
+
     if let Some(plus_idx) = trimmed.find('+') {
         let module = trimmed[..plus_idx].trim();
         let offset_str = trimmed[plus_idx + 1..].trim();
@@ -289,7 +327,9 @@ fn parse_address_spec(addr: &str, offsets: &[u64]) -> Result<AddressSpec, CtImpo
             // "+12C" — child-offset-only entry, not standalone resolvable.
             return Err(CtImportError::UnsupportedAddressForm(trimmed.to_string()));
         }
-        let offset = parse_hex_loose(offset_str)?;
+        let Ok(offset) = parse_hex_loose(offset_str) else {
+            return Err(CtImportError::UnsupportedAddressForm(trimmed.to_string()));
+        };
         return Ok(if offsets.is_empty() {
             AddressSpec::Static {
                 module: module.to_string(),
@@ -305,13 +345,13 @@ fn parse_address_spec(addr: &str, offsets: &[u64]) -> Result<AddressSpec, CtImpo
     }
 
     if let Ok(addr_u64) = parse_hex_loose(trimmed) {
-        return Ok(if offsets.is_empty() {
-            AddressSpec::Absolute { address: addr_u64 }
+        return if offsets.is_empty() {
+            Ok(AddressSpec::Absolute { address: addr_u64 })
         } else {
-            return Err(CtImportError::UnsupportedAddressForm(format!(
+            Err(CtImportError::UnsupportedAddressForm(format!(
                 "{trimmed} (absolute address with pointer offsets — needs a module base for portability)"
-            )));
-        });
+            )))
+        };
     }
 
     Err(CtImportError::UnsupportedAddressForm(trimmed.to_string()))
