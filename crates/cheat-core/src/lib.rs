@@ -1,5 +1,6 @@
 pub mod attach;
 pub mod db;
+pub mod freeze;
 pub mod memory;
 pub mod resolve;
 pub mod types;
