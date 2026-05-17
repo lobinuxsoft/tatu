@@ -1,3 +1,4 @@
+pub mod cheat_cmd;
 pub mod collection_cmd;
 pub mod detail_cmd;
 pub mod disk_cmd;
