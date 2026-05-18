@@ -1,0 +1,22 @@
+[package]
+name = "cheat-runtime-extension"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "In-process extension loaded into the target via dlopen by `cheat-runtime::inject`. Exposes IPC (Unix socket) for speedhack / in-process alloc / state-store commands."
+
+[lib]
+# cdylib so it can be dlopen'd into the target process. rlib keeps the
+# protocol types reachable as a normal Rust dep from `cheat-runtime` (host
+# side) without rebuilding them.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+bincode = { version = "2", features = ["serde"] }
+ctor = "0.5"
+libc = "0.2"
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+
+[dev-dependencies]
+tempfile = "3"

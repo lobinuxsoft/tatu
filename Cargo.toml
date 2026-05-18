@@ -3,5 +3,6 @@ resolver = "3"
 members = [
     "src-tauri",
     "crates/cheat-runtime",
+    "crates/cheat-runtime-extension",
     "crates/ce-launcher",
 ]
