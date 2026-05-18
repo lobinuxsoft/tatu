@@ -167,7 +167,7 @@ impl Engine {
                 }
                 Statement::Raw(line) => {
                     if let Some(c) = cursor.as_mut() {
-                        let len = estimate_raw_length(line).ok_or_else(|| {
+                        let len = estimate_raw_length(line, &self.symbols).ok_or_else(|| {
                             ExecError::Unsupported(format!(
                                 "cannot estimate length for pass 1: {line:?}"
                             ))
@@ -355,23 +355,32 @@ fn compile_raw(
     {
         return readmem_bytes(args, symbols, pid);
     }
-    if let Some(bytes) = asm::compile_line(trimmed, symbols, base)? {
-        return Ok(bytes);
+    // Flatten `AsmError::Unsupported` (a known-mnemonic-but-unsupported-form
+    // signal, e.g. `mov dword ptr [r13+13C], (float)100` until Phase B v2.2)
+    // into the executor's own Unsupported variant so callers / tests only
+    // need to match one shape regardless of which layer rejected the line.
+    match asm::compile_line(trimmed, symbols, base) {
+        Ok(Some(bytes)) => Ok(bytes),
+        Ok(None) => Err(ExecError::Unsupported(format!(
+            "asm/raw not supported: {line:?}"
+        ))),
+        Err(asm::AsmError::Unsupported(detail)) => Err(ExecError::Unsupported(detail)),
+        Err(e) => Err(ExecError::Asm(e)),
     }
-    Err(ExecError::Unsupported(format!(
-        "asm/raw not supported: {line:?}"
-    )))
 }
 
 /// Predict the byte length a `Statement::Raw` line will produce in pass 2.
 ///
 /// Used by [`Engine::pre_resolve_symbols`] to advance the virtual cursor
-/// without resolving symbols. The estimator is intentionally restricted to
-/// length-stable encodings — `jmp`/`call` always assemble as 5 bytes
-/// (rel32) in Phase B v1, `ret` as 1, `nop N` as N, `readmem(s, N)` as N,
-/// `dq` as 8, `db` as the token count. Returns `None` for anything we cannot
-/// size without compiling; pass 2 will surface a clear `Unsupported` error.
-fn estimate_raw_length(line: &str) -> Option<usize> {
+/// without committing writes. Length is exact for the constant-encoding
+/// directives (`db`, `dq`, `nop N`, `readmem(s, N)`); for the asm subset
+/// covered by [`crate::asm`] the estimator delegates to a speculative
+/// compile that substitutes `0` for any still-unresolved symbol, so a
+/// forward reference like `jmp return` (where `return:` is declared later)
+/// returns the correct 5 bytes before the symbol is bound. Returns `None`
+/// for anything we cannot size; pass 2 surfaces the clear `Unsupported`
+/// error.
+fn estimate_raw_length(line: &str, symbols: &HashMap<String, u64>) -> Option<usize> {
     let trimmed = line.trim();
     if let Some(rest) = trimmed
         .strip_prefix("db ")
@@ -401,16 +410,26 @@ fn estimate_raw_length(line: &str) -> Option<usize> {
         }
         return None;
     }
-    let mnemonic = trimmed
-        .split_once(char::is_whitespace)
-        .map(|(m, _)| m)
-        .unwrap_or(trimmed)
-        .to_ascii_lowercase();
-    match mnemonic.as_str() {
-        "jmp" | "call" => Some(5),
-        "ret" | "retn" => Some(1),
-        _ => None,
+
+    // Asm line: speculatively compile. Unresolved symbols (forward refs)
+    // get a temporary placeholder address. We use `0x10000` (not zero) so
+    // iced-x86 does not pick a short-form `rel8` encoding for a `jmp 0`
+    // self-loop — pass 2's real address will be a far page-aligned vaddr,
+    // which always wants `rel32`. Choosing the placeholder to match the
+    // real form is what keeps pass-1 length predictions accurate.
+    const FAR_PLACEHOLDER: u64 = 0x10000;
+    let mut perm = symbols.clone();
+    for _ in 0..16 {
+        match asm::compile_line(trimmed, &perm, 0) {
+            Ok(Some(bytes)) => return Some(bytes.len()),
+            Ok(None) => return None,
+            Err(asm::AsmError::UnknownSymbol(name)) => {
+                perm.insert(name, FAR_PLACEHOLDER);
+            }
+            Err(_) => return None,
+        }
     }
+    None
 }
 
 fn parse_numeric_token(token: &str) -> Option<u64> {
@@ -600,10 +619,11 @@ mod tests {
     fn compile_raw_rejects_unsupported_asm() {
         let syms = HashMap::new();
         let pid = Pid::this();
-        // `mov` / `push` aren't covered by Phase B v1; they should still
-        // fall through to Unsupported until Phase B v2 broadens coverage.
+        // Memory-operand mnemonics (`cmp [mem]`, `mov [mem]`, `lea`, etc.)
+        // are not covered by Phase B v2.1 — they ship in v2.2 alongside the
+        // memory-operand parser. They must still fall through to Unsupported.
         assert!(matches!(
-            compile_raw("push ebx", &syms, pid, 0),
+            compile_raw("cmp byte ptr [foo], 1", &syms, pid, 0),
             Err(ExecError::Unsupported(_))
         ));
         assert!(matches!(
@@ -694,11 +714,12 @@ mod tests {
         let target_addr = victim.as_ptr() as u64 + 8;
 
         // First write zeros, then trigger an Unsupported asm line — must rollback.
+        // `cmp [mem]` is Phase B v2.2 territory and still surfaces Unsupported.
         let script_src = "[ENABLE]\n\
              registersymbol(victim)\n\
              victim:\n\
              db 00 00 00 00 00 00 00 00\n\
-             push ebx\n\
+             cmp byte ptr [foo], 1\n\
              [DISABLE]\n";
         let script = parse(script_src).unwrap();
 
@@ -713,18 +734,24 @@ mod tests {
 
     #[test]
     fn estimate_raw_length_covers_db_dq_nop_readmem_and_asm() {
-        assert_eq!(estimate_raw_length("db 90 90 90"), Some(3));
-        assert_eq!(estimate_raw_length("dq 0"), Some(8));
-        assert_eq!(estimate_raw_length("nop 5"), Some(5));
-        assert_eq!(estimate_raw_length("nop"), Some(1));
-        assert_eq!(estimate_raw_length("readmem(orig, 8)"), Some(8));
-        assert_eq!(estimate_raw_length("jmp codecave"), Some(5));
-        assert_eq!(estimate_raw_length("call helper"), Some(5));
-        assert_eq!(estimate_raw_length("ret"), Some(1));
-        // Phase B v2 mnemonics return None — pass 1 will surface a clear
-        // Unsupported error if the script uses them.
-        assert_eq!(estimate_raw_length("mov rax, 1"), None);
-        assert_eq!(estimate_raw_length("push ebx"), None);
+        let empty: HashMap<String, u64> = HashMap::new();
+        assert_eq!(estimate_raw_length("db 90 90 90", &empty), Some(3));
+        assert_eq!(estimate_raw_length("dq 0", &empty), Some(8));
+        assert_eq!(estimate_raw_length("nop 5", &empty), Some(5));
+        assert_eq!(estimate_raw_length("nop", &empty), Some(1));
+        assert_eq!(estimate_raw_length("readmem(orig, 8)", &empty), Some(8));
+        assert_eq!(estimate_raw_length("jmp codecave", &empty), Some(5));
+        assert_eq!(estimate_raw_length("call helper", &empty), Some(5));
+        assert_eq!(estimate_raw_length("ret", &empty), Some(1));
+        // Phase B v2.1 mnemonics — now sized exactly via speculative compile.
+        assert_eq!(estimate_raw_length("push ebx", &empty), Some(1));
+        assert_eq!(estimate_raw_length("push r13d", &empty), Some(2));
+        assert_eq!(estimate_raw_length("pop rax", &empty), Some(1));
+        assert_eq!(estimate_raw_length("mov rax, rbx", &empty), Some(3));
+        assert_eq!(estimate_raw_length("mov eax, 1", &empty), Some(5));
+        assert_eq!(estimate_raw_length("jne target", &empty), Some(6));
+        // Phase B v2.2 mnemonics (memory operands) still fall through.
+        assert_eq!(estimate_raw_length("cmp byte ptr [foo], 1", &empty), None);
     }
 
     /// Pass 1 must bind a forward `LabelSite` to the cursor it computes from
