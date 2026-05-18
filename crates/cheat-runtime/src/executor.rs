@@ -619,15 +619,14 @@ mod tests {
     fn compile_raw_rejects_unsupported_asm() {
         let syms = HashMap::new();
         let pid = Pid::this();
-        // Memory-operand mnemonics (`cmp [mem]`, `mov [mem]`, `lea`, etc.)
-        // are not covered by Phase B v2.1 — they ship in v2.2 alongside the
-        // memory-operand parser. They must still fall through to Unsupported.
+        // `lea` is still Phase B v2.3 territory — must surface Unsupported.
+        // `add` / `sub` / `xor` likewise have no encoder yet.
         assert!(matches!(
-            compile_raw("cmp byte ptr [foo], 1", &syms, pid, 0),
+            compile_raw("lea rax, [rbx+8]", &syms, pid, 0),
             Err(ExecError::Unsupported(_))
         ));
         assert!(matches!(
-            compile_raw("mov dword ptr [r13+13C],(float)100", &syms, pid, 0),
+            compile_raw("xor rax, rax", &syms, pid, 0),
             Err(ExecError::Unsupported(_))
         ));
     }
@@ -714,12 +713,12 @@ mod tests {
         let target_addr = victim.as_ptr() as u64 + 8;
 
         // First write zeros, then trigger an Unsupported asm line — must rollback.
-        // `cmp [mem]` is Phase B v2.2 territory and still surfaces Unsupported.
+        // `lea` is still Phase B v2.3 territory and surfaces Unsupported.
         let script_src = "[ENABLE]\n\
              registersymbol(victim)\n\
              victim:\n\
              db 00 00 00 00 00 00 00 00\n\
-             cmp byte ptr [foo], 1\n\
+             lea rax, [rbx+8]\n\
              [DISABLE]\n";
         let script = parse(script_src).unwrap();
 
@@ -750,8 +749,16 @@ mod tests {
         assert_eq!(estimate_raw_length("mov rax, rbx", &empty), Some(3));
         assert_eq!(estimate_raw_length("mov eax, 1", &empty), Some(5));
         assert_eq!(estimate_raw_length("jne target", &empty), Some(6));
-        // Phase B v2.2 mnemonics (memory operands) still fall through.
-        assert_eq!(estimate_raw_length("cmp byte ptr [foo], 1", &empty), None);
+        // Phase B v2.2: memory operands estimate via speculative compile.
+        // `cmp byte ptr [foo], 1` resolves `foo` to the placeholder and
+        // produces an 8-byte encoding (iced picks `cmp r/m8, imm8` with a
+        // SIB-less disp32 and explicit 64-bit absolute via the placeholder).
+        assert_eq!(
+            estimate_raw_length("cmp byte ptr [foo], 1", &empty),
+            Some(8)
+        );
+        // `lea` is still Phase B v2.3 territory — falls through to None.
+        assert_eq!(estimate_raw_length("lea rax, [rbx+8]", &empty), None);
     }
 
     /// Pass 1 must bind a forward `LabelSite` to the cursor it computes from
