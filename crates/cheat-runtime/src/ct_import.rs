@@ -129,6 +129,9 @@ fn entry_to_feature(entry: roxmltree::Node, stem: &str) -> Option<ManifestFeatur
     let uuid = format!("ct-{stem}-{id}");
 
     if child_text(entry, "GroupHeader").is_some_and(|v| v.trim() == "1") {
+        if !is_meaningful_header(&description) {
+            return None;
+        }
         return Some(ManifestFeature {
             uuid,
             name: description,
@@ -161,6 +164,35 @@ fn entry_to_feature(entry: roxmltree::Node, stem: &str) -> Option<ManifestFeatur
 fn child_text(node: roxmltree::Node, tag: &str) -> Option<String> {
     let child = node.children().find(|c| c.has_tag_name(tag))?;
     Some(child.text().unwrap_or("").trim().to_string())
+}
+
+/// Drop CE `<GroupHeader>` entries that are pure visual ornament: ASCII
+/// separators (`---------`), runic dividers (`◣⫘⫘⫘…◢`), info notes prefixed
+/// with `❖`, and clarifications wrapped in `《…》`. Cheat-table authors use
+/// `<GroupHeader>1</GroupHeader>` for *any* description-only entry — CE
+/// itself renders them all uniformly, but a tracker UI listing 108 of them
+/// between 5 actual cheats hides the cheats. Concrete rule:
+///
+/// - reject if the description starts with `❖`, contains a matched `《…》`
+///   info-note wrapper, or starts with `❎`/`⚠` UI guidance markers,
+/// - reject if it contains no Unicode letters at all (separators),
+/// - keep everything else, including the common `【 Title 】` section-header
+///   shape used by this author.
+fn is_meaningful_header(description: &str) -> bool {
+    let trimmed = description.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    if trimmed.starts_with('❖') {
+        return false;
+    }
+    if trimmed.contains('《') && trimmed.contains('》') {
+        return false;
+    }
+    if !trimmed.chars().any(char::is_alphabetic) {
+        return false;
+    }
+    true
 }
 
 /// Strip a single pair of surrounding straight ASCII quotes that CE wraps
@@ -501,6 +533,29 @@ aobscanmodule(INJECT,Game.exe,90 90 90)
         assert_eq!(manifest.features[0].name, "=== Outer ===");
         assert_eq!(manifest.features[1].kind, FeatureKind::Toggle);
         assert_eq!(manifest.features[1].name, "Inner Cheat");
+    }
+
+    #[test]
+    fn is_meaningful_header_filters_ornament_but_keeps_real_sections() {
+        // Section headers stay.
+        assert!(is_meaningful_header("【 Player Stats 】"));
+        assert!(is_meaningful_header("Equipment"));
+        assert!(is_meaningful_header("【X】👈〖 All Relics 〗"));
+        // Pure separators with no letters: drop.
+        assert!(!is_meaningful_header("◣⫘⫘⫘⫘⫘⫘⫘⫘⫘⫘⫘​⫘⫘◢"));
+        assert!(!is_meaningful_header(
+            "----------------------------------------"
+        ));
+        // Info-note wrapper 《…》: drop.
+        assert!(!is_meaningful_header(
+            "《 freeze with 'Invincibility' script 》"
+        ));
+        // ❖-prefixed instructional bullet: drop.
+        assert!(!is_meaningful_header("❖ select an attire from the list"));
+        assert!(!is_meaningful_header(" ❖ trailing whitespace tolerated"));
+        // Empty: drop.
+        assert!(!is_meaningful_header(""));
+        assert!(!is_meaningful_header("   "));
     }
 
     #[test]
