@@ -148,8 +148,16 @@ pub fn scan_in_process(
         } else {
             SCAN_CHUNK_SIZE + overlap
         };
-        let chunk = memory::read_bytes(pid, region.start + chunk_start as u64, read_len)?;
-        let keep_until = if is_last {
+        // Use the permissive read: a region listed `r` in /proc/<pid>/maps
+        // can still span an unmapped sub-page (kernel quirks, lazy
+        // mappings). `process_vm_readv` returns the prefix it could
+        // deliver and we keep scanning that prefix — CE's
+        // `ceserver/api.c` ignores short-read returns the same way.
+        let chunk = memory::read_bytes_partial(pid, region.start + chunk_start as u64, read_len)?;
+        if chunk.is_empty() {
+            break;
+        }
+        let keep_until = if is_last || chunk.len() < read_len {
             chunk.len()
         } else {
             SCAN_CHUNK_SIZE

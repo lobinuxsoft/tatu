@@ -16,6 +16,7 @@
 pub mod alloc;
 pub mod asm;
 pub mod aurora;
+pub mod ct_import;
 pub mod elfsym;
 pub mod executor;
 pub mod extension;
@@ -32,6 +33,10 @@ pub mod scanner;
 pub use alloc::{AllocError, alloc_remote, dealloc_remote};
 pub use asm::{AsmError, compile_line as compile_asm_line};
 pub use aurora::{AuroraError, Feature, Trainer, load_trainer, load_trainer_file};
+pub use ct_import::{
+    CtImportError, ImportReport, auto_import_default_dirs, auto_import_for_app, convert_ct_file,
+    import_dirs as ct_import_dirs,
+};
 pub use elfsym::{ElfSymError, find_libc_symbol, find_module_base, find_module_symbol};
 pub use executor::{ActiveCheat, Engine, ExecError};
 pub use extension::{Extension, ExtensionError};

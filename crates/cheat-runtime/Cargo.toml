@@ -18,6 +18,7 @@ goblin = { version = "0.10", default-features = false, features = ["std", "elf32
 iced-x86 = { version = "1", default-features = false, features = ["std", "decoder", "encoder", "code_asm"] }
 memchr = "2"
 nix = { version = "0.30", features = ["uio", "process", "ptrace", "signal"] }
+roxmltree = "0.20"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"

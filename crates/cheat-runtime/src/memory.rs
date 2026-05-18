@@ -11,7 +11,10 @@
 
 use std::io::{self, IoSlice, IoSliceMut};
 
+use nix::sys::ptrace::{self, AddressType};
+use nix::sys::signal::Signal;
 use nix::sys::uio::{RemoteIoVec, process_vm_readv, process_vm_writev};
+use nix::sys::wait::{WaitStatus, waitpid};
 use nix::unistd::Pid;
 
 #[derive(Debug, thiserror::Error)]
@@ -61,11 +64,46 @@ pub fn read_bytes(pid: Pid, addr: u64, len: usize) -> Result<Vec<u8>, RuntimeErr
     Ok(buf)
 }
 
+/// Read up to `len` bytes from `pid` at `addr`, returning whatever the
+/// kernel managed to transfer.
+///
+/// `process_vm_readv` can satisfy a partial request when the requested
+/// range spans into an unmapped or unreadable page. The exact-length
+/// [`read_bytes`] surfaces that as [`RuntimeError::ShortRead`]; this
+/// permissive variant truncates the buffer to the transferred size and
+/// returns it. CE's scanner does the same (`ceserver/api.c`
+/// `ReadProcessMemory` callers ignore the short-read return). Use this in
+/// bulk-scan paths where a partial chunk is still useful for pattern
+/// matching.
+pub fn read_bytes_partial(pid: Pid, addr: u64, len: usize) -> Result<Vec<u8>, RuntimeError> {
+    if len == 0 {
+        return Ok(Vec::new());
+    }
+    let mut buf = vec![0u8; len];
+    let got = {
+        let mut local = [IoSliceMut::new(&mut buf)];
+        let remote = [RemoteIoVec {
+            base: addr as usize,
+            len,
+        }];
+        process_vm_readv(pid, &mut local, &remote)?
+    };
+    buf.truncate(got);
+    Ok(buf)
+}
+
 /// Write `data` to `addr` in process `pid`.
 ///
-/// Returns [`RuntimeError::ShortWrite`] if the kernel accepted fewer bytes
-/// than provided. The target page must be writable from the target's POV;
-/// read-only `.text` pages will fail with `EFAULT` (surfaced as `Nix`).
+/// Tries the fast `process_vm_writev` path first. On `EFAULT` (typical for
+/// read-only `.text` pages — Linux refuses cross-process writev into RX
+/// mappings) falls back to ptrace `PTRACE_POKEDATA` which the kernel
+/// permits for tracer→tracee writes regardless of page perms. The ptrace
+/// fallback is ~8 bytes per syscall and requires us to briefly attach and
+/// stop the target; that matches CE's own behaviour
+/// (`ceserver/api.c::WriteProcessMemory` uses POKEDATA for code patches).
+///
+/// Returns [`RuntimeError::ShortWrite`] if neither path can transfer the
+/// full payload.
 pub fn write_bytes(pid: Pid, addr: u64, data: &[u8]) -> Result<(), RuntimeError> {
     if data.is_empty() {
         return Ok(());
@@ -75,15 +113,68 @@ pub fn write_bytes(pid: Pid, addr: u64, data: &[u8]) -> Result<(), RuntimeError>
         base: addr as usize,
         len: data.len(),
     }];
-    let got = process_vm_writev(pid, &local, &remote)?;
-    if got != data.len() {
-        return Err(RuntimeError::ShortWrite {
+    match process_vm_writev(pid, &local, &remote) {
+        Ok(got) if got == data.len() => Ok(()),
+        Ok(got) => Err(RuntimeError::ShortWrite {
             addr,
             requested: data.len(),
             got,
-        });
+        }),
+        Err(nix::errno::Errno::EFAULT) => write_bytes_ptrace(pid, addr, data),
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// Ptrace fallback for writes into read-only target pages. Attaches once,
+/// writes 8-byte words via `PTRACE_POKEDATA` (reading + masking the tail
+/// when the payload isn't 8-aligned to avoid clobbering surrounding
+/// bytes), detaches. Slow (~1μs/word) but pages-perms-agnostic.
+fn write_bytes_ptrace(pid: Pid, addr: u64, data: &[u8]) -> Result<(), RuntimeError> {
+    ptrace::attach(pid).map_err(nix::Error::from)?;
+    match waitpid(pid, None) {
+        Ok(WaitStatus::Stopped(_, Signal::SIGSTOP)) => {}
+        Ok(other) => {
+            let _ = ptrace::detach(pid, None);
+            return Err(RuntimeError::Nix(
+                other_status_to_errno(other).unwrap_or(nix::errno::Errno::ESRCH),
+            ));
+        }
+        Err(e) => {
+            let _ = ptrace::detach(pid, None);
+            return Err(RuntimeError::Nix(e));
+        }
+    }
+    let result = pokedata_chunks(pid, addr, data);
+    let _ = ptrace::detach(pid, None);
+    result
+}
+
+fn pokedata_chunks(pid: Pid, addr: u64, data: &[u8]) -> Result<(), RuntimeError> {
+    let word_size = std::mem::size_of::<usize>();
+    let mut offset = 0;
+    while offset < data.len() {
+        let word_addr = addr + offset as u64;
+        let remaining = data.len() - offset;
+        let word = if remaining >= word_size {
+            let mut bytes = [0u8; 8];
+            bytes[..word_size].copy_from_slice(&data[offset..offset + word_size]);
+            i64::from_le_bytes(bytes)
+        } else {
+            // Tail: read current word, merge new bytes into the leading
+            // positions, write back so we don't clobber adjacent code.
+            let current = ptrace::read(pid, word_addr as AddressType).map_err(nix::Error::from)?;
+            let mut bytes = current.to_le_bytes();
+            bytes[..remaining].copy_from_slice(&data[offset..]);
+            i64::from_le_bytes(bytes)
+        };
+        ptrace::write(pid, word_addr as AddressType, word).map_err(nix::Error::from)?;
+        offset += word_size.min(remaining);
     }
     Ok(())
+}
+
+fn other_status_to_errno(_status: WaitStatus) -> Option<nix::errno::Errno> {
+    None
 }
 
 #[cfg(test)]
