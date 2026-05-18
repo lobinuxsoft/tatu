@@ -109,3 +109,5 @@
 .cheat-runtime-info { flex: 1; min-width: 0; }
 .cheat-runtime-name { font-size: 0.85rem; font-weight: 600; color: var(--fg); }
 .cheat-runtime-meta { font-size: 0.65rem; color: var(--fg-dim); margin-top: 0.15rem; font-family: var(--font-display); }
+.cheat-runtime-header-row { list-style: none; padding: 0.8rem 0 0.3rem; border-bottom: 1px solid var(--border-subtle); }
+.cheat-runtime-header-text { font-family: var(--font-display); font-size: 0.7rem; font-weight: 700; text-transform: var(--display-transform); letter-spacing: var(--display-tracking); color: var(--fg-muted); }

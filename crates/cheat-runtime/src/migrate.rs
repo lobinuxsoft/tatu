@@ -214,7 +214,8 @@ fn migrate_one(
             uuid: synthetic_uuid(table.app_id, &cheat.id),
             name: cheat.name.clone(),
             category: cheat.description.clone(),
-            script: synth_script(address, &cheat.action.value().to_le_bytes()),
+            kind: crate::manifest::FeatureKind::Toggle,
+            script: Some(synth_script(address, &cheat.action.value().to_le_bytes())),
         });
     }
 
@@ -325,7 +326,11 @@ mod tests {
         assert_eq!(m.features[0].name, "Materials");
 
         // The synthesised script must parse into AbsoluteSite + a db raw line.
-        let Script { enable, .. } = parse_script(&m.features[0].script).unwrap();
+        let script_src = m.features[0]
+            .script
+            .as_deref()
+            .expect("migrated cheats are Toggle with a script");
+        let Script { enable, .. } = parse_script(script_src).unwrap();
         assert!(matches!(enable[0], Statement::AbsoluteSite(708_486_264)));
         assert!(matches!(&enable[1], Statement::Raw(line) if line.starts_with("db ")));
     }
@@ -341,7 +346,10 @@ mod tests {
         migrate_dirs(&legacy, &trainers).unwrap();
         let target = trainers.join("3357650").join("legacy.json");
         let m: Manifest = serde_json::from_str(&std::fs::read_to_string(&target).unwrap()).unwrap();
-        let script = &m.features[0].script;
+        let script = m.features[0]
+            .script
+            .as_deref()
+            .expect("migrated cheats are Toggle with a script");
         // 1600.0f32 little-endian = 00 00 C8 44
         assert!(script.contains("0xB056EC28:"));
         assert!(script.contains("db 00 00 C8 44"));

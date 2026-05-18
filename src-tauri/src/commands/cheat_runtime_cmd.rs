@@ -13,7 +13,9 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use cheat_runtime::{ActiveCheat, Engine, find_pid_by_exe, load_manifests_for, parse_script};
+use cheat_runtime::{
+    ActiveCheat, Engine, FeatureKind, find_pid_by_exe, load_manifests_for, parse_script,
+};
 use serde::Serialize;
 use tauri::State;
 
@@ -27,6 +29,7 @@ pub struct FeatureView {
     pub uuid: String,
     pub name: String,
     pub category: Option<String>,
+    pub kind: FeatureKind,
     pub active: bool,
     pub game_running: bool,
 }
@@ -55,6 +58,7 @@ pub fn cheat_runtime_list_features(
                 uuid: f.uuid,
                 name: f.name,
                 category: f.category,
+                kind: f.kind,
                 game_running,
             });
         }
@@ -112,9 +116,18 @@ fn locate_feature_script(app_id: &str, uuid: &str) -> Result<(String, String), S
     let manifests = load_manifests_for(app_id).map_err(|e| e.to_string())?;
     for m in manifests {
         for f in m.features {
-            if f.uuid == uuid {
-                return Ok((m.exe, f.script));
+            if f.uuid != uuid {
+                continue;
             }
+            return match (f.kind, f.script) {
+                (FeatureKind::Header, _) => Err(format!(
+                    "feature {uuid:?} is a Header (visual-only) — not toggleable"
+                )),
+                (FeatureKind::Toggle, Some(script)) => Ok((m.exe, script)),
+                (FeatureKind::Toggle, None) => Err(format!(
+                    "feature {uuid:?} is a Toggle but has no script — the manifest is malformed"
+                )),
+            };
         }
     }
     Err(format!("feature {uuid} not found for app {app_id}"))

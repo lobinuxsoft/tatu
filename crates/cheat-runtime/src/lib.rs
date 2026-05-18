@@ -32,7 +32,7 @@ pub use aurora::{AuroraError, Feature, Trainer, load_trainer, load_trainer_file}
 pub use executor::{ActiveCheat, Engine, ExecError};
 pub use freeze::{FreezeError, FreezeHandle, FreezeKey, FreezeRegistry};
 pub use manifest::{
-    Manifest, ManifestError, ManifestFeature, load_manifests_for, manifests_dir_for,
+    FeatureKind, Manifest, ManifestError, ManifestFeature, load_manifests_for, manifests_dir_for,
 };
 pub use maps::{MemoryRegion, Perms, parse_maps, read_maps};
 pub use memory::{RuntimeError, read_bytes, write_bytes};
