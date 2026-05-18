@@ -42,13 +42,41 @@ pub struct Manifest {
     pub features: Vec<ManifestFeature>,
 }
 
+/// Visual / behavioural category of a [`ManifestFeature`].
+///
+/// Mirrors Cheat Engine's distinction between functional cheats and pure
+/// grouping headers in `.CT` tables (CE uses `<GroupHeader>1</GroupHeader>`
+/// in the XML element — `MemoryRecordUnit.pas:148` documents it as
+/// *"set if it's a groupheader, only the description matters then"*).
+///
+/// `Toggle` is the default so older manifests (which omit `kind` entirely)
+/// continue to deserialize as functional cheats without a migration step.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum FeatureKind {
+    /// Functional cheat — has an Auto-Assembler script and renders as a
+    /// switch in the UI.
+    #[default]
+    Toggle,
+    /// Visual section title. No script, no switch — the UI renders just
+    /// the description as a header above the features that follow.
+    Header,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ManifestFeature {
     pub uuid: String,
     pub name: String,
     #[serde(default)]
     pub category: Option<String>,
-    pub script: String,
+    #[serde(default)]
+    pub kind: FeatureKind,
+    /// CE Auto-Assembler script for [`FeatureKind::Toggle`]. Always `None`
+    /// for [`FeatureKind::Header`]. Omitted in older manifests (before this
+    /// field existed) — those load as `Toggle` with `script: None` and the
+    /// runtime command rejects them at enable time with a clear error.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub script: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -153,16 +181,62 @@ mod tests {
         let m = Manifest {
             exe: "Game.exe".into(),
             title: "My Game".into(),
-            features: vec![ManifestFeature {
-                uuid: "u".into(),
-                name: "God Mode".into(),
-                category: Some("Player".into()),
-                script: "[ENABLE]\n[DISABLE]\n".into(),
-            }],
+            features: vec![
+                ManifestFeature {
+                    uuid: "u".into(),
+                    name: "God Mode".into(),
+                    category: Some("Player".into()),
+                    kind: FeatureKind::Toggle,
+                    script: Some("[ENABLE]\n[DISABLE]\n".into()),
+                },
+                ManifestFeature {
+                    uuid: "h".into(),
+                    name: "=== Player ===".into(),
+                    category: None,
+                    kind: FeatureKind::Header,
+                    script: None,
+                },
+            ],
         };
         let text = serde_json::to_string(&m).unwrap();
         let back: Manifest = serde_json::from_str(&text).unwrap();
         assert_eq!(m, back);
+    }
+
+    #[test]
+    fn deserialises_old_shape_without_kind_as_toggle() {
+        let m: Manifest = serde_json::from_str(
+            r#"{
+                "exe": "Game.exe",
+                "features": [
+                    {"uuid":"u","name":"God Mode","script":"[ENABLE]\n[DISABLE]\n"}
+                ]
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(m.features[0].kind, FeatureKind::Toggle);
+        assert_eq!(
+            m.features[0].script.as_deref(),
+            Some("[ENABLE]\n[DISABLE]\n")
+        );
+    }
+
+    #[test]
+    fn header_kind_round_trips_without_script() {
+        let m: Manifest = serde_json::from_str(
+            r#"{
+                "exe": "Game.exe",
+                "features": [
+                    {"uuid":"sep1","name":"== Combat ==","kind":"header"}
+                ]
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(m.features[0].kind, FeatureKind::Header);
+        assert!(m.features[0].script.is_none());
+        // Round-trip omits the script field when None.
+        let json = serde_json::to_string(&m).unwrap();
+        assert!(!json.contains("\"script\""));
     }
 
     #[test]

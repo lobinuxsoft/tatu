@@ -139,6 +139,16 @@ function renderRuntimeSection(features) {
       `</div>` +
       `<ul class="cheat-runtime-list">`;
   for (const f of features) {
+    if (f.kind === "header") {
+      // Visual-only divider: no switch, no toggle. Renders as a small caps
+      // title above the next batch of features. Mirrors CE's `<GroupHeader>`
+      // entries — see MemoryRecordUnit.pas:148.
+      html +=
+        `<li class="cheat-runtime-header-row">` +
+          `<div class="cheat-runtime-header-text">${esc(f.name)}</div>` +
+        `</li>`;
+      continue;
+    }
     const dis = f.game_running ? "" : "disabled";
     const ch = f.active ? "checked" : "";
     const cat = f.category ? `${esc(f.category)} • ` : "";

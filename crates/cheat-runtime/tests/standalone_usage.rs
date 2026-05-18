@@ -36,20 +36,24 @@ fn downstream_can_drive_full_enable_disable_via_public_root() {
             uuid: "11111111-2222-3333-4444-555555555555".into(),
             name: "Zero out".into(),
             category: None,
-            script: "[ENABLE]\n\
-                     registersymbol(victim)\n\
-                     victim:\n\
-                     db 00 00 00 00 00 00 00 00\n\
-                     [DISABLE]\n\
-                     victim:\n\
-                     db 10 20 30 40 50 60 70 80\n\
-                     unregistersymbol(victim)\n"
-                .into(),
+            kind: cheat_runtime::FeatureKind::Toggle,
+            script: Some(
+                "[ENABLE]\n\
+                 registersymbol(victim)\n\
+                 victim:\n\
+                 db 00 00 00 00 00 00 00 00\n\
+                 [DISABLE]\n\
+                 victim:\n\
+                 db 10 20 30 40 50 60 70 80\n\
+                 unregistersymbol(victim)\n"
+                    .into(),
+            ),
         }],
     };
 
     let feature = manifest.features.into_iter().next().unwrap();
-    let script: Script = parse_script(&feature.script).expect("parse script");
+    let script: Script =
+        parse_script(feature.script.as_deref().expect("toggle has script")).expect("parse script");
     assert!(matches!(
         script.enable.first(),
         Some(Statement::RegisterSymbol(_))
