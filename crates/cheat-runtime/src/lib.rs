@@ -18,7 +18,9 @@ pub mod asm;
 pub mod aurora;
 pub mod elfsym;
 pub mod executor;
+pub mod extension;
 pub mod freeze;
+pub mod inject;
 pub mod manifest;
 pub mod maps;
 pub mod memory;
@@ -32,7 +34,9 @@ pub use asm::{AsmError, compile_line as compile_asm_line};
 pub use aurora::{AuroraError, Feature, Trainer, load_trainer, load_trainer_file};
 pub use elfsym::{ElfSymError, find_libc_symbol, find_module_base, find_module_symbol};
 pub use executor::{ActiveCheat, Engine, ExecError};
+pub use extension::{Extension, ExtensionError};
 pub use freeze::{FreezeError, FreezeHandle, FreezeKey, FreezeRegistry};
+pub use inject::{InjectError, inject_so};
 pub use manifest::{
     FeatureKind, Manifest, ManifestError, ManifestFeature, load_manifests_for, manifests_dir_for,
 };

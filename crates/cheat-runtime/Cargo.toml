@@ -12,6 +12,7 @@ description = "Linux-native Cheat Engine Auto-Assembler runtime. Reusable from a
 crate-type = ["rlib", "cdylib"]
 
 [dependencies]
+cheat-runtime-extension = { path = "../cheat-runtime-extension" }
 dirs = "6"
 goblin = { version = "0.10", default-features = false, features = ["std", "elf32", "elf64", "endian_fd"] }
 iced-x86 = { version = "1", default-features = false, features = ["std", "decoder", "encoder", "code_asm"] }
