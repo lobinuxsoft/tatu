@@ -9,7 +9,7 @@
 //! (MIT, maintained, exhaustive opcode coverage), so we pay for "no native
 //! deps" with a Rust crate instead of porting Pascal opcode tables.
 //!
-//! Scope (Phase B v2.1):
+//! Scope (Phase B v2.2):
 //!
 //! - `jmp <addr|symbol>` / `call <addr|symbol>` / `ret` (Phase B v1).
 //! - Conditional jumps with a `<target>` operand: `je`/`jne`/`jg`/`jge`/
@@ -17,17 +17,27 @@
 //! - `push <reg64|reg32|imm32>`, `pop <reg64|reg32>` — 32-bit register
 //!   names alias to their 64-bit equivalent, matching CE's behaviour
 //!   when porting Win32-era scripts to x86_64.
-//! - `mov <reg>, <reg>` and `mov <reg>, <imm>` (same width, no memory
-//!   operands yet).
+//! - `mov` / `cmp` with the full operand matrix:
+//!     - `<reg>, <reg>` / `<reg>, <imm>` (Phase B v2.1)
+//!     - `<reg>, <mem>` / `<mem>, <reg>` / `<mem>, <imm>` (new in v2.2)
+//! - Memory operand syntax: `byte|word|dword|qword ptr [<addr>]` where
+//!   `<addr>` is one of: a bare register, `register+disp`, `register-disp`,
+//!   a numeric absolute, or a symbol (looked up in the table).
+//! - Float-literal immediates: `(float)100` → IEEE 754 single-precision
+//!   bit pattern; `(double)100` → 64-bit. Required for cheats that overwrite
+//!   game state with float constants (CE's canonical
+//!   `mov dword ptr [r13+13C], (float)100` pattern).
 //!
-//! Out of scope for v2.1: memory operands like `dword ptr [r13+13C]`,
-//! float-literal coercion `(float)100`, `cmp` / `add` / `sub` / `xor` /
-//! `lea`. Those land in Phase B v2.2 alongside the memory-operand parser.
+//! Out of scope for v2.2: anonymous labels (`@@:` / `@f` / `@b`),
+//! scale-index SIB addressing (`[reg+reg*4+disp]`), `lea`, `add`/`sub`/`xor`
+//! with full operand matrix. Surfaces as `Unsupported` until a real trainer
+//! needs them.
 
 use std::collections::HashMap;
 
 use iced_x86::code_asm::{
-    AsmRegister8, AsmRegister16, AsmRegister32, AsmRegister64, CodeAssembler, registers as r,
+    AsmMemoryOperand, AsmRegister8, AsmRegister16, AsmRegister32, AsmRegister64, CodeAssembler,
+    byte_ptr, dword_ptr, qword_ptr, registers as r, word_ptr,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -73,6 +83,7 @@ pub fn compile_line(
         "push" => Ok(Some(emit_push(rest, symbols, base_addr)?)),
         "pop" => Ok(Some(emit_pop(rest, base_addr)?)),
         "mov" => Ok(Some(emit_mov(rest, symbols, base_addr)?)),
+        "cmp" => Ok(Some(emit_cmp(rest, symbols, base_addr)?)),
         m if is_conditional_jump(m) => Ok(Some(emit_jcc(m, rest, symbols, base_addr)?)),
         _ => Ok(None),
     }
@@ -200,45 +211,356 @@ fn emit_pop(rest: &str, base: u64) -> Result<Vec<u8>, AsmError> {
 }
 
 fn emit_mov(rest: &str, syms: &HashMap<String, u64>, base: u64) -> Result<Vec<u8>, AsmError> {
-    let (dst_text, src_text) = rest
-        .split_once(',')
-        .ok_or_else(|| AsmError::BadOperand(rest.into()))?;
-    let dst_text = dst_text.trim();
-    let src_text = src_text.trim();
+    let (dst_text, src_text) = split_two_operands(rest)?;
+    let mut a = CodeAssembler::new(64)?;
 
+    // `mov <mem>, <...>` — memory destination.
+    if let Some((size, mem)) = try_parse_memory_operand(dst_text, syms)? {
+        let sized = apply_size(size, mem);
+        return emit_mov_into_mem(&mut a, sized, size, src_text, syms, base, dst_text);
+    }
+
+    // `mov <reg>, <...>` — register destination.
     let dst = parse_register(dst_text)
         .ok_or_else(|| AsmError::Unsupported(format!("mov dest {dst_text:?}: not a register")))?;
-    let mut a = CodeAssembler::new(64)?;
     match dst {
         TypedReg::R64(dst_r) => {
             if let Some(TypedReg::R64(src_r)) = parse_register(src_text) {
                 a.mov(dst_r, src_r)?;
-            } else if let Some(imm) = resolve_numeric_or_symbol(src_text, syms) {
+            } else if let Some((size, mem)) = try_parse_memory_operand(src_text, syms)? {
+                if size != MemSize::Qword {
+                    return Err(AsmError::Unsupported(format!(
+                        "mov {dst_text}, {src_text:?}: r64 destination needs qword ptr source"
+                    )));
+                }
+                a.mov(dst_r, qword_ptr(mem))?;
+            } else if let Some(imm) = parse_immediate(src_text, syms) {
                 a.mov(dst_r, imm)?;
             } else {
                 return Err(AsmError::Unsupported(format!(
-                    "mov {dst_text}, {src_text:?}: src must be a 64-bit register or immediate"
+                    "mov {dst_text}, {src_text:?}: src must be a register, memory, or immediate"
                 )));
             }
         }
         TypedReg::R32(dst_r) => {
             if let Some(TypedReg::R32(src_r)) = parse_register(src_text) {
                 a.mov(dst_r, src_r)?;
-            } else if let Some(imm) = resolve_numeric_or_symbol(src_text, syms) {
+            } else if let Some((size, mem)) = try_parse_memory_operand(src_text, syms)? {
+                if size != MemSize::Dword {
+                    return Err(AsmError::Unsupported(format!(
+                        "mov {dst_text}, {src_text:?}: r32 destination needs dword ptr source"
+                    )));
+                }
+                a.mov(dst_r, dword_ptr(mem))?;
+            } else if let Some(imm) = parse_immediate(src_text, syms) {
                 a.mov(dst_r, imm as u32)?;
             } else {
                 return Err(AsmError::Unsupported(format!(
-                    "mov {dst_text}, {src_text:?}: src must be a 32-bit register or immediate"
+                    "mov {dst_text}, {src_text:?}: src must be a register, memory, or immediate"
                 )));
             }
         }
         _ => {
             return Err(AsmError::Unsupported(format!(
-                "mov {dst_text}: 8/16-bit destination not supported in v2.1"
+                "mov {dst_text}: 8/16-bit destination not supported yet"
             )));
         }
     }
     Ok(a.assemble(base)?)
+}
+
+fn emit_mov_into_mem(
+    a: &mut CodeAssembler,
+    sized: AsmMemoryOperand,
+    size: MemSize,
+    src_text: &str,
+    syms: &HashMap<String, u64>,
+    base: u64,
+    dst_text: &str,
+) -> Result<Vec<u8>, AsmError> {
+    if let Some(reg) = parse_register(src_text) {
+        match (size, reg) {
+            (MemSize::Qword, TypedReg::R64(r)) => a.mov(sized, r)?,
+            (MemSize::Dword, TypedReg::R32(r)) => a.mov(sized, r)?,
+            (MemSize::Word, TypedReg::R16(r)) => a.mov(sized, r)?,
+            (MemSize::Byte, TypedReg::R8(r)) => a.mov(sized, r)?,
+            _ => {
+                return Err(AsmError::Unsupported(format!(
+                    "mov {dst_text}, {src_text:?}: register width mismatches memory size"
+                )));
+            }
+        }
+    } else if let Some(imm) = parse_immediate(src_text, syms) {
+        match size {
+            MemSize::Byte => a.mov(sized, (imm as u32) & 0xff)?,
+            MemSize::Word => a.mov(sized, (imm as u32) & 0xffff)?,
+            MemSize::Dword => a.mov(sized, imm as u32)?,
+            MemSize::Qword => a.mov(sized, imm as i32)?,
+        }
+    } else {
+        return Err(AsmError::Unsupported(format!(
+            "mov {dst_text}, {src_text:?}: src must be a register or immediate"
+        )));
+    }
+    Ok(a.assemble(base)?)
+}
+
+fn emit_cmp(rest: &str, syms: &HashMap<String, u64>, base: u64) -> Result<Vec<u8>, AsmError> {
+    let (lhs_text, rhs_text) = split_two_operands(rest)?;
+    let mut a = CodeAssembler::new(64)?;
+
+    // `cmp <mem>, <reg|imm>` — memory left.
+    if let Some((size, mem)) = try_parse_memory_operand(lhs_text, syms)? {
+        let sized = apply_size(size, mem);
+        if let Some(reg) = parse_register(rhs_text) {
+            match (size, reg) {
+                (MemSize::Qword, TypedReg::R64(r)) => a.cmp(sized, r)?,
+                (MemSize::Dword, TypedReg::R32(r)) => a.cmp(sized, r)?,
+                (MemSize::Word, TypedReg::R16(r)) => a.cmp(sized, r)?,
+                (MemSize::Byte, TypedReg::R8(r)) => a.cmp(sized, r)?,
+                _ => {
+                    return Err(AsmError::Unsupported(format!(
+                        "cmp {lhs_text}, {rhs_text:?}: register width mismatches memory size"
+                    )));
+                }
+            }
+        } else if let Some(imm) = parse_immediate(rhs_text, syms) {
+            match size {
+                MemSize::Byte => a.cmp(sized, (imm as i32) & 0xff)?,
+                MemSize::Word => a.cmp(sized, (imm as i32) & 0xffff)?,
+                MemSize::Dword => a.cmp(sized, imm as i32)?,
+                MemSize::Qword => a.cmp(sized, imm as i32)?,
+            }
+        } else {
+            return Err(AsmError::Unsupported(format!(
+                "cmp {lhs_text}, {rhs_text:?}: rhs must be a register or immediate"
+            )));
+        }
+        return Ok(a.assemble(base)?);
+    }
+
+    // `cmp <reg>, <reg|imm|mem>` — register left.
+    let lhs = parse_register(lhs_text).ok_or_else(|| {
+        AsmError::Unsupported(format!("cmp lhs {lhs_text:?}: not a register or memory"))
+    })?;
+    match lhs {
+        TypedReg::R64(l) => {
+            if let Some(TypedReg::R64(r)) = parse_register(rhs_text) {
+                a.cmp(l, r)?;
+            } else if let Some((size, mem)) = try_parse_memory_operand(rhs_text, syms)? {
+                if size != MemSize::Qword {
+                    return Err(AsmError::Unsupported(format!(
+                        "cmp {lhs_text}, {rhs_text:?}: r64 needs qword ptr"
+                    )));
+                }
+                a.cmp(l, qword_ptr(mem))?;
+            } else if let Some(imm) = parse_immediate(rhs_text, syms) {
+                a.cmp(l, imm as i32)?;
+            } else {
+                return Err(AsmError::Unsupported(format!(
+                    "cmp {lhs_text}, {rhs_text:?}: rhs must be a register, memory, or immediate"
+                )));
+            }
+        }
+        TypedReg::R32(l) => {
+            if let Some(TypedReg::R32(r)) = parse_register(rhs_text) {
+                a.cmp(l, r)?;
+            } else if let Some((size, mem)) = try_parse_memory_operand(rhs_text, syms)? {
+                if size != MemSize::Dword {
+                    return Err(AsmError::Unsupported(format!(
+                        "cmp {lhs_text}, {rhs_text:?}: r32 needs dword ptr"
+                    )));
+                }
+                a.cmp(l, dword_ptr(mem))?;
+            } else if let Some(imm) = parse_immediate(rhs_text, syms) {
+                a.cmp(l, imm as i32)?;
+            } else {
+                return Err(AsmError::Unsupported(format!(
+                    "cmp {lhs_text}, {rhs_text:?}: rhs must be a register, memory, or immediate"
+                )));
+            }
+        }
+        _ => {
+            return Err(AsmError::Unsupported(format!(
+                "cmp {lhs_text}: 8/16-bit lhs register not supported yet"
+            )));
+        }
+    }
+    Ok(a.assemble(base)?)
+}
+
+fn split_two_operands(rest: &str) -> Result<(&str, &str), AsmError> {
+    let (lhs, rhs) = rest
+        .split_once(',')
+        .ok_or_else(|| AsmError::BadOperand(rest.into()))?;
+    Ok((lhs.trim(), rhs.trim()))
+}
+
+// ---- memory operand parsing --------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MemSize {
+    Byte,
+    Word,
+    Dword,
+    Qword,
+}
+
+/// Parse a CE-AA memory operand like `dword ptr [r13+13C]` or
+/// `byte ptr [unlHarvestFlag]`. Returns the size prefix together with an
+/// iced-x86 [`AsmMemoryOperand`] that still needs the size applied via
+/// [`apply_size`] before it can be passed to `mov`/`cmp`.
+///
+/// Returns `Ok(None)` when the text is not a memory operand (no `[...]`
+/// bracket pair); the caller should fall through to the register / immediate
+/// parsers. Returns `Err` when the text *looks* like a memory operand but
+/// the body is malformed — bubbling that up as `Unsupported` so the user
+/// sees the offending text rather than a silent fall-through.
+fn try_parse_memory_operand(
+    text: &str,
+    syms: &HashMap<String, u64>,
+) -> Result<Option<(MemSize, AsmMemoryOperand)>, AsmError> {
+    let t = text.trim();
+    let (size, body) = match split_size_prefix(t) {
+        Some((s, b)) => (s, b),
+        None => {
+            // Allow the `[expr]` shorthand without an explicit size prefix.
+            if t.starts_with('[') && t.ends_with(']') {
+                (MemSize::Dword, t)
+            } else {
+                return Ok(None);
+            }
+        }
+    };
+    let body = body.trim();
+    if !body.starts_with('[') || !body.ends_with(']') {
+        return Err(AsmError::Unsupported(format!(
+            "memory operand {text:?}: expected `[...]` body"
+        )));
+    }
+    let inner = &body[1..body.len() - 1];
+    let mem = parse_addr_inside_brackets(inner.trim(), syms)?;
+    Ok(Some((size, mem)))
+}
+
+fn split_size_prefix(text: &str) -> Option<(MemSize, &str)> {
+    for (kw, size) in [
+        ("byte ptr", MemSize::Byte),
+        ("word ptr", MemSize::Word),
+        ("dword ptr", MemSize::Dword),
+        ("qword ptr", MemSize::Qword),
+    ] {
+        if let Some(rest) = text.strip_prefix(kw) {
+            return Some((size, rest.trim_start()));
+        }
+    }
+    None
+}
+
+fn parse_addr_inside_brackets(
+    inner: &str,
+    syms: &HashMap<String, u64>,
+) -> Result<AsmMemoryOperand, AsmError> {
+    let inner = inner.trim();
+    if inner.is_empty() {
+        return Err(AsmError::BadOperand(inner.into()));
+    }
+
+    // Just a register: `[rax]`.
+    if let Some(reg) = parse_register(inner) {
+        return reg_into_memop(reg, inner);
+    }
+
+    // `register +/- displacement`. Pick the rightmost `+` or `-` so that
+    // hex displacements containing letters don't trip the split.
+    if let Some(idx) = inner.rfind(|c| c == '+' || c == '-')
+        && idx > 0
+    {
+        let (lhs, op_disp) = inner.split_at(idx);
+        let (op, disp_text) = op_disp.split_at(1);
+        let lhs = lhs.trim();
+        let disp_text = disp_text.trim();
+        if let Some(reg) = parse_register(lhs) {
+            // Inside `[reg+disp]`, CE Auto-Assembler treats unprefixed
+            // tokens as hex (`[r13+13C]` means displacement `0x13C`).
+            // `parse_numeric` already accepts `0x` / `$` / decimal; we add
+            // the hex-by-default fallback as the third try, after the
+            // symbol table.
+            let raw = parse_numeric(disp_text)
+                .or_else(|| syms.get(disp_text).copied())
+                .or_else(|| u64::from_str_radix(disp_text, 16).ok())
+                .ok_or_else(|| AsmError::BadOperand(inner.into()))?;
+            let disp = if op == "-" {
+                -(raw as i64) as i32
+            } else {
+                raw as i32
+            };
+            return reg_disp_into_memop(reg, disp, inner);
+        }
+    }
+
+    // Absolute numeric or symbol → bare displacement.
+    if let Some(v) = parse_numeric(inner) {
+        return Ok(v.into());
+    }
+    if let Some(&v) = syms.get(inner) {
+        return Ok(v.into());
+    }
+    Err(AsmError::UnknownSymbol(inner.into()))
+}
+
+fn reg_into_memop(reg: TypedReg, source: &str) -> Result<AsmMemoryOperand, AsmError> {
+    match reg {
+        TypedReg::R64(r) => Ok(r.into()),
+        TypedReg::R32(r) => Ok(r.into()),
+        _ => Err(AsmError::Unsupported(format!(
+            "address register {source:?}: only r64 / r32 supported in brackets"
+        ))),
+    }
+}
+
+fn reg_disp_into_memop(
+    reg: TypedReg,
+    disp: i32,
+    source: &str,
+) -> Result<AsmMemoryOperand, AsmError> {
+    match reg {
+        TypedReg::R64(r) => Ok(r + disp),
+        TypedReg::R32(r) => Ok(r + disp),
+        _ => Err(AsmError::Unsupported(format!(
+            "address register {source:?}: only r64 / r32 supported in brackets"
+        ))),
+    }
+}
+
+fn apply_size(size: MemSize, mem: AsmMemoryOperand) -> AsmMemoryOperand {
+    match size {
+        MemSize::Byte => byte_ptr(mem),
+        MemSize::Word => word_ptr(mem),
+        MemSize::Dword => dword_ptr(mem),
+        MemSize::Qword => qword_ptr(mem),
+    }
+}
+
+// ---- immediate parsing with float coercion -----------------------------
+
+/// Resolve an immediate operand to a 64-bit raw value. Accepts the CE-AA
+/// `(float)N` and `(double)N` casts (IEEE 754 bit pattern), numeric
+/// literals (`0x...`, `$...`, decimal), and symbol names.
+fn parse_immediate(text: &str, syms: &HashMap<String, u64>) -> Option<i64> {
+    let t = text.trim();
+    if let Some(rest) = t.strip_prefix("(float)") {
+        let f: f32 = rest.trim().parse().ok()?;
+        return Some(f.to_bits() as i64);
+    }
+    if let Some(rest) = t.strip_prefix("(double)") {
+        let f: f64 = rest.trim().parse().ok()?;
+        return Some(f.to_bits() as i64);
+    }
+    if let Some(v) = parse_numeric(t) {
+        return Some(v as i64);
+    }
+    syms.get(t).map(|&v| v as i64)
 }
 
 // ---- operand parsing ---------------------------------------------------
@@ -599,8 +921,9 @@ mod tests {
 
     #[test]
     fn unknown_mnemonic_returns_none() {
-        // `cmp` with memory operand falls through to None until Phase B v2.2.
-        let bytes = compile_line("cmp byte ptr [foo], 1", &HashMap::new(), 0).unwrap();
+        // `lea` is still Phase B v2.3 territory — must fall through to None
+        // so the executor's compile_raw can surface its own Unsupported.
+        let bytes = compile_line("lea rax, [rbx+8]", &HashMap::new(), 0).unwrap();
         assert!(bytes.is_none());
     }
 
@@ -645,5 +968,111 @@ mod tests {
     fn mov_missing_comma_errors() {
         let err = compile_line("mov rax rbx", &HashMap::new(), 0).unwrap_err();
         assert!(matches!(err, AsmError::BadOperand(_)));
+    }
+
+    // -- Phase B v2.2: memory operands + float literals ----------------
+
+    #[test]
+    fn parse_float_literal_to_bit_pattern() {
+        // 100.0f32 = 0x42C80000.
+        let imm = parse_immediate("(float)100", &HashMap::new()).unwrap();
+        assert_eq!(imm as u32, 0x42C8_0000);
+        // 100.0f64 = 0x4059000000000000.
+        let imm = parse_immediate("(double)100", &HashMap::new()).unwrap();
+        assert_eq!(imm as u64, 0x4059_0000_0000_0000);
+    }
+
+    #[test]
+    fn mov_dword_ptr_reg_disp_with_float_literal() {
+        // The canonical Aurora pattern:
+        //   mov dword ptr [r13+13C], (float)100
+        // 100.0f32 = 0x42C80000.
+        let bytes = compile_line("mov dword ptr [r13+13C],(float)100", &HashMap::new(), 0)
+            .unwrap()
+            .unwrap();
+        // Check the encoding ends with the float bits in little-endian:
+        // 00 00 C8 42.
+        assert_eq!(&bytes[bytes.len() - 4..], &[0x00, 0x00, 0xC8, 0x42]);
+        // C7 is the mov r/m32, imm32 opcode; first byte is the REX prefix
+        // for the r13 base (REX.B set: 0x41).
+        assert_eq!(bytes[0], 0x41);
+        assert_eq!(bytes[1], 0xC7);
+    }
+
+    #[test]
+    fn cmp_byte_ptr_symbol_with_immediate() {
+        // cmp byte ptr [unlHarvestFlag], 1
+        // unlHarvestFlag is a symbol → absolute address.
+        let syms = symtab(&[("unlHarvestFlag", 0x12345678)]);
+        let bytes = compile_line("cmp byte ptr [unlHarvestFlag], 1", &syms, 0)
+            .unwrap()
+            .unwrap();
+        // Should encode as cmp byte [disp32], imm8. The disp32 contains
+        // 0x12345678 in little-endian.
+        let disp = u32::from_le_bytes(bytes[bytes.len() - 5..bytes.len() - 1].try_into().unwrap());
+        assert_eq!(disp, 0x12345678);
+        // Last byte is the immediate.
+        assert_eq!(*bytes.last().unwrap(), 0x01);
+    }
+
+    #[test]
+    fn mov_reg_from_mem_qword() {
+        // mov rax, qword ptr [rbx]
+        let bytes = compile_line("mov rax, qword ptr [rbx]", &HashMap::new(), 0)
+            .unwrap()
+            .unwrap();
+        // REX.W + 8B + ModR/M; 3 bytes total for [rbx] (no displacement).
+        assert_eq!(bytes, vec![0x48, 0x8B, 0x03]);
+    }
+
+    #[test]
+    fn mov_mem_from_reg_qword() {
+        // mov qword ptr [rbx], rax
+        let bytes = compile_line("mov qword ptr [rbx], rax", &HashMap::new(), 0)
+            .unwrap()
+            .unwrap();
+        assert_eq!(bytes, vec![0x48, 0x89, 0x03]);
+    }
+
+    #[test]
+    fn cmp_reg_imm() {
+        // cmp eax, 1 — iced may pick either the `cmp r/m32, imm8 sext`
+        // (3 bytes: 83 F8 01) or the eax-special `cmp eax, imm32`
+        // (5 bytes: 3D 01 00 00 00). Accept either, both decode to the
+        // same comparison.
+        let bytes = compile_line("cmp eax, 1", &HashMap::new(), 0)
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(bytes.as_slice(), [0x83, 0xF8, 0x01] | [0x3D, 0x01, 0, 0, 0]),
+            "unexpected cmp encoding: {bytes:02X?}"
+        );
+    }
+
+    #[test]
+    fn cmp_reg_reg() {
+        let bytes = compile_line("cmp rax, rbx", &HashMap::new(), 0)
+            .unwrap()
+            .unwrap();
+        // 48 39 D8 — cmp r/m64, r64.
+        assert_eq!(bytes, vec![0x48, 0x39, 0xD8]);
+    }
+
+    #[test]
+    fn memory_operand_minus_displacement() {
+        // mov dword ptr [r13-8], 0
+        let bytes = compile_line("mov dword ptr [r13-8], 0", &HashMap::new(), 0)
+            .unwrap()
+            .unwrap();
+        // Last byte of disp8 = -8 = 0xF8.
+        assert!(bytes.iter().any(|&b| b == 0xF8));
+    }
+
+    #[test]
+    fn malformed_memory_operand_errors() {
+        let err = compile_line("mov dword ptr r13+13C, 0", &HashMap::new(), 0).unwrap_err();
+        // Without brackets, the parser sees a non-register dest and rejects
+        // it as an unsupported source.
+        assert!(matches!(err, AsmError::Unsupported(_)));
     }
 }
