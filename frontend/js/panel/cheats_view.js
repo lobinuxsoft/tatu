@@ -149,6 +149,10 @@ function renderRuntimeSection(features) {
         `</li>`;
       continue;
     }
+    if (f.kind === "value") {
+      html += renderValueRow(f);
+      continue;
+    }
     const dis = f.game_running ? "" : "disabled";
     const ch = f.active ? "checked" : "";
     const cat = f.category ? `${esc(f.category)} • ` : "";
@@ -168,8 +172,159 @@ function renderRuntimeSection(features) {
   return html;
 }
 
+/// Render one Value-kind row: typed numeric input + Set + Freeze. Dimmed
+/// (with reason) when the game isn't running OR the master scaffold cheat
+/// hasn't been enabled — the backend flags both via `game_running` and
+/// `symbol_ready` in the FeatureView.
+function renderValueRow(f) {
+  const cat = f.category ? `${esc(f.category)} • ` : "";
+  const spec = f.value_spec || {};
+  const vt = spec.vtype || "u32";
+  const offsets = (spec.offsets || []).map(o => "0x" + o.toString(16).toUpperCase()).join(",");
+  const addrSummary = `${esc(spec.base_expr || "?")}${offsets ? " + [" + esc(offsets) + "]" : ""}`;
+  const blockedReason = !f.game_running
+    ? "Launch the game first"
+    : !f.symbol_ready
+    ? `Enable the scaffold cheat that registers '${esc(f.required_symbol || "?")}' first`
+    : "";
+  const blocked = blockedReason !== "";
+  const dis = blocked ? "disabled" : "";
+  const blockedAttr = blocked ? `title="${blockedReason}"` : "";
+  const isFloat = vt === "f32" || vt === "f64";
+  const step = isFloat ? "any" : "1";
+  return (
+    `<li class="cheat-runtime-item cheat-runtime-value ${blocked ? 'cheat-runtime-value-blocked' : ''}" data-feature-uuid="${esc(f.uuid)}" data-vtype="${esc(vt)}">` +
+      `<div class="cheat-runtime-info">` +
+        `<div class="cheat-runtime-name">${esc(f.name)} <span class="cheat-runtime-vtype">${esc(vt)}</span></div>` +
+        `<div class="cheat-runtime-meta">${cat}${addrSummary}</div>` +
+      `</div>` +
+      `<div class="cheat-runtime-value-controls" ${blockedAttr}>` +
+        `<button class="cheat-value-read" data-action="read" ${dis}>↻</button>` +
+        `<input class="cheat-value-input" type="number" step="${step}" value="" ${dis}>` +
+        `<button class="cheat-value-set" data-action="set" ${dis}>Set</button>` +
+        `<label class="cheat-switch cheat-switch-sm" title="${dis ? blockedReason : 'Freeze at current input value'}">` +
+          `<input type="checkbox" class="cheat-value-freeze" data-action="freeze" ${dis}>` +
+          `<span class="cheat-switch-slider"></span>` +
+        `</label>` +
+      `</div>` +
+    `</li>`
+  );
+}
+
+function parseValueByType(text, vtype) {
+  if (text === "" || text === null) return null;
+  if (vtype === "f32" || vtype === "f64") {
+    const f = Number(text);
+    return Number.isFinite(f) ? { vtype, value: f } : null;
+  }
+  // Integer parse, base-10. Backend serializes signed types as JSON numbers.
+  const n = Number(text);
+  if (!Number.isFinite(n) || !Number.isInteger(n)) return null;
+  return { vtype, value: n };
+}
+
+function formatValuePayload(payload) {
+  if (!payload || payload.value === undefined) return "";
+  return String(payload.value);
+}
+
+function wireValueRows(panel, gameId) {
+  panel.querySelectorAll(".cheat-runtime-value").forEach(row => {
+    const uuid = row.dataset.featureUuid;
+    const vtype = row.dataset.vtype;
+    const input = row.querySelector(".cheat-value-input");
+    const readBtn = row.querySelector(".cheat-value-read");
+    const setBtn = row.querySelector(".cheat-value-set");
+    const freezeCb = row.querySelector(".cheat-value-freeze");
+
+    const flash = (el, ok) => {
+      el.classList.toggle("cheat-value-flash-ok", ok);
+      el.classList.toggle("cheat-value-flash-err", !ok);
+      setTimeout(() => {
+        el.classList.remove("cheat-value-flash-ok", "cheat-value-flash-err");
+      }, 800);
+    };
+
+    if (readBtn) {
+      readBtn.addEventListener("click", async () => {
+        readBtn.disabled = true;
+        try {
+          const payload = await invoke("cheat_runtime_value_read", {
+            appId: String(gameId),
+            featureUuid: uuid,
+          });
+          input.value = formatValuePayload(payload);
+          flash(input, true);
+        } catch (e) {
+          input.title = String(e);
+          flash(input, false);
+          setTimeout(() => input.removeAttribute("title"), 3000);
+        } finally {
+          readBtn.disabled = false;
+        }
+      });
+    }
+
+    if (setBtn) {
+      setBtn.addEventListener("click", async () => {
+        const value = parseValueByType(input.value, vtype);
+        if (!value) {
+          flash(input, false);
+          return;
+        }
+        setBtn.disabled = true;
+        try {
+          await invoke("cheat_runtime_value_write", {
+            appId: String(gameId),
+            featureUuid: uuid,
+            value,
+          });
+          flash(setBtn, true);
+        } catch (e) {
+          setBtn.title = String(e);
+          flash(setBtn, false);
+          setTimeout(() => setBtn.removeAttribute("title"), 3000);
+        } finally {
+          setBtn.disabled = false;
+        }
+      });
+    }
+
+    if (freezeCb) {
+      freezeCb.addEventListener("change", async () => {
+        const enabled = freezeCb.checked;
+        const value = enabled ? parseValueByType(input.value, vtype) : null;
+        if (enabled && !value) {
+          freezeCb.checked = false;
+          flash(input, false);
+          return;
+        }
+        freezeCb.disabled = true;
+        try {
+          await invoke("cheat_runtime_value_freeze", {
+            req: {
+              app_id: String(gameId),
+              feature_uuid: uuid,
+              enabled,
+              value,
+            },
+          });
+        } catch (e) {
+          freezeCb.checked = !enabled;
+          freezeCb.title = String(e);
+          setTimeout(() => freezeCb.removeAttribute("title"), 3000);
+        } finally {
+          freezeCb.disabled = false;
+        }
+      });
+    }
+  });
+}
+
 function wireRuntimeSwitches(panel, gameId) {
-  panel.querySelectorAll(".cheat-runtime-item input").forEach(input => {
+  // Limit to Toggle rows — Value rows have their own `.cheat-runtime-value`
+  // container and must not be wired as plain enable/disable switches.
+  panel.querySelectorAll(".cheat-runtime-item:not(.cheat-runtime-value) input[data-feature-uuid]").forEach(input => {
     input.addEventListener("change", async () => {
       const uuid = input.dataset.featureUuid;
       const desired = input.checked;
@@ -180,6 +335,9 @@ function wireRuntimeSwitches(panel, gameId) {
         } else {
           await invoke("cheat_runtime_disable", { featureUuid: uuid });
         }
+        // Master toggles register / unregister symbols that gate Value rows.
+        // Refresh so symbol_ready reflects the new state.
+        loadCheats(gameId);
       } catch (e) {
         input.checked = !desired;
         input.title = String(e);
@@ -229,6 +387,7 @@ export async function loadCheats(gameId) {
 
     wireBanner(panel, gameId);
     wireRuntimeSwitches(panel, gameId);
+    wireValueRows(panel, gameId);
     wireTables(panel, gameId);
     wireSearchButton(panel);
   } catch (e) {

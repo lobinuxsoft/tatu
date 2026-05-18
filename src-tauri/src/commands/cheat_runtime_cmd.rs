@@ -44,6 +44,10 @@ pub struct FeatureView {
     /// isn't enabled yet.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub required_symbol: Option<String>,
+    /// `true` if the value's required symbol is currently bound by some
+    /// active cheat (or the value has no symbol dep). The UI uses this to
+    /// gate the read/write/freeze controls on a per-feature basis.
+    pub symbol_ready: bool,
 }
 
 #[tauri::command]
@@ -52,18 +56,29 @@ pub fn cheat_runtime_list_features(
     active: State<'_, ActiveCheats>,
 ) -> Result<Vec<FeatureView>, String> {
     let manifests = load_manifests_for(&app_id).map_err(|e| e.to_string())?;
-    let active_keys: std::collections::HashSet<String> = active
-        .lock()
-        .map_err(|e| format!("active registry poisoned: {e}"))?
-        .keys()
-        .cloned()
-        .collect();
+    let (active_keys, registered_symbols) = {
+        let guard = active
+            .lock()
+            .map_err(|e| format!("active registry poisoned: {e}"))?;
+        let keys: std::collections::HashSet<String> = guard.keys().cloned().collect();
+        let mut syms: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for cheat in guard.values() {
+            for k in cheat.symbols().keys() {
+                syms.insert(k.clone());
+            }
+        }
+        (keys, syms)
+    };
 
     let mut out = Vec::new();
     for m in manifests {
         let game_running = find_pid_by_exe(&m.exe).is_some();
         for f in m.features {
             let required_symbol = master_symbol_for_value(&f);
+            let symbol_ready = match &required_symbol {
+                Some(name) => registered_symbols.contains(name),
+                None => true,
+            };
             let value_spec = f.value.clone();
             out.push(FeatureView {
                 manifest_title: m.title.clone(),
@@ -75,6 +90,7 @@ pub fn cheat_runtime_list_features(
                 kind: f.kind,
                 value_spec,
                 required_symbol,
+                symbol_ready,
                 game_running,
             });
         }
