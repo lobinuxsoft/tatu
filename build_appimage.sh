@@ -33,9 +33,17 @@ esac
 # ============================================
 
 echo -e "${YELLOW}[1/5]${NC} Building release binary..."
-cargo tauri build 2>&1 | tail -5
+# NO_STRIP=1: Tauri's internal linuxdeploy invocation calls `strip` on every
+# bundled `.so` without honouring host capabilities. The bundled binutils
+# strip (from the linuxdeploy AppImage) does not parse RELR relocations
+# (Fedora 40+, Bazzite). Without NO_STRIP, every system .so fails strip and
+# Tauri aborts the bundle with `failed to run linuxdeploy`, leaving no
+# AppDir / AppImage to consume.
+NO_STRIP=1 cargo tauri build 2>&1 | tail -5
 
-TAURI_APPDIR="src-tauri/target/release/bundle/appimage/${APP_NAME}.AppDir"
+# Tauri's bundle output sits at the workspace root, not at src-tauri/target,
+# since this is a multi-crate workspace (`cheat-runtime`, `ce-launcher`, …).
+TAURI_APPDIR="target/release/bundle/appimage/${APP_NAME}.AppDir"
 
 if [ ! -d "$TAURI_APPDIR" ]; then
     echo -e "${RED}[ERROR]${NC} Tauri AppDir not found at: $TAURI_APPDIR"
@@ -61,16 +69,17 @@ else
     echo -e "  appimagetool: ${GREEN}cached${NC}"
 fi
 
-LINUXDEPLOY="$TOOLS_DIR/linuxdeploy-$APPIMAGE_ARCH.AppImage"
-if [ ! -f "$LINUXDEPLOY" ]; then
-    echo "  Downloading linuxdeploy..."
-    curl -sL -o "$LINUXDEPLOY" \
-        "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-$APPIMAGE_ARCH.AppImage"
-    chmod +x "$LINUXDEPLOY"
-    echo -e "  ${GREEN}Downloaded${NC}"
-else
-    echo -e "  linuxdeploy: ${GREEN}cached${NC}"
-fi
+# linuxdeploy intentionally NOT used here. Its rpath-patching step (patchelf
+# under the hood) corrupts ELF DT_INIT pointers on every bundled .so: DT_INIT
+# is left pointing to the old vaddr while the actual `.init` section is moved
+# to a new file offset. ld.so then jumps into stale data at dl_init time and
+# the process SIGSEGVs before main runs (#65, e.g. `libXau.so.6 + 0x2cc` and
+# `libmp3lame.so.0 + 0x294` on Bazzite F44).
+#
+# Tauri's own bundle (`cargo tauri build`) produces an uncorrupted AppDir with
+# 144 libs already resolved — we use that as the base and only supplement
+# what Tauri doesn't ship (GIO modules, GLib schemas, GStreamer plugins,
+# WebKit binary path patch, custom AppRun).
 
 # ============================================
 # [3/5] Setup AppDir
@@ -80,26 +89,13 @@ echo -e "${YELLOW}[3/5]${NC} Setting up AppDir..."
 
 APPDIR="$DIST_DIR/appimage/${DESKTOP_ID}.AppDir"
 rm -rf "$APPDIR"
-mkdir -p "$APPDIR/usr/bin"
+mkdir -p "$DIST_DIR/appimage"
+# Copy Tauri's complete AppDir verbatim — libs are already correctly bundled.
+cp -a "$TAURI_APPDIR" "$APPDIR"
 
-# Copy binary from Tauri build output
-cp "$TAURI_APPDIR/usr/bin/$BINARY_NAME" "$APPDIR/usr/bin/"
-
-# Copy icon
-cp "$ICON_SOURCE" "$APPDIR/$DESKTOP_ID.png"
-
-# Create .desktop file
-cat > "$APPDIR/$DESKTOP_ID.desktop" << DESKTOP
-[Desktop Entry]
-Name=$APP_NAME
-Comment=Track your Steam game library progress, achievements, trading cards and badges
-Exec=$BINARY_NAME
-Icon=$DESKTOP_ID
-Type=Application
-Categories=Game;Utility;
-Keywords=steam;games;progress;achievements;trading cards;
-Terminal=false
-DESKTOP
+# Tauri ships AppRun + .desktop + icon at the AppDir root. We overwrite the
+# AppRun with our own at step [4/5] (adds --install/--uninstall + env setup);
+# the root .desktop/.png it leaves are fine.
 
 # ============================================
 # [4/5] Bundle libraries
@@ -107,52 +103,13 @@ DESKTOP
 
 echo -e "${YELLOW}[4/5]${NC} Bundling libraries..."
 
-# Bundle shared libraries with linuxdeploy.
-# NO_STRIP=1: linuxdeploy bundles an old binutils strip that can't parse RELR
-# relocations used on modern distros (Fedora 40+, Bazzite, etc.). Without this,
-# strip fails on every system .so with "unknown type [0x13] section .relr.dyn"
-# and `set -e` aborts the script before step [5/5]. Cost: ~10 MB extra in the
-# AppImage (debug symbols not stripped from bundled libs).
-echo "  Running linuxdeploy..."
-NO_STRIP=1 APPIMAGE_EXTRACT_AND_RUN=1 "$LINUXDEPLOY" \
-    --appdir "$APPDIR" \
-    --executable "$APPDIR/usr/bin/$BINARY_NAME" \
-    --desktop-file "$APPDIR/$DESKTOP_ID.desktop" \
-    --icon-file "$APPDIR/$DESKTOP_ID.png"
-
-# --- WebKit binary patching ---
-# WebKit hardcodes helper paths at compile time. We binary-patch the .so
-# to use relative paths (././ prefix) and cd to AppDir before exec.
-echo "  Patching WebKit..."
-WEBKIT_HARDCODED=$(strings "$APPDIR/usr/lib/libwebkit2gtk-4.1.so.0" 2>/dev/null | grep -m1 '/webkit2gtk-4.1$' || true)
-WEBKIT_DIR=""
-for candidate in /usr/libexec/webkit2gtk-4.1 /usr/lib/x86_64-linux-gnu/webkit2gtk-4.1 /usr/lib64/webkit2gtk-4.1; do
-    if [ -d "$candidate" ]; then
-        WEBKIT_DIR="$candidate"
-        break
-    fi
-done
-if [ -z "$WEBKIT_DIR" ]; then
-    WKP=$(find /usr -name "WebKitWebProcess" -path "*webkit2gtk*" 2>/dev/null | head -1)
-    if [ -n "$WKP" ]; then
-        WEBKIT_DIR=$(dirname "$WKP")
-    fi
-fi
-if [ -n "$WEBKIT_DIR" ] && [ -n "$WEBKIT_HARDCODED" ]; then
-    WEBKIT_RELATIVE="././${WEBKIT_HARDCODED#/usr}"
-    echo "    Path: $WEBKIT_HARDCODED -> $WEBKIT_RELATIVE"
-    LC_ALL=C sed -i "s|$WEBKIT_HARDCODED|$WEBKIT_RELATIVE|g" "$APPDIR/usr/lib/libwebkit2gtk-4.1.so.0"
-    HELPERS_DEST="$APPDIR${WEBKIT_HARDCODED#/usr}"
-    mkdir -p "$HELPERS_DEST"
-    cp "$WEBKIT_DIR/WebKitWebProcess" "$HELPERS_DEST/"
-    cp "$WEBKIT_DIR/WebKitNetworkProcess" "$HELPERS_DEST/"
-    if [ -d "$WEBKIT_DIR/injected-bundle" ]; then
-        cp -r "$WEBKIT_DIR/injected-bundle" "$HELPERS_DEST/"
-    fi
-    echo -e "    ${GREEN}WebKit helpers bundled${NC}"
-else
-    echo -e "    ${YELLOW}[WARN]${NC} WebKit helpers or library not found"
-fi
+# WebKit binary path patching is handled by Tauri's bundle phase (via
+# `linuxdeploy-plugin-gtk`), which rewrites the hardcoded helper path in
+# `libwebkit2gtk-4.1.so.0` from `/usr/libexec/webkit2gtk-4.1` to
+# `././/libexec/webkit2gtk-4.1` and bundles the helper binaries at
+# `usr/libexec/webkit2gtk-4.1/`. Re-running the same `sed` here would
+# match the already-patched path and emit a longer string, shifting ELF
+# layout and corrupting the .so (#65 follow-up). Trust Tauri's patch.
 
 # --- GLib compiled schemas ---
 if [ -f "/usr/share/glib-2.0/schemas/gschemas.compiled" ]; then
@@ -268,17 +225,31 @@ ICON_DIR="$HOME/.local/share/icons"
 # binary, NOT before system tools like zenity/kdialog which break when
 # they pick up our bundled GStreamer/GTK libs.
 setup_env() {
+    export APPDIR="${HERE}"
     export LD_LIBRARY_PATH="${HERE}/usr/lib:${LD_LIBRARY_PATH}"
+    # WebKit binary patching strips `/usr` from helper paths, turning
+    # /usr/libexec/webkit2gtk-4.1/WebKitNetworkProcess into ././/libexec/...
+    # GTK_EXE_PREFIX="$APPDIR//usr" rejoins the missing prefix so the
+    # helper resolves to $APPDIR/usr/libexec/webkit2gtk-4.1/...
+    export GTK_EXE_PREFIX="${HERE}//usr"
+    export GTK_PATH="${HERE}//usr/lib64/gtk-3.0:${HERE}//usr/lib/gtk-3.0:/usr/lib64/gtk-3.0:/usr/lib/gtk-3.0"
+    # WebKit2GTK crashes under the GDK Wayland backend in AppImage:
+    # https://github.com/tauri-apps/tauri/issues/8541 — force X11 (XWayland
+    # is available on every Wayland session) which is what Tauri's stock
+    # linuxdeploy-plugin-gtk does for the same reason.
+    export GDK_BACKEND=x11
     export GIO_MODULE_DIR="${HERE}/usr/lib/gio/modules"
+    export GIO_EXTRA_MODULES="${HERE}/usr/lib64/gio/modules:${HERE}/usr/lib/gio/modules"
     export GDK_PIXBUF_MODULE_FILE="${HERE}/usr/lib/gdk-pixbuf-2.0/2.10.0/loaders.cache"
-    export GSETTINGS_SCHEMA_DIR="${HERE}/usr/share/glib-2.0/schemas"
+    export GSETTINGS_SCHEMA_DIR="${HERE}//usr/share/glib-2.0/schemas"
+    export XDG_DATA_DIRS="${HERE}/usr/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
     export GST_PLUGIN_PATH="${HERE}/usr/lib/gstreamer-1.0"
     export GST_PLUGIN_SYSTEM_PATH=""
     export GST_PLUGIN_SCANNER="${HERE}/usr/libexec/gstreamer-1.0/gst-plugin-scanner"
     export GST_REGISTRY="${HOME}/.cache/game-progress-tracker/gst-registry.bin"
-    # WebKit helpers use paths patched to be relative (././ prefix),
-    # so we must cd to the AppDir root for them to resolve correctly.
-    cd "${HERE}"
+    # cd into $APPDIR/usr so the webkit helper path `././/libexec/...`
+    # resolves relative to AppDir/usr (where the helpers actually live).
+    cd "${HERE}/usr"
 }
 
 install_app() {
