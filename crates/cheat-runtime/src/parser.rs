@@ -54,9 +54,17 @@ pub enum Statement {
     /// `label(symbol)` — declare a local symbol that will be defined later
     /// by a label site (`symbol:`) somewhere in the same block.
     Label(String),
-    /// `alloc(symbol, size)` — allocate writable+executable memory in the
-    /// target process. Size accepts decimal or `0x`-prefixed hex.
-    Alloc { symbol: String, size: u64 },
+    /// `alloc(symbol, size [, near])` — allocate writable+executable memory
+    /// in the target process. Size accepts decimal or `0x`-prefixed hex.
+    /// `near` is the optional 3rd argument from CE AA: an address (or symbol
+    /// name resolving to one) the kernel should place the new mapping close
+    /// to. Critical when the script later patches a `jmp` from the original
+    /// code into the alloc, because `jmp rel32` only reaches ±2 GB.
+    Alloc {
+        symbol: String,
+        size: u64,
+        near: Option<String>,
+    },
     /// `dealloc(symbol)`.
     Dealloc(String),
     /// `symbol:` at the start of a line. The body of the label (raw bytes,
@@ -215,10 +223,10 @@ where
 
 fn parse_alloc(args: &str) -> Result<Statement, ParseError> {
     let parts: Vec<&str> = args.split(',').map(str::trim).collect();
-    if parts.len() != 2 {
+    if !(parts.len() == 2 || parts.len() == 3) {
         return Err(ParseError::BadCall {
             fn_name: "alloc".into(),
-            detail: format!("expected 2 args, got {}", parts.len()),
+            detail: format!("expected 2 or 3 args, got {}", parts.len()),
         });
     }
     let symbol = parts[0];
@@ -232,9 +240,11 @@ fn parse_alloc(args: &str) -> Result<Statement, ParseError> {
         fn_name: "alloc".into(),
         detail: format!("invalid size {:?}", parts[1]),
     })?;
+    let near = parts.get(2).map(|s| s.to_string());
     Ok(Statement::Alloc {
         symbol: symbol.to_string(),
         size,
+        near,
     })
 }
 
@@ -305,21 +315,36 @@ mod tests {
             classify("alloc(codecave,1024)").unwrap(),
             Statement::Alloc {
                 symbol: "codecave".into(),
-                size: 1024
+                size: 1024,
+                near: None,
             }
         );
         assert_eq!(
             classify("alloc(codecave,0x400)").unwrap(),
             Statement::Alloc {
                 symbol: "codecave".into(),
-                size: 1024
+                size: 1024,
+                near: None,
             }
         );
         assert_eq!(
             classify("alloc(codecave,$400)").unwrap(),
             Statement::Alloc {
                 symbol: "codecave".into(),
-                size: 1024
+                size: 1024,
+                near: None,
+            }
+        );
+    }
+
+    #[test]
+    fn parse_alloc_with_near_hint() {
+        assert_eq!(
+            classify("alloc(codecave,1024,originalcode)").unwrap(),
+            Statement::Alloc {
+                symbol: "codecave".into(),
+                size: 1024,
+                near: Some("originalcode".into()),
             }
         );
     }
@@ -436,7 +461,7 @@ mod tests {
             .enable
             .iter()
             .find_map(|s| match s {
-                Statement::Alloc { symbol, size } if symbol == "codecave" => Some(*size),
+                Statement::Alloc { symbol, size, .. } if symbol == "codecave" => Some(*size),
                 _ => None,
             })
             .expect("alloc(codecave,1024) must be present");

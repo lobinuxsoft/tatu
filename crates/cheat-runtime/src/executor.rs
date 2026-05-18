@@ -98,9 +98,16 @@ impl Engine {
 
     /// Walk `script.enable` and apply every supported statement.
     ///
-    /// On any error, every write already applied is reverted before
-    /// returning. The returned [`ActiveCheat`] can later be `.disable()`d
-    /// to undo the writes on demand.
+    /// Two-pass evaluation. Pass 1 runs the side-effecting symbol providers
+    /// (`aobscanmodule`, `alloc`) and walks a virtual cursor through the rest
+    /// of the script to bind every `LabelSite` to its address — that's what
+    /// makes forward references like `jmp return` work when `return:` is
+    /// declared further down. Pass 2 walks again and emits the actual bytes
+    /// with the now-complete symbol table.
+    ///
+    /// On any error, every side effect already applied (writes + allocs) is
+    /// reverted before returning. The returned [`ActiveCheat`] can later be
+    /// `.disable()`d to undo the writes on demand.
     pub fn enable(&mut self, script: &Script) -> Result<ActiveCheat, ExecError> {
         let mut active = ActiveCheat {
             pid: self.pid,
@@ -108,74 +115,119 @@ impl Engine {
             allocs: HashMap::new(),
             disabled: false,
         };
-        let mut cursor: Option<u64> = None;
 
-        for stmt in &script.enable {
-            if let Err(e) = self.apply_one(stmt, &mut cursor, &mut active) {
-                rollback(&mut active);
-                return Err(e);
-            }
+        if let Err(e) = self.pre_resolve_symbols(script, &mut active) {
+            rollback(&mut active);
+            return Err(e);
+        }
+        if let Err(e) = self.write_pass(script, &mut active) {
+            rollback(&mut active);
+            return Err(e);
         }
         Ok(active)
     }
 
-    fn apply_one(
+    /// Pass 1: bind every symbol the script references before pass 2 writes.
+    fn pre_resolve_symbols(
         &mut self,
-        stmt: &Statement,
-        cursor: &mut Option<u64>,
+        script: &Script,
         active: &mut ActiveCheat,
     ) -> Result<(), ExecError> {
-        match stmt {
-            Statement::AobScanModule {
-                symbol, pattern, ..
-            } => {
-                let addr = self.scan_unique(pattern, symbol)?;
-                self.symbols.insert(symbol.clone(), addr);
-                Ok(())
-            }
-            Statement::RegisterSymbol(_)
-            | Statement::UnregisterSymbol(_)
-            | Statement::Label(_)
-            | Statement::Directive(_) => Ok(()),
-            Statement::LabelSite(name) => {
-                let addr = *self
-                    .symbols
-                    .get(name)
-                    .ok_or_else(|| ExecError::UnknownSymbol(name.clone()))?;
-                *cursor = Some(addr);
-                Ok(())
-            }
-            Statement::AbsoluteSite(addr) => {
-                *cursor = Some(*addr);
-                Ok(())
-            }
-            Statement::Raw(line) => {
-                let Some(base) = *cursor else {
-                    return Err(ExecError::OrphanWrite(line.clone()));
-                };
-                let bytes = compile_raw(line, &self.symbols, self.pid, base)?;
-                let original = memory::read_bytes(self.pid, base, bytes.len())?;
-                memory::write_bytes(self.pid, base, &bytes)?;
-                active.undo.push((base, original));
-                *cursor = Some(base + bytes.len() as u64);
-                Ok(())
-            }
-            Statement::Alloc { symbol, size } => {
-                let addr = alloc::alloc_remote(self.pid, *size as usize, None, None)?;
-                self.symbols.insert(symbol.clone(), addr);
-                active.allocs.insert(symbol.clone(), (addr, *size as usize));
-                Ok(())
-            }
-            Statement::Dealloc(symbol) => {
-                let (addr, size) = active
-                    .allocs
-                    .remove(symbol)
-                    .ok_or_else(|| ExecError::DeallocUnknown(symbol.clone()))?;
-                alloc::dealloc_remote(self.pid, addr, size)?;
-                self.symbols.remove(symbol);
-                Ok(())
+        let mut cursor: Option<u64> = None;
+        for stmt in &script.enable {
+            match stmt {
+                Statement::AobScanModule {
+                    symbol, pattern, ..
+                } => {
+                    let addr = self.scan_unique(pattern, symbol)?;
+                    self.symbols.insert(symbol.clone(), addr);
+                }
+                Statement::Alloc { symbol, size, near } => {
+                    let hint = near.as_ref().and_then(|n| {
+                        self.symbols
+                            .get(n)
+                            .copied()
+                            .or_else(|| parse_numeric_token(n))
+                    });
+                    let addr = alloc::alloc_remote(self.pid, *size as usize, None, hint)?;
+                    self.symbols.insert(symbol.clone(), addr);
+                    active.allocs.insert(symbol.clone(), (addr, *size as usize));
+                }
+                Statement::LabelSite(name) => {
+                    if let Some(addr) = self.symbols.get(name).copied() {
+                        cursor = Some(addr);
+                    } else if let Some(c) = cursor {
+                        // Forward label declared inside an alloc / aobscan region.
+                        self.symbols.insert(name.clone(), c);
+                    }
+                    // Else: still unbound; pass 2 will emit OrphanWrite / UnknownSymbol.
+                }
+                Statement::AbsoluteSite(addr) => {
+                    cursor = Some(*addr);
+                }
+                Statement::Raw(line) => {
+                    if let Some(c) = cursor.as_mut() {
+                        let len = estimate_raw_length(line).ok_or_else(|| {
+                            ExecError::Unsupported(format!(
+                                "cannot estimate length for pass 1: {line:?}"
+                            ))
+                        })?;
+                        *c = c.wrapping_add(len as u64);
+                    }
+                }
+                Statement::RegisterSymbol(_)
+                | Statement::UnregisterSymbol(_)
+                | Statement::Label(_)
+                | Statement::Directive(_)
+                | Statement::Dealloc(_) => {}
             }
         }
+        Ok(())
+    }
+
+    /// Pass 2: with every symbol now bound, walk again and emit the bytes.
+    fn write_pass(&mut self, script: &Script, active: &mut ActiveCheat) -> Result<(), ExecError> {
+        let mut cursor: Option<u64> = None;
+        for stmt in &script.enable {
+            match stmt {
+                Statement::LabelSite(name) => {
+                    let addr = *self
+                        .symbols
+                        .get(name)
+                        .ok_or_else(|| ExecError::UnknownSymbol(name.clone()))?;
+                    cursor = Some(addr);
+                }
+                Statement::AbsoluteSite(addr) => {
+                    cursor = Some(*addr);
+                }
+                Statement::Raw(line) => {
+                    let Some(base) = cursor else {
+                        return Err(ExecError::OrphanWrite(line.clone()));
+                    };
+                    let bytes = compile_raw(line, &self.symbols, self.pid, base)?;
+                    let original = memory::read_bytes(self.pid, base, bytes.len())?;
+                    memory::write_bytes(self.pid, base, &bytes)?;
+                    active.undo.push((base, original));
+                    cursor = Some(base + bytes.len() as u64);
+                }
+                Statement::Dealloc(symbol) => {
+                    let (addr, size) = active
+                        .allocs
+                        .remove(symbol)
+                        .ok_or_else(|| ExecError::DeallocUnknown(symbol.clone()))?;
+                    alloc::dealloc_remote(self.pid, addr, size)?;
+                    self.symbols.remove(symbol);
+                }
+                // Symbol providers already ran in pass 1.
+                Statement::AobScanModule { .. }
+                | Statement::Alloc { .. }
+                | Statement::RegisterSymbol(_)
+                | Statement::UnregisterSymbol(_)
+                | Statement::Label(_)
+                | Statement::Directive(_) => {}
+            }
+        }
+        Ok(())
     }
 
     fn scan_unique(&self, pattern_text: &str, symbol: &str) -> Result<u64, ExecError> {
@@ -183,8 +235,17 @@ impl Engine {
         let regions = read_maps(self.pid).map_err(|e| ExecError::Memory(RuntimeError::Io(e)))?;
         let mut hits: Vec<u64> = Vec::new();
         for r in regions.iter().filter(|r| is_scannable(r)) {
-            let mut found = scanner::scan_in_process(self.pid, r, &pat)?;
-            hits.append(&mut found);
+            // Some regions show `r` in /proc/<pid>/maps but `process_vm_readv`
+            // still returns EFAULT (kernel-managed shadow stacks, lazy file
+            // mappings whose backing inode is gone, etc.). CE silently skips
+            // these and so do we — a single unreadable region must not abort
+            // the whole scan.
+            let found = match scanner::scan_in_process(self.pid, r, &pat) {
+                Ok(v) => v,
+                Err(RuntimeError::Nix(nix::errno::Errno::EFAULT)) => continue,
+                Err(e) => return Err(ExecError::Memory(e)),
+            };
+            hits.extend(found);
             if hits.len() > 1 {
                 break;
             }
@@ -300,6 +361,67 @@ fn compile_raw(
     Err(ExecError::Unsupported(format!(
         "asm/raw not supported: {line:?}"
     )))
+}
+
+/// Predict the byte length a `Statement::Raw` line will produce in pass 2.
+///
+/// Used by [`Engine::pre_resolve_symbols`] to advance the virtual cursor
+/// without resolving symbols. The estimator is intentionally restricted to
+/// length-stable encodings — `jmp`/`call` always assemble as 5 bytes
+/// (rel32) in Phase B v1, `ret` as 1, `nop N` as N, `readmem(s, N)` as N,
+/// `dq` as 8, `db` as the token count. Returns `None` for anything we cannot
+/// size without compiling; pass 2 will surface a clear `Unsupported` error.
+fn estimate_raw_length(line: &str) -> Option<usize> {
+    let trimmed = line.trim();
+    if let Some(rest) = trimmed
+        .strip_prefix("db ")
+        .or_else(|| trimmed.strip_prefix("db\t"))
+    {
+        return Some(rest.split_whitespace().count());
+    }
+    if trimmed.starts_with("dq ") || trimmed.starts_with("dq\t") {
+        return Some(8);
+    }
+    if let Some(rest) = trimmed
+        .strip_prefix("nop ")
+        .or_else(|| trimmed.strip_prefix("nop\t"))
+    {
+        return rest.trim().parse::<usize>().ok();
+    }
+    if trimmed == "nop" {
+        return Some(1);
+    }
+    if let Some(args) = trimmed
+        .strip_prefix("readmem(")
+        .and_then(|s| s.strip_suffix(')'))
+    {
+        let parts: Vec<&str> = args.split(',').map(str::trim).collect();
+        if parts.len() == 2 {
+            return parts[1].parse::<usize>().ok();
+        }
+        return None;
+    }
+    let mnemonic = trimmed
+        .split_once(char::is_whitespace)
+        .map(|(m, _)| m)
+        .unwrap_or(trimmed)
+        .to_ascii_lowercase();
+    match mnemonic.as_str() {
+        "jmp" | "call" => Some(5),
+        "ret" | "retn" => Some(1),
+        _ => None,
+    }
+}
+
+fn parse_numeric_token(token: &str) -> Option<u64> {
+    let t = token.trim();
+    if let Some(hex) = t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")) {
+        return u64::from_str_radix(hex, 16).ok();
+    }
+    if let Some(hex) = t.strip_prefix('$') {
+        return u64::from_str_radix(hex, 16).ok();
+    }
+    t.parse::<u64>().ok()
 }
 
 fn parse_byte_list(rest: &str) -> Option<Vec<u8>> {
@@ -587,5 +709,109 @@ mod tests {
         assert!(matches!(err, ExecError::Unsupported(_)));
         // Crucially, the previously-applied write was reverted.
         assert_eq!(&victim[8..16], &original);
+    }
+
+    #[test]
+    fn estimate_raw_length_covers_db_dq_nop_readmem_and_asm() {
+        assert_eq!(estimate_raw_length("db 90 90 90"), Some(3));
+        assert_eq!(estimate_raw_length("dq 0"), Some(8));
+        assert_eq!(estimate_raw_length("nop 5"), Some(5));
+        assert_eq!(estimate_raw_length("nop"), Some(1));
+        assert_eq!(estimate_raw_length("readmem(orig, 8)"), Some(8));
+        assert_eq!(estimate_raw_length("jmp codecave"), Some(5));
+        assert_eq!(estimate_raw_length("call helper"), Some(5));
+        assert_eq!(estimate_raw_length("ret"), Some(1));
+        // Phase B v2 mnemonics return None — pass 1 will surface a clear
+        // Unsupported error if the script uses them.
+        assert_eq!(estimate_raw_length("mov rax, 1"), None);
+        assert_eq!(estimate_raw_length("push ebx"), None);
+    }
+
+    /// Pass 1 must bind a forward `LabelSite` to the cursor it computes from
+    /// previous Raw lengths. This is the lever that makes `jmp return` work
+    /// before `return:` is reached at write time.
+    #[test]
+    #[ignore = "requires kernel.yama.ptrace_scope=0 or CAP_SYS_PTRACE; run with --ignored"]
+    fn full_injection_round_trip_against_forked_child() {
+        use nix::sys::signal::{Signal, kill};
+        use nix::sys::wait::waitpid;
+        use nix::unistd::{ForkResult, fork};
+        use std::time::Duration;
+
+        // Unique pattern + 8 bytes that will be overwritten by the hook.
+        // The pattern is the *anchor* aobscan finds; the 8 bytes immediately
+        // after it are what `jmp codecave + nop 3` (5+3 = 8 bytes) replaces.
+        let pattern = [0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE, 0xBA, 0xBE];
+        let original_hook = [0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0];
+        // Box::leak so the buffer survives the fork's child lifetime without
+        // touching the parent's stack frame.
+        let mut buf = vec![0u8; 256];
+        buf[0..8].copy_from_slice(&pattern);
+        buf[8..16].copy_from_slice(&original_hook);
+        let leaked: &'static [u8] = Box::leak(buf.into_boxed_slice());
+        let pattern_addr = leaked.as_ptr() as u64;
+        let hook_addr = pattern_addr + 8;
+
+        match unsafe { fork() }.expect("fork") {
+            ForkResult::Child => {
+                // Hold the page alive long enough for the parent to ptrace
+                // + run the inject + dealloc + verify.
+                std::thread::sleep(Duration::from_secs(10));
+                std::process::exit(0);
+            }
+            ForkResult::Parent { child } => {
+                std::thread::sleep(Duration::from_millis(150));
+
+                let pattern_str = pattern
+                    .iter()
+                    .map(|b| format!("{b:02X}"))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                let orig_hex = original_hook
+                    .iter()
+                    .map(|b| format!("{b:02X}"))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                let script_src = format!(
+                    "[ENABLE]\n\
+                     aobscanmodule(hook_origin, $process, {pattern_str})\n\
+                     alloc(codecave, 0x100, hook_origin)\n\
+                     codecave:\n\
+                     db {orig_hex}\n\
+                     jmp hook_return\n\
+                     hook:\n\
+                     jmp codecave\n\
+                     nop 3\n\
+                     hook_return:\n\
+                     [DISABLE]\n\
+                     dealloc(codecave)\n",
+                );
+                let script = parse(&script_src).expect("script parses");
+
+                let mut eng = Engine::new(child);
+                // `hook` references the 8-byte hook region. AobScan finds
+                // `hook_origin` = pattern_addr; we pre-bind `hook` =
+                // pattern_addr + 8 so the second LabelSite can resolve to it.
+                eng.bind_symbol("hook", hook_addr);
+
+                let active = eng.enable(&script).expect("full inject must succeed");
+                let _ = pattern_addr; // silence dead_code on the debug capture
+
+                // After enable, the child's memory at `hook_addr` is the
+                // jmp + nop pad we wrote. Read it back and verify.
+                let hooked = crate::memory::read_bytes(child, hook_addr, 8).expect("read hook");
+                assert_eq!(hooked[0], 0xE9, "first hook byte is jmp rel32 opcode");
+                assert_eq!(&hooked[5..8], &[0x90, 0x90, 0x90], "nop 3 fill");
+
+                // Disable rolls back the writes AND deallocs the codecave.
+                active.disable().expect("disable must succeed");
+                let restored =
+                    crate::memory::read_bytes(child, hook_addr, 8).expect("read restored");
+                assert_eq!(restored, original_hook, "hook bytes byte-for-byte restored");
+
+                let _ = kill(child, Signal::SIGKILL);
+                let _ = waitpid(child, None);
+            }
+        }
     }
 }
