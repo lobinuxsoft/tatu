@@ -13,6 +13,7 @@
 //! - No `unwrap` in non-test code; errors bubble through `RuntimeError`.
 //! - The runtime is process-agnostic: any Linux PID, Proton or native.
 
+pub mod alloc;
 pub mod aurora;
 pub mod executor;
 pub mod freeze;
@@ -24,6 +25,7 @@ pub mod parser;
 pub mod process;
 pub mod scanner;
 
+pub use alloc::{AllocError, alloc_remote, dealloc_remote, find_libc_symbol};
 pub use aurora::{AuroraError, Feature, Trainer, load_trainer, load_trainer_file};
 pub use executor::{ActiveCheat, Engine, ExecError};
 pub use freeze::{FreezeError, FreezeHandle, FreezeKey, FreezeRegistry};
