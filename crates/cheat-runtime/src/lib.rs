@@ -30,6 +30,7 @@ pub mod migrate;
 pub mod parser;
 pub mod process;
 pub mod scanner;
+pub mod threads;
 
 pub use alloc::{AllocError, alloc_remote, dealloc_remote};
 pub use asm::{AsmError, compile_line as compile_asm_line};
