@@ -1,3 +1,21 @@
+//! # DEPRECATED — superseded by `cheat-runtime`
+//!
+//! `cheat-core` was the project's first attempt at a Linux-native cheat
+//! runtime, covering only **Static** + **PointerChain** value writes
+//! (no support for CE Auto-Assembler scripts). Issue #64 introduced
+//! `cheat-runtime`, a full Rust port of the CE Auto-Assembler dialect with
+//! atomic enable/disable, AOB scanning, and a manifest format that is a
+//! strict superset of what `cheat-core` does.
+//!
+//! **Do not add new code that depends on this crate.** Use `cheat-runtime`
+//! instead. The legacy `~/.config/backlog-tracker/cheats/<appid>.json`
+//! files this crate consumes will be migrated to the new manifest format
+//! (`~/.config/backlog-tracker/trainers/<appid>/*.json`) in a follow-up PR
+//! that ships an explicit converter. Until then, this crate stays in the
+//! workspace so existing user data keeps working.
+//!
+//! See the crate `README.md` for the full migration plan and timeline.
+
 pub mod attach;
 pub mod ct_import;
 pub mod db;

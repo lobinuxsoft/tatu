@@ -1,3 +1,13 @@
+//! **Deprecated** legacy commands that read the static/pointer-chain JSON
+//! files under `~/.config/backlog-tracker/cheats/<appid>.json` via
+//! `cheat-core`. New work belongs in `commands::cheat_runtime_cmd` (manifest
+//! format under `~/.config/backlog-tracker/trainers/<appid>/*.json`).
+//!
+//! This file stays alive only so existing user data keeps working until the
+//! migration tool in subtask 7-B converts it across. Every invocation logs a
+//! `[deprecated cheat_cmd]` line to stderr so it is observable when the panel
+//! still touches this code path.
+
 use std::path::PathBuf;
 
 use serde::Serialize;
@@ -7,6 +17,10 @@ use cheat_core::db::load_cheat_table;
 use cheat_core::freeze::{FreezeKey, FreezeRegistry};
 use cheat_core::types::Cheat;
 use cheat_core::{is_process_running, trigger_cheat};
+
+fn deprecated_call(name: &str) {
+    eprintln!("[deprecated cheat_cmd] {name} — migrate to cheat_runtime_cmd (manifest format)");
+}
 
 #[derive(Debug, Serialize)]
 pub struct CheatSummary {
@@ -32,18 +46,21 @@ fn cheats_dir() -> PathBuf {
 
 #[tauri::command]
 pub fn cheat_list(app_id: u64) -> Result<Vec<CheatSummary>, String> {
+    deprecated_call("cheat_list");
     let table = load_cheat_table(&cheats_dir(), app_id).map_err(|e| e.to_string())?;
     Ok(table.cheats.iter().map(summarize).collect())
 }
 
 #[tauri::command]
 pub fn cheat_trigger(app_id: u64, cheat_id: String) -> Result<(), String> {
+    deprecated_call("cheat_trigger");
     let table = load_cheat_table(&cheats_dir(), app_id).map_err(|e| e.to_string())?;
     trigger_cheat(&table, &cheat_id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn cheat_status(app_id: u64) -> CheatStatus {
+    deprecated_call("cheat_status");
     match load_cheat_table(&cheats_dir(), app_id) {
         Ok(table) => CheatStatus {
             has_cheats: !table.cheats.is_empty(),
@@ -63,6 +80,7 @@ pub fn cheat_freeze_toggle(
     cheat_id: String,
     enabled: bool,
 ) -> Result<bool, String> {
+    deprecated_call("cheat_freeze_toggle");
     let key = FreezeKey {
         app_id,
         cheat_id: cheat_id.clone(),
@@ -86,6 +104,7 @@ pub fn cheat_freeze_status(
     app_id: u64,
     cheat_id: String,
 ) -> bool {
+    deprecated_call("cheat_freeze_status");
     let key = FreezeKey { app_id, cheat_id };
 
     // Auto-cleanup: if the target process is gone, a previously-active
