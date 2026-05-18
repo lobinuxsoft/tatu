@@ -3,6 +3,7 @@ name = "cheat-core"
 version = "0.1.0"
 edition = "2024"
 publish = false
+description = "DEPRECATED — superseded by cheat-runtime. See crate README and #64 subtask 7."
 
 [dependencies]
 nix = { version = "0.29", features = ["uio", "process"] }

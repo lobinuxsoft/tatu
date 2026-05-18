@@ -217,16 +217,11 @@ export async function loadCheats(gameId) {
     const tablesSection = renderTablesSection(gameId, tables);
     const searchBar = renderSearchBar(gameId);
 
-    let nativeBlock;
-    if (!status.has_cheats || !list) {
-      nativeBlock =
-        `<div class="ach-empty">` +
-          `No native cheats configured for this game.<br>` +
-          `<small style="color:var(--fg-muted);display:block;margin-top:0.5rem">` +
-            `Create <code>~/.config/backlog-tracker/cheats/${gameId}.json</code>` +
-          `</small>` +
-        `</div>`;
-    } else {
+    let nativeBlock = "";
+    // Legacy cheat-core section is deprecated: only render when the user has
+    // pre-existing data on disk. Empty state is hidden entirely so the
+    // surrounding UI doesn't keep recommending the obsolete format.
+    if (status.has_cheats && list) {
       const freezeIds = list.filter(c => c.action_kind === "Freeze").map(c => c.id);
       const freezeStates = await Promise.all(
         freezeIds.map(id =>
@@ -238,7 +233,16 @@ export async function loadCheats(gameId) {
 
       const pillCls = status.process_running ? "cheat-pill-on" : "cheat-pill-off";
       const pillTxt = status.process_running ? "\u{1F7E2} Game running" : "\u{1F534} Game not running";
-      nativeBlock = `<div class="cheat-status-bar"><span class="cheat-pill ${pillCls}">${pillTxt}</span></div><ul class="cheat-list">`;
+      nativeBlock =
+        `<div class="cheat-legacy-header">` +
+          `Legacy native cheats <span class="cheat-legacy-tag">deprecated</span>` +
+        `</div>` +
+        `<div class="cheat-legacy-note">` +
+          `Reads <code>~/.config/backlog-tracker/cheats/${gameId}.json</code>. ` +
+          `Will be auto-migrated to the manifest format above in a future update.` +
+        `</div>` +
+        `<div class="cheat-status-bar"><span class="cheat-pill ${pillCls}">${pillTxt}</span></div>` +
+        `<ul class="cheat-list">`;
       for (const c of list) {
         const desc = c.description ? `<div class="cheat-desc">${esc(c.description)}</div>` : "";
         const dis = status.process_running ? "" : "disabled";
