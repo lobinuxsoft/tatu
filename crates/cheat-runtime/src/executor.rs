@@ -20,6 +20,7 @@ use std::collections::HashMap;
 
 use nix::unistd::Pid;
 
+use crate::alloc::{self, AllocError};
 use crate::maps::{MemoryRegion, read_maps};
 use crate::memory::{self, RuntimeError};
 use crate::parser::{Script, Statement};
@@ -31,12 +32,16 @@ pub enum ExecError {
     Pattern(#[from] scanner::ParseError),
     #[error("memory io: {0}")]
     Memory(#[from] RuntimeError),
+    #[error("remote alloc: {0}")]
+    Alloc(#[from] AllocError),
     #[error("aobscanmodule({symbol}): no match in any executable region")]
     PatternNotFound { symbol: String },
     #[error("aobscanmodule({symbol}): {count} matches found, pattern must be unique")]
     PatternAmbiguous { symbol: String, count: usize },
     #[error("unknown symbol {0:?}")]
     UnknownSymbol(String),
+    #[error("dealloc({0:?}) before matching alloc — symbol not in active region table")]
+    DeallocUnknown(String),
     #[error("write outside any label site: {0:?}")]
     OrphanWrite(String),
     #[error("unsupported statement: {0}")]
@@ -58,6 +63,10 @@ pub struct Engine {
 pub struct ActiveCheat {
     pid: Pid,
     undo: Vec<(u64, Vec<u8>)>,
+    /// Pairs of `(remote_address, size)` that were allocated via `Statement::Alloc`
+    /// and need to be released with `munmap` when the cheat is disabled. Keyed
+    /// by the AA symbol name so `Statement::Dealloc(symbol)` can find them.
+    allocs: HashMap<String, (u64, usize)>,
     disabled: bool,
 }
 
@@ -93,6 +102,7 @@ impl Engine {
         let mut active = ActiveCheat {
             pid: self.pid,
             undo: Vec::new(),
+            allocs: HashMap::new(),
             disabled: false,
         };
         let mut cursor: Option<u64> = None;
@@ -147,12 +157,21 @@ impl Engine {
                 *cursor = Some(base + bytes.len() as u64);
                 Ok(())
             }
-            Statement::Alloc { symbol, size } => Err(ExecError::Unsupported(format!(
-                "alloc({symbol}, {size}) — requires remote mmap (out of subtask 4 scope)"
-            ))),
-            Statement::Dealloc(s) => Err(ExecError::Unsupported(format!(
-                "dealloc({s}) — paired with alloc, out of subtask 4 scope"
-            ))),
+            Statement::Alloc { symbol, size } => {
+                let addr = alloc::alloc_remote(self.pid, *size as usize, None, None)?;
+                self.symbols.insert(symbol.clone(), addr);
+                active.allocs.insert(symbol.clone(), (addr, *size as usize));
+                Ok(())
+            }
+            Statement::Dealloc(symbol) => {
+                let (addr, size) = active
+                    .allocs
+                    .remove(symbol)
+                    .ok_or_else(|| ExecError::DeallocUnknown(symbol.clone()))?;
+                alloc::dealloc_remote(self.pid, addr, size)?;
+                self.symbols.remove(symbol);
+                Ok(())
+            }
         }
     }
 
@@ -217,6 +236,12 @@ impl Drop for ActiveCheat {
 fn rollback(active: &mut ActiveCheat) {
     while let Some((addr, bytes)) = active.undo.pop() {
         let _ = memory::write_bytes(active.pid, addr, &bytes);
+    }
+    // Release any codecaves we allocated. Best-effort: a failure here would
+    // leak ~pages in the target, not a correctness issue for the host. The
+    // map is drained so a second rollback is a no-op.
+    for (_, (addr, size)) in active.allocs.drain() {
+        let _ = alloc::dealloc_remote(active.pid, addr, size);
     }
 }
 
@@ -332,11 +357,45 @@ mod tests {
     }
 
     #[test]
-    fn alloc_returns_unsupported_and_rolls_back() {
-        let script = parse("[ENABLE]\nalloc(codecave,1024)\n[DISABLE]\n").unwrap();
+    #[ignore = "requires kernel.yama.ptrace_scope=0 or CAP_SYS_PTRACE; run with --ignored"]
+    fn alloc_enable_then_disable_round_trips_codecave() {
+        use nix::sys::signal::{Signal, kill};
+        use nix::sys::wait::waitpid;
+        use nix::unistd::{ForkResult, fork};
+        use std::time::Duration;
+
+        // Linux refuses ptrace-self. Fork a sleeping child and run the
+        // executor against it.
+        match unsafe { fork() }.expect("fork") {
+            ForkResult::Child => {
+                std::thread::sleep(Duration::from_secs(5));
+                std::process::exit(0);
+            }
+            ForkResult::Parent { child } => {
+                std::thread::sleep(Duration::from_millis(150));
+
+                let script =
+                    parse("[ENABLE]\nalloc(codecave,4096)\n[DISABLE]\ndealloc(codecave)\n")
+                        .unwrap();
+                let mut eng = Engine::new(child);
+                let active = eng.enable(&script).expect("alloc must succeed");
+                let codecave_addr = *eng.symbols().get("codecave").expect("codecave bound");
+                assert!(codecave_addr != 0);
+                assert!(codecave_addr & 0xfff == 0);
+                active.disable().unwrap();
+
+                let _ = kill(child, Signal::SIGKILL);
+                let _ = waitpid(child, None);
+            }
+        }
+    }
+
+    #[test]
+    fn dealloc_of_unknown_symbol_errors() {
+        let script = parse("[ENABLE]\ndealloc(missing)\n[DISABLE]\n").unwrap();
         let mut eng = engine_for_self();
         let err = eng.enable(&script).unwrap_err();
-        assert!(matches!(err, ExecError::Unsupported(_)));
+        assert!(matches!(err, ExecError::DeallocUnknown(name) if name == "missing"));
     }
 
     #[test]
@@ -493,12 +552,12 @@ mod tests {
         victim[8..16].copy_from_slice(&original);
         let target_addr = victim.as_ptr() as u64 + 8;
 
-        // First write zeros, then trigger Unsupported via alloc — must rollback.
+        // First write zeros, then trigger an Unsupported asm line — must rollback.
         let script_src = "[ENABLE]\n\
              registersymbol(victim)\n\
              victim:\n\
              db 00 00 00 00 00 00 00 00\n\
-             alloc(unsupported,1024)\n\
+             push ebx\n\
              [DISABLE]\n";
         let script = parse(script_src).unwrap();
 
