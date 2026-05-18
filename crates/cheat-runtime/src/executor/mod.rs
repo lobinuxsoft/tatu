@@ -198,11 +198,12 @@ impl Engine {
                 }
                 Statement::Raw(line) => {
                     if let Some(c) = cursor.as_mut() {
-                        let len = estimate_raw_length(line, &self.symbols).ok_or_else(|| {
-                            ExecError::Unsupported(format!(
-                                "cannot estimate length for pass 1: {line:?}"
-                            ))
-                        })?;
+                        let len =
+                            estimate_raw_length(line, &self.symbols, *c).ok_or_else(|| {
+                                ExecError::Unsupported(format!(
+                                    "cannot estimate length for pass 1: {line:?}"
+                                ))
+                            })?;
                         *c = c.wrapping_add(len as u64);
                     }
                 }
