@@ -16,6 +16,7 @@
 pub mod alloc;
 pub mod asm;
 pub mod aurora;
+pub mod chain;
 pub mod ct_import;
 pub mod elfsym;
 pub mod executor;
@@ -33,6 +34,10 @@ pub mod scanner;
 pub use alloc::{AllocError, alloc_remote, dealloc_remote};
 pub use asm::{AsmError, compile_line as compile_asm_line};
 pub use aurora::{AuroraError, Feature, Trainer, load_trainer, load_trainer_file};
+pub use chain::{
+    AddrExpr, ChainError, Value, parse_addr_expr, read_chain, read_value, resolve_addr_expr,
+    walk_chain, write_chain, write_value,
+};
 pub use ct_import::{
     CtImportError, ImportReport, auto_import_default_dirs, auto_import_for_app, convert_ct_file,
     import_dirs as ct_import_dirs,
