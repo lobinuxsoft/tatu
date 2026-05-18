@@ -92,13 +92,13 @@ fn is_trainer_object(v: &Value) -> bool {
         Value::String(s) => s.to_lowercase().ends_with(".exe"),
         _ => false,
     });
-    let has_features = map.values().any(|val| array_has_uuid_dict(val));
+    let has_features = map.values().any(array_has_uuid_dict);
     has_exe && has_features
 }
 
 fn array_has_uuid_dict(v: &Value) -> bool {
     let Value::Array(items) = v else { return false };
-    items.iter().any(|item| dict_has_uuid_string(item))
+    items.iter().any(dict_has_uuid_string)
 }
 
 fn dict_has_uuid_string(v: &Value) -> bool {
@@ -120,7 +120,6 @@ fn extract_trainer(trainer: &Value, root: &Value) -> Trainer {
     let mut title = String::new();
     let mut version = String::new();
     let mut appid: Option<u64> = None;
-    let mut title_id: Option<u64> = None;
     let mut features: Vec<Feature> = Vec::new();
     let mut scripts: Vec<String> = Vec::new();
     // Longest string that isn't the exe/platform/version: provisional title.
@@ -139,10 +138,11 @@ fn extract_trainer(trainer: &Value, root: &Value) -> Trainer {
                 }
             }
             Value::Number(n) => {
-                if let Some(u) = n.as_u64() {
-                    if appid.is_none() && (1..=STEAM_APPID_MAX).contains(&u) && u >= 100 {
-                        appid = Some(u);
-                    }
+                if let Some(u) = n.as_u64()
+                    && appid.is_none()
+                    && (100..=STEAM_APPID_MAX).contains(&u)
+                {
+                    appid = Some(u);
                 }
             }
             Value::Array(items) => {
@@ -161,7 +161,7 @@ fn extract_trainer(trainer: &Value, root: &Value) -> Trainer {
     }
 
     // Outer envelope: walk the root for a likely titleId (separate from appid).
-    title_id = find_title_id(root, appid);
+    let title_id = find_title_id(root, appid);
 
     Trainer {
         exe,
