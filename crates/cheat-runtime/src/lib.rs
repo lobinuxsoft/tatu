@@ -13,12 +13,14 @@
 //! - No `unwrap` in non-test code; errors bubble through `RuntimeError`.
 //! - The runtime is process-agnostic: any Linux PID, Proton or native.
 
+pub mod aurora;
 pub mod executor;
 pub mod maps;
 pub mod memory;
 pub mod parser;
 pub mod scanner;
 
+pub use aurora::{AuroraError, Feature, Trainer, load_trainer, load_trainer_file};
 pub use executor::{ActiveCheat, Engine, ExecError};
 pub use maps::{MemoryRegion, Perms, parse_maps, read_maps};
 pub use memory::{RuntimeError, read_bytes, write_bytes};
