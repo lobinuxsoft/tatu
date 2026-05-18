@@ -11,7 +11,7 @@ mod steam;
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use cheat_core::freeze::FreezeRegistry;
+use cheat_runtime::FreezeRegistry;
 use commands::cheat_runtime_cmd::ActiveCheats;
 use state::AppState;
 
@@ -20,6 +20,19 @@ pub type SharedState = Mutex<AppState>;
 pub fn run() {
     let app_state = AppState::load();
     let active_cheats: ActiveCheats = Mutex::new(HashMap::new());
+
+    // One-shot migration of any legacy cheat-core JSON to the manifest format
+    // consumed by `cheat-runtime`. Idempotent: existing manifests are skipped.
+    match cheat_runtime::migrate_default_dirs() {
+        Ok(report) if !report.migrated.is_empty() || !report.unsupported.is_empty() => {
+            eprintln!(
+                "[cheat-runtime migrate] migrated={:?} skipped={:?} unsupported={:?}",
+                report.migrated, report.skipped, report.unsupported
+            );
+        }
+        Ok(_) => {}
+        Err(e) => eprintln!("[cheat-runtime migrate] failed: {e}"),
+    }
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -46,11 +59,6 @@ pub fn run() {
             commands::collection_cmd::import_completed_from_collection,
             commands::disk_cmd::scan_sizes,
             commands::misc_cmd::detect_steam_id,
-            commands::cheat_cmd::cheat_list,
-            commands::cheat_cmd::cheat_trigger,
-            commands::cheat_cmd::cheat_status,
-            commands::cheat_cmd::cheat_freeze_toggle,
-            commands::cheat_cmd::cheat_freeze_status,
             commands::ce_cmd::ce_install_status,
             commands::ce_cmd::ce_install_trigger,
             commands::ce_cmd::ce_list_tables_for_game,

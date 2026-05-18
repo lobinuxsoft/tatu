@@ -1,5 +1,4 @@
 pub mod ce_cmd;
-pub mod cheat_cmd;
 pub mod cheat_runtime_cmd;
 pub mod cheat_search_cmd;
 pub mod collection_cmd;
