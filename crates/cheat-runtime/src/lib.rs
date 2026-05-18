@@ -43,7 +43,8 @@ pub use extension::{Extension, ExtensionError};
 pub use freeze::{FreezeError, FreezeHandle, FreezeKey, FreezeRegistry};
 pub use inject::{InjectError, inject_so};
 pub use manifest::{
-    FeatureKind, Manifest, ManifestError, ManifestFeature, load_manifests_for, manifests_dir_for,
+    FeatureKind, Manifest, ManifestError, ManifestFeature, VType, ValueSpec, load_manifests_for,
+    manifests_dir_for,
 };
 pub use maps::{MemoryRegion, Perms, parse_maps, read_maps};
 pub use memory::{RuntimeError, read_bytes, write_bytes};

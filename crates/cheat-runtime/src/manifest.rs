@@ -61,6 +61,61 @@ pub enum FeatureKind {
     /// Visual section title. No script, no switch — the UI renders just
     /// the description as a header above the features that follow.
     Header,
+    /// Pointer-chain value entry — CE-style `<Address>` + `<Offsets>` that
+    /// resolves to a numeric address whose contents the UI can read, write
+    /// and freeze. Requires the [`ValueSpec`] sibling field to be present.
+    Value,
+}
+
+/// Numeric type read from / written to a pointer-chain target.
+///
+/// Combines CE's [`VariableType`] enum with the `ShowAsSigned` flag into a
+/// single rust-typed variant: CE keeps them separate so the same bytes can
+/// be displayed differently, but the importer collapses them at conversion
+/// time (`VariableType=4 Bytes` + `ShowAsSigned=1` → `I32`) so downstream
+/// code can dispatch on a single tag.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "lowercase")]
+pub enum VType {
+    U32,
+    I32,
+    U64,
+    I64,
+    F32,
+    F64,
+}
+
+impl VType {
+    pub const fn size_bytes(self) -> usize {
+        match self {
+            VType::U32 | VType::I32 | VType::F32 => 4,
+            VType::U64 | VType::I64 | VType::F64 => 8,
+        }
+    }
+
+    pub const fn is_float(self) -> bool {
+        matches!(self, VType::F32 | VType::F64)
+    }
+}
+
+/// Pointer-chain value resolution descriptor.
+///
+/// `base_expr` is the verbatim CE address expression
+/// (e.g. `"[base_address]+30"` or `"[shop]+4B0"`). Evaluating it gives the
+/// starting address — see [`crate::chain`] for the parser, which mirrors
+/// `symbolhandler.pas:getAddressFromName` for the subset the importer
+/// emits (single-level `[symbol]` deref + optional `+|-hex` literal).
+///
+/// `offsets` is stored in **the same order as CE's `<Offsets>` XML**: the
+/// last element is the outermost pointer to follow first, and `offsets[0]`
+/// is the innermost — it lands directly in the final address with no
+/// trailing deref. The walker iterates in reverse.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ValueSpec {
+    pub base_expr: String,
+    #[serde(default)]
+    pub offsets: Vec<u64>,
+    pub vtype: VType,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -72,11 +127,16 @@ pub struct ManifestFeature {
     #[serde(default)]
     pub kind: FeatureKind,
     /// CE Auto-Assembler script for [`FeatureKind::Toggle`]. Always `None`
-    /// for [`FeatureKind::Header`]. Omitted in older manifests (before this
-    /// field existed) — those load as `Toggle` with `script: None` and the
-    /// runtime command rejects them at enable time with a clear error.
+    /// for [`FeatureKind::Header`] / [`FeatureKind::Value`]. Omitted in
+    /// older manifests (before this field existed) — those load as
+    /// `Toggle` with `script: None` and the runtime command rejects them
+    /// at enable time with a clear error.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub script: Option<String>,
+    /// Pointer-chain spec for [`FeatureKind::Value`]. Always `None` for
+    /// Toggle and Header.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<ValueSpec>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -188,6 +248,7 @@ mod tests {
                     category: Some("Player".into()),
                     kind: FeatureKind::Toggle,
                     script: Some("[ENABLE]\n[DISABLE]\n".into()),
+                    value: None,
                 },
                 ManifestFeature {
                     uuid: "h".into(),
@@ -195,12 +256,60 @@ mod tests {
                     category: None,
                     kind: FeatureKind::Header,
                     script: None,
+                    value: None,
+                },
+                ManifestFeature {
+                    uuid: "v".into(),
+                    name: "Current HP".into(),
+                    category: Some("Player Stats".into()),
+                    kind: FeatureKind::Value,
+                    script: None,
+                    value: Some(ValueSpec {
+                        base_expr: "[base_address]+30".into(),
+                        offsets: vec![0x13C, 0x8B8, 0x2D0],
+                        vtype: VType::U32,
+                    }),
                 },
             ],
         };
         let text = serde_json::to_string(&m).unwrap();
         let back: Manifest = serde_json::from_str(&text).unwrap();
         assert_eq!(m, back);
+    }
+
+    #[test]
+    fn value_kind_round_trip_preserves_offsets_and_vtype() {
+        let json = r#"{
+            "exe": "Game.exe",
+            "features": [{
+                "uuid": "hp",
+                "name": "Current HP",
+                "kind": "value",
+                "value": {
+                    "base_expr": "[base_address]+30",
+                    "offsets": [316, 2232, 720],
+                    "vtype": "u32"
+                }
+            }]
+        }"#;
+        let m: Manifest = serde_json::from_str(json).unwrap();
+        assert_eq!(m.features[0].kind, FeatureKind::Value);
+        let spec = m.features[0].value.as_ref().unwrap();
+        assert_eq!(spec.base_expr, "[base_address]+30");
+        assert_eq!(spec.offsets, vec![316, 2232, 720]);
+        assert_eq!(spec.vtype, VType::U32);
+    }
+
+    #[test]
+    fn vtype_byte_sizes_match_ce() {
+        assert_eq!(VType::U32.size_bytes(), 4);
+        assert_eq!(VType::I32.size_bytes(), 4);
+        assert_eq!(VType::F32.size_bytes(), 4);
+        assert_eq!(VType::U64.size_bytes(), 8);
+        assert_eq!(VType::I64.size_bytes(), 8);
+        assert_eq!(VType::F64.size_bytes(), 8);
+        assert!(VType::F32.is_float() && VType::F64.is_float());
+        assert!(!VType::U32.is_float() && !VType::I64.is_float());
     }
 
     #[test]
