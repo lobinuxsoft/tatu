@@ -8,20 +8,24 @@ mod shortcuts;
 mod state;
 mod steam;
 
+use std::collections::HashMap;
 use std::sync::Mutex;
 
 use cheat_core::freeze::FreezeRegistry;
+use commands::cheat_runtime_cmd::ActiveCheats;
 use state::AppState;
 
 pub type SharedState = Mutex<AppState>;
 
 pub fn run() {
     let app_state = AppState::load();
+    let active_cheats: ActiveCheats = Mutex::new(HashMap::new());
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(Mutex::new(app_state))
         .manage(FreezeRegistry::new())
+        .manage(active_cheats)
         .invoke_handler(tauri::generate_handler![
             commands::state_cmd::get_state,
             commands::state_cmd::get_settings,
@@ -51,6 +55,9 @@ pub fn run() {
             commands::ce_cmd::ce_install_trigger,
             commands::ce_cmd::ce_list_tables_for_game,
             commands::ce_cmd::ce_open_for_game,
+            commands::cheat_runtime_cmd::cheat_runtime_list_features,
+            commands::cheat_runtime_cmd::cheat_runtime_enable,
+            commands::cheat_runtime_cmd::cheat_runtime_disable,
             commands::cheat_search_cmd::open_fearless_search,
         ])
         .run(tauri::generate_context!())

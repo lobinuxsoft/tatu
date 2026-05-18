@@ -114,6 +114,73 @@ function wireTables(panel, gameId) {
   });
 }
 
+function renderRuntimeSection(features) {
+  if (!features.length) {
+    return (
+      `<div class="cheat-runtime-section">` +
+        `<div class="cheat-runtime-header">Trainer features</div>` +
+        `<div class="ach-empty">` +
+          `No trainer manifests for this game.<br>` +
+          `<small style="color:var(--fg-muted);display:block;margin-top:0.5rem">` +
+            `Place a JSON manifest under <code>~/.config/backlog-tracker/trainers/&lt;appid&gt;/</code>` +
+          `</small>` +
+        `</div>` +
+      `</div>`
+    );
+  }
+  const anyRunning = features.some(f => f.game_running);
+  const pillCls = anyRunning ? "cheat-pill-on" : "cheat-pill-off";
+  const pillTxt = anyRunning ? "\u{1F7E2} Game running" : "\u{1F534} Game not running";
+
+  let html =
+    `<div class="cheat-runtime-section">` +
+      `<div class="cheat-runtime-header">` +
+        `Trainer features <span class="cheat-pill ${pillCls}">${pillTxt}</span>` +
+      `</div>` +
+      `<ul class="cheat-runtime-list">`;
+  for (const f of features) {
+    const dis = f.game_running ? "" : "disabled";
+    const ch = f.active ? "checked" : "";
+    const cat = f.category ? `${esc(f.category)} • ` : "";
+    html +=
+      `<li class="cheat-runtime-item">` +
+        `<div class="cheat-runtime-info">` +
+          `<div class="cheat-runtime-name">${esc(f.name)}</div>` +
+          `<div class="cheat-runtime-meta">${cat}${esc(f.manifest_exe)}</div>` +
+        `</div>` +
+        `<label class="cheat-switch" title="${dis ? 'Launch the game first' : 'Toggle'}">` +
+          `<input type="checkbox" data-feature-uuid="${esc(f.uuid)}" ${ch} ${dis}>` +
+          `<span class="cheat-switch-slider"></span>` +
+        `</label>` +
+      `</li>`;
+  }
+  html += `</ul></div>`;
+  return html;
+}
+
+function wireRuntimeSwitches(panel, gameId) {
+  panel.querySelectorAll(".cheat-runtime-item input").forEach(input => {
+    input.addEventListener("change", async () => {
+      const uuid = input.dataset.featureUuid;
+      const desired = input.checked;
+      input.disabled = true;
+      try {
+        if (desired) {
+          await invoke("cheat_runtime_enable", { appId: String(gameId), featureUuid: uuid });
+        } else {
+          await invoke("cheat_runtime_disable", { featureUuid: uuid });
+        }
+      } catch (e) {
+        input.checked = !desired;
+        input.title = String(e);
+        setTimeout(() => input.removeAttribute("title"), 3000);
+      } finally {
+        input.disabled = false;
+      }
+    });
+  });
+}
+
 function wireSearchButton(panel) {
   const btn = panel.querySelector(".cheat-search-btn");
   if (!btn) return;
@@ -135,9 +202,10 @@ export async function loadCheats(gameId) {
   if (!panel) return;
 
   try {
-    const [ceStatus, tables, status, list] = await Promise.all([
+    const [ceStatus, tables, runtimeFeatures, status, list] = await Promise.all([
       invoke("ce_install_status").catch(() => ({ kind: "not_installed" })),
       invoke("ce_list_tables_for_game", { appId: String(gameId) }).catch(() => []),
+      invoke("cheat_runtime_list_features", { appId: String(gameId) }).catch(() => []),
       invoke("cheat_status", { appId: gameId }),
       invoke("cheat_list", { appId: gameId }).catch(() => null),
     ]);
@@ -145,6 +213,7 @@ export async function loadCheats(gameId) {
     if (state.panelGameId !== gameId) return;
 
     const banner = renderCeBanner(ceStatus);
+    const runtimeSection = renderRuntimeSection(runtimeFeatures);
     const tablesSection = renderTablesSection(gameId, tables);
     const searchBar = renderSearchBar(gameId);
 
@@ -188,16 +257,17 @@ export async function loadCheats(gameId) {
       nativeBlock += `</ul>`;
     }
 
-    panel.innerHTML = banner + tablesSection + searchBar + nativeBlock;
+    panel.innerHTML = banner + runtimeSection + tablesSection + searchBar + nativeBlock;
 
     wireBanner(panel, gameId);
+    wireRuntimeSwitches(panel, gameId);
     wireTables(panel, gameId);
     wireSearchButton(panel);
 
     panel.querySelectorAll(".cheat-trigger-btn").forEach(btn => {
       btn.addEventListener("click", () => triggerCheat(gameId, btn.dataset.cheatId, btn));
     });
-    panel.querySelectorAll(".cheat-switch input").forEach(input => {
+    panel.querySelectorAll(".cheat-list .cheat-switch input").forEach(input => {
       input.addEventListener("change", () => toggleFreeze(gameId, input.dataset.cheatId, input));
     });
   } catch (e) {
