@@ -64,6 +64,13 @@ pub enum Statement {
     /// [`Statement::Raw`] entries until the next label site, ENABLE/DISABLE
     /// boundary, or end-of-input.
     LabelSite(String),
+    /// `0xADDR:` or `<decimal>:` at the start of a line. CE Auto-Assembler
+    /// accepts numeric label sites as a way to anchor writes at a known
+    /// absolute address without a prior `aobscanmodule` or `registersymbol`.
+    /// The executor sets the cursor to the address directly and the body is
+    /// captured as subsequent [`Statement::Raw`] entries, identical to the
+    /// symbolic [`Statement::LabelSite`] semantics.
+    AbsoluteSite(u64),
     /// `{$begin_obfuscate}`, `{$end_obfuscate}`, `{$lua}`, `{$asm}` and other
     /// CE compiler directives. Preserved with surrounding braces intact.
     Directive(String),
@@ -149,6 +156,9 @@ fn classify(line: &str) -> Result<Statement, ParseError> {
         let name = name.trim();
         if is_identifier(name) {
             return Ok(Statement::LabelSite(name.to_string()));
+        }
+        if let Some(addr) = parse_size(name) {
+            return Ok(Statement::AbsoluteSite(addr));
         }
     }
     // Function-call style commands: `name(args)`.
@@ -323,6 +333,27 @@ mod tests {
         assert_eq!(
             classify("originalcode_7149:").unwrap(),
             Statement::LabelSite("originalcode_7149".into())
+        );
+    }
+
+    #[test]
+    fn parse_absolute_label_site_hex() {
+        assert_eq!(
+            classify("0xB056EC28:").unwrap(),
+            Statement::AbsoluteSite(0xB056_EC28)
+        );
+        assert_eq!(
+            classify("0X2A39E658:").unwrap(),
+            Statement::AbsoluteSite(0x2A39_E658)
+        );
+        assert_eq!(classify("$DEAD:").unwrap(), Statement::AbsoluteSite(0xDEAD));
+    }
+
+    #[test]
+    fn parse_absolute_label_site_decimal() {
+        assert_eq!(
+            classify("708486264:").unwrap(),
+            Statement::AbsoluteSite(708_486_264)
         );
     }
 

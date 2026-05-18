@@ -132,6 +132,10 @@ impl Engine {
                 *cursor = Some(addr);
                 Ok(())
             }
+            Statement::AbsoluteSite(addr) => {
+                *cursor = Some(*addr);
+                Ok(())
+            }
             Statement::Raw(line) => {
                 let Some(base) = *cursor else {
                     return Err(ExecError::OrphanWrite(line.clone()));
@@ -454,6 +458,30 @@ mod tests {
 
         // After DISABLE the original bytes are restored.
         assert_eq!(&victim[16..32], &original);
+    }
+
+    /// AbsoluteSite parity with LabelSite: the migrator emits numeric label
+    /// sites (CE's `0xADDR:` form) and the executor must apply writes the
+    /// same way as it does for symbolic sites resolved via aobscanmodule.
+    #[test]
+    fn absolute_site_roundtrips_a_byte_overwrite() {
+        let mut victim = [0u8; 16];
+        let original = [0xCA, 0xFE, 0xBA, 0xBE];
+        victim[4..8].copy_from_slice(&original);
+        let target_addr = victim.as_ptr() as u64 + 4;
+
+        let script_src = format!("[ENABLE]\n0x{target_addr:X}:\ndb 11 22 33 44\n[DISABLE]\n");
+        let script = parse(&script_src).unwrap();
+
+        let mut eng = Engine::new(Pid::this());
+        let active = eng
+            .enable(&script)
+            .expect("absolute-site enable must succeed");
+        assert_eq!(active.writes(), 1);
+        assert_eq!(&victim[4..8], &[0x11, 0x22, 0x33, 0x44]);
+
+        active.disable().unwrap();
+        assert_eq!(&victim[4..8], &original);
     }
 
     /// Atomicity: a failing later statement must roll back the writes that

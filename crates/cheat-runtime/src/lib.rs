@@ -15,20 +15,24 @@
 
 pub mod aurora;
 pub mod executor;
+pub mod freeze;
 pub mod manifest;
 pub mod maps;
 pub mod memory;
+pub mod migrate;
 pub mod parser;
 pub mod process;
 pub mod scanner;
 
 pub use aurora::{AuroraError, Feature, Trainer, load_trainer, load_trainer_file};
 pub use executor::{ActiveCheat, Engine, ExecError};
+pub use freeze::{FreezeError, FreezeHandle, FreezeKey, FreezeRegistry};
 pub use manifest::{
     Manifest, ManifestError, ManifestFeature, load_manifests_for, manifests_dir_for,
 };
 pub use maps::{MemoryRegion, Perms, parse_maps, read_maps};
 pub use memory::{RuntimeError, read_bytes, write_bytes};
+pub use migrate::{MigrateError, MigrateReport, migrate_default_dirs, migrate_dirs};
 pub use parser::{ParseError as ScriptParseError, Script, Statement, parse as parse_script};
 pub use process::{find_pid_by_exe, find_pids_by_exe};
 pub use scanner::{ParseError as PatternParseError, Pattern, scan, scan_in_process};
