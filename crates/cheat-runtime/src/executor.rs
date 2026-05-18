@@ -619,14 +619,14 @@ mod tests {
     fn compile_raw_rejects_unsupported_asm() {
         let syms = HashMap::new();
         let pid = Pid::this();
-        // `lea` is still Phase B v2.3 territory — must surface Unsupported.
-        // `add` / `sub` / `xor` likewise have no encoder yet.
+        // Anything outside the Phase B subset (`imul`, AVX, MMX, etc.) must
+        // surface Unsupported so the user sees what's missing.
         assert!(matches!(
-            compile_raw("lea rax, [rbx+8]", &syms, pid, 0),
+            compile_raw("imul rax, rbx, 4", &syms, pid, 0),
             Err(ExecError::Unsupported(_))
         ));
         assert!(matches!(
-            compile_raw("xor rax, rax", &syms, pid, 0),
+            compile_raw("vmovups ymm0, ymm1", &syms, pid, 0),
             Err(ExecError::Unsupported(_))
         ));
     }
@@ -713,12 +713,12 @@ mod tests {
         let target_addr = victim.as_ptr() as u64 + 8;
 
         // First write zeros, then trigger an Unsupported asm line — must rollback.
-        // `lea` is still Phase B v2.3 territory and surfaces Unsupported.
+        // `imul rax, rbx, 4` is outside the Phase B subset.
         let script_src = "[ENABLE]\n\
              registersymbol(victim)\n\
              victim:\n\
              db 00 00 00 00 00 00 00 00\n\
-             lea rax, [rbx+8]\n\
+             imul rax, rbx, 4\n\
              [DISABLE]\n";
         let script = parse(script_src).unwrap();
 
@@ -757,8 +757,10 @@ mod tests {
             estimate_raw_length("cmp byte ptr [foo], 1", &empty),
             Some(8)
         );
-        // `lea` is still Phase B v2.3 territory — falls through to None.
-        assert_eq!(estimate_raw_length("lea rax, [rbx+8]", &empty), None);
+        // `imul rax, rbx, 4` is outside the Phase B subset — None.
+        assert_eq!(estimate_raw_length("imul rax, rbx, 4", &empty), None);
+        // `lea rax, [rbx+8]` is now supported (4 bytes: 48 8D 43 08).
+        assert_eq!(estimate_raw_length("lea rax, [rbx+8]", &empty), Some(4));
     }
 
     /// Pass 1 must bind a forward `LabelSite` to the cursor it computes from

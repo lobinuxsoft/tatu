@@ -108,10 +108,139 @@ pub fn parse(input: &str) -> Result<Script, ParseError> {
         _ => (section_after(input, enable_idx, None), ""),
     };
 
-    Ok(Script {
-        enable: parse_section(enable_section)?,
-        disable: parse_section(disable_section)?,
-    })
+    let enable = resolve_anonymous_refs(parse_section(enable_section)?)?;
+    let disable = resolve_anonymous_refs(parse_section(disable_section)?)?;
+    Ok(Script { enable, disable })
+}
+
+/// Rewrite CE-AA anonymous-label tokens (`@f` forward / `@b` back) inside
+/// `Raw` statements to the actual label name they would resolve to. CE walks
+/// the statement list, tracking the most recently seen `LabelSite`. `@f`
+/// becomes `labels[lastseen + 1]` and `@b` becomes `labels[lastseen]`.
+/// `@@:` is also accepted but auto-renamed to a unique synthetic label that
+/// then joins the regular list.
+///
+/// Ported from `Cheat Engine/autoassembler.pas:815-896` — same algorithm,
+/// minus the random-letter rename for `@@:` (we use a deterministic
+/// ordinal so error messages stay readable in tests).
+fn resolve_anonymous_refs(mut stmts: Vec<Statement>) -> Result<Vec<Statement>, ParseError> {
+    // First sweep: rename `@@:` LabelSites to `__anon_<ord>` so the
+    // second sweep treats them as regular labels.
+    let mut anon_counter = 0usize;
+    for s in stmts.iter_mut() {
+        if let Statement::LabelSite(name) = s
+            && name == "@@"
+        {
+            *name = format!("__anon_{anon_counter}");
+            anon_counter += 1;
+        }
+    }
+
+    // Collect every LabelSite name in document order.
+    let labels: Vec<String> = stmts
+        .iter()
+        .filter_map(|s| match s {
+            Statement::LabelSite(n) => Some(n.clone()),
+            _ => None,
+        })
+        .collect();
+
+    // Second sweep: track `lastseen` index of the most recent LabelSite and
+    // rewrite `@f` / `@b` tokens inside Raw lines accordingly.
+    let mut lastseen: Option<usize> = None;
+    for s in stmts.iter_mut() {
+        match s {
+            Statement::LabelSite(n) => {
+                lastseen = labels.iter().position(|l| l == n);
+            }
+            Statement::Raw(line) => {
+                if !contains_anon_token(line) {
+                    continue;
+                }
+                let resolved = rewrite_anonymous_tokens(line, &labels, lastseen)?;
+                *line = resolved;
+            }
+            _ => {}
+        }
+    }
+    Ok(stmts)
+}
+
+fn contains_anon_token(line: &str) -> bool {
+    let lower = line.to_ascii_lowercase();
+    has_word_token(&lower, "@f") || has_word_token(&lower, "@b")
+}
+
+fn rewrite_anonymous_tokens(
+    line: &str,
+    labels: &[String],
+    lastseen: Option<usize>,
+) -> Result<String, ParseError> {
+    let lower = line.to_ascii_lowercase();
+    let mut out = line.to_string();
+    if has_word_token(&lower, "@f") {
+        let next_idx = lastseen.map_or(0, |i| i + 1);
+        let target = labels.get(next_idx).ok_or_else(|| ParseError::BadCall {
+            fn_name: "@f".into(),
+            detail: format!("no label declared after this point in {line:?}"),
+        })?;
+        out = replace_word_token(&out, "@f", target);
+        out = replace_word_token(&out, "@F", target);
+    }
+    if has_word_token(&lower, "@b") {
+        let prev_idx = lastseen.ok_or_else(|| ParseError::BadCall {
+            fn_name: "@b".into(),
+            detail: format!("no label declared before this point in {line:?}"),
+        })?;
+        let target = &labels[prev_idx];
+        out = replace_word_token(&out, "@b", target);
+        out = replace_word_token(&out, "@B", target);
+    }
+    Ok(out)
+}
+
+/// Token-boundary aware search: returns `true` if `needle` appears in
+/// `haystack` not surrounded by identifier characters (`@` counts as part
+/// of the token here so `@f` doesn't match inside `foo@f` accidentally).
+fn has_word_token(haystack: &str, needle: &str) -> bool {
+    let bytes = haystack.as_bytes();
+    let n = needle.as_bytes();
+    let mut i = 0;
+    while i + n.len() <= bytes.len() {
+        if &bytes[i..i + n.len()] == n {
+            let after_ok = bytes.get(i + n.len()).map_or(true, |c| !is_token_char(*c));
+            if after_ok {
+                return true;
+            }
+        }
+        i += 1;
+    }
+    false
+}
+
+fn replace_word_token(haystack: &str, needle: &str, replacement: &str) -> String {
+    let bytes = haystack.as_bytes();
+    let n = needle.as_bytes();
+    let mut out = String::with_capacity(haystack.len());
+    let mut i = 0;
+    while i + n.len() <= bytes.len() {
+        if &bytes[i..i + n.len()] == n {
+            let after_ok = bytes.get(i + n.len()).map_or(true, |c| !is_token_char(*c));
+            if after_ok {
+                out.push_str(replacement);
+                i += n.len();
+                continue;
+            }
+        }
+        out.push(bytes[i] as char);
+        i += 1;
+    }
+    out.push_str(&haystack[i..]);
+    out
+}
+
+fn is_token_char(c: u8) -> bool {
+    c.is_ascii_alphanumeric() || c == b'_'
 }
 
 fn find_block_header(input: &str, tag: &str) -> Option<usize> {
@@ -164,6 +293,11 @@ fn classify(line: &str) -> Result<Statement, ParseError> {
         let name = name.trim();
         if is_identifier(name) {
             return Ok(Statement::LabelSite(name.to_string()));
+        }
+        // CE-AA anonymous label `@@:` — flows through to
+        // `resolve_anonymous_refs`, which renames it to `__anon_<ord>`.
+        if name == "@@" {
+            return Ok(Statement::LabelSite("@@".to_string()));
         }
         if let Some(addr) = parse_size(name) {
             return Ok(Statement::AbsoluteSite(addr));
@@ -512,5 +646,137 @@ mod tests {
     fn aobscan_with_two_args_errors() {
         let err = classify("aobscanmodule(foo,$process)").unwrap_err();
         assert!(matches!(err, ParseError::BadCall { fn_name, .. } if fn_name == "aobscanmodule"));
+    }
+
+    #[test]
+    fn anonymous_forward_label_rewritten_to_next_label() {
+        let src = "[ENABLE]\n\
+                   codecave:\n\
+                   cmp eax, 1\n\
+                   jne @f\n\
+                   mov eax, 2\n\
+                   code:\n\
+                   ret\n\
+                   [DISABLE]\n";
+        let s = parse(src).unwrap();
+        // The `jne @f` should have been rewritten to `jne code` because
+        // `code:` is the next LabelSite after the codecave block.
+        let rewritten = s
+            .enable
+            .iter()
+            .find_map(|s| match s {
+                Statement::Raw(line) if line.starts_with("jne ") => Some(line.clone()),
+                _ => None,
+            })
+            .expect("jne @f rewritten");
+        assert_eq!(rewritten, "jne code");
+    }
+
+    #[test]
+    fn anonymous_backward_label_rewritten_to_previous() {
+        let src = "[ENABLE]\n\
+                   start:\n\
+                   add eax, 1\n\
+                   loop_body:\n\
+                   sub eax, 1\n\
+                   jne @b\n\
+                   ret\n\
+                   [DISABLE]\n";
+        let s = parse(src).unwrap();
+        // `@b` resolves to the most recent label before the line,
+        // which is `loop_body`.
+        let rewritten = s
+            .enable
+            .iter()
+            .find_map(|s| match s {
+                Statement::Raw(line) if line.starts_with("jne ") => Some(line.clone()),
+                _ => None,
+            })
+            .expect("jne @b rewritten");
+        assert_eq!(rewritten, "jne loop_body");
+    }
+
+    #[test]
+    fn double_at_label_gets_synthetic_name() {
+        let src = "[ENABLE]\n\
+                   @@:\n\
+                   jmp @b\n\
+                   [DISABLE]\n";
+        let s = parse(src).unwrap();
+        let site = s.enable.iter().find_map(|s| match s {
+            Statement::LabelSite(n) => Some(n.clone()),
+            _ => None,
+        });
+        assert_eq!(site.as_deref(), Some("__anon_0"));
+        let raw = s.enable.iter().find_map(|s| match s {
+            Statement::Raw(line) => Some(line.clone()),
+            _ => None,
+        });
+        assert_eq!(raw.as_deref(), Some("jmp __anon_0"));
+    }
+
+    #[test]
+    fn forward_anon_without_next_label_errors() {
+        let src = "[ENABLE]\n\
+                   start:\n\
+                   jmp @f\n\
+                   [DISABLE]\n";
+        let err = parse(src).unwrap_err();
+        assert!(matches!(err, ParseError::BadCall { fn_name, .. } if fn_name == "@f"));
+    }
+
+    #[test]
+    fn anon_token_inside_identifier_not_replaced() {
+        // `foo@f` and `@for` should not match the `@f` token.
+        let src = "[ENABLE]\n\
+                   anchor:\n\
+                   db DE @forward AD\n\
+                   next:\n\
+                   [DISABLE]\n";
+        let s = parse(src).unwrap();
+        // db line should be preserved verbatim — `@forward` is its own
+        // identifier and is not the `@f` token.
+        let raw = s.enable.iter().find_map(|s| match s {
+            Statement::Raw(line) => Some(line.clone()),
+            _ => None,
+        });
+        assert_eq!(raw.as_deref(), Some("db DE @forward AD"));
+    }
+
+    /// The real Ender Magnolia `unlHarvestFlag` Aurora trainer parses
+    /// end-to-end and `jne @f` resolves to the next regular label
+    /// (`code`) — that's the path CE's `autoassembler.pas:875` takes
+    /// when no explicit `@@:` precedes the `@f`.
+    #[test]
+    fn em_fixture_parses_and_resolves_anon_forward() {
+        let src = include_str!("../tests/fixtures/aurora_em_unlharvestflag.txt");
+        let s = parse(src).expect("EM fixture must parse");
+
+        // `jne @f` should have been rewritten to `jne code` — `code:` is
+        // the next label after the codecave body.
+        let jne_line = s
+            .enable
+            .iter()
+            .find_map(|stmt| match stmt {
+                Statement::Raw(line) if line.starts_with("jne ") => Some(line.clone()),
+                _ => None,
+            })
+            .expect("jne line present");
+        assert_eq!(jne_line, "jne code");
+
+        // No raw line still contains a literal `@f` / `@b` token after
+        // resolution.
+        for stmt in &s.enable {
+            if let Statement::Raw(line) = stmt {
+                assert!(
+                    !has_word_token(&line.to_ascii_lowercase(), "@f"),
+                    "unresolved @f in {line:?}"
+                );
+                assert!(
+                    !has_word_token(&line.to_ascii_lowercase(), "@b"),
+                    "unresolved @b in {line:?}"
+                );
+            }
+        }
     }
 }

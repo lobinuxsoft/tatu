@@ -84,6 +84,10 @@ pub fn compile_line(
         "pop" => Ok(Some(emit_pop(rest, base_addr)?)),
         "mov" => Ok(Some(emit_mov(rest, symbols, base_addr)?)),
         "cmp" => Ok(Some(emit_cmp(rest, symbols, base_addr)?)),
+        "lea" => Ok(Some(emit_lea(rest, symbols, base_addr)?)),
+        "add" => Ok(Some(emit_arith(rest, symbols, base_addr, Arith::Add)?)),
+        "sub" => Ok(Some(emit_arith(rest, symbols, base_addr, Arith::Sub)?)),
+        "xor" => Ok(Some(emit_arith(rest, symbols, base_addr, Arith::Xor)?)),
         m if is_conditional_jump(m) => Ok(Some(emit_jcc(m, rest, symbols, base_addr)?)),
         _ => Ok(None),
     }
@@ -394,6 +398,105 @@ fn split_two_operands(rest: &str) -> Result<(&str, &str), AsmError> {
         .split_once(',')
         .ok_or_else(|| AsmError::BadOperand(rest.into()))?;
     Ok((lhs.trim(), rhs.trim()))
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Arith {
+    Add,
+    Sub,
+    Xor,
+}
+
+fn emit_arith(
+    rest: &str,
+    syms: &HashMap<String, u64>,
+    base: u64,
+    op: Arith,
+) -> Result<Vec<u8>, AsmError> {
+    let (lhs_text, rhs_text) = split_two_operands(rest)?;
+    let lhs = parse_register(lhs_text).ok_or_else(|| {
+        AsmError::Unsupported(format!("{op:?} lhs {lhs_text:?}: needs to be a register"))
+    })?;
+    let mut a = CodeAssembler::new(64)?;
+    match lhs {
+        TypedReg::R64(l) => match (op, parse_register(rhs_text)) {
+            (Arith::Add, Some(TypedReg::R64(r))) => a.add(l, r)?,
+            (Arith::Sub, Some(TypedReg::R64(r))) => a.sub(l, r)?,
+            (Arith::Xor, Some(TypedReg::R64(r))) => a.xor(l, r)?,
+            (op, None) => {
+                let imm = parse_immediate(rhs_text, syms).ok_or_else(|| {
+                    AsmError::Unsupported(format!(
+                        "{op:?} {lhs_text}, {rhs_text:?}: rhs must be a register or immediate"
+                    ))
+                })?;
+                match op {
+                    Arith::Add => a.add(l, imm as i32)?,
+                    Arith::Sub => a.sub(l, imm as i32)?,
+                    Arith::Xor => a.xor(l, imm as i32)?,
+                }
+            }
+            _ => {
+                return Err(AsmError::Unsupported(format!(
+                    "{op:?} {lhs_text}, {rhs_text:?}: width mismatch"
+                )));
+            }
+        },
+        TypedReg::R32(l) => match (op, parse_register(rhs_text)) {
+            (Arith::Add, Some(TypedReg::R32(r))) => a.add(l, r)?,
+            (Arith::Sub, Some(TypedReg::R32(r))) => a.sub(l, r)?,
+            (Arith::Xor, Some(TypedReg::R32(r))) => a.xor(l, r)?,
+            (op, None) => {
+                let imm = parse_immediate(rhs_text, syms).ok_or_else(|| {
+                    AsmError::Unsupported(format!(
+                        "{op:?} {lhs_text}, {rhs_text:?}: rhs must be a register or immediate"
+                    ))
+                })?;
+                match op {
+                    Arith::Add => a.add(l, imm as i32)?,
+                    Arith::Sub => a.sub(l, imm as i32)?,
+                    Arith::Xor => a.xor(l, imm as i32)?,
+                }
+            }
+            _ => {
+                return Err(AsmError::Unsupported(format!(
+                    "{op:?} {lhs_text}, {rhs_text:?}: width mismatch"
+                )));
+            }
+        },
+        _ => {
+            return Err(AsmError::Unsupported(format!(
+                "{op:?} {lhs_text}: 8/16-bit lhs not supported yet"
+            )));
+        }
+    }
+    Ok(a.assemble(base)?)
+}
+
+fn emit_lea(rest: &str, syms: &HashMap<String, u64>, base: u64) -> Result<Vec<u8>, AsmError> {
+    let (dst_text, src_text) = split_two_operands(rest)?;
+    let dst = parse_register(dst_text)
+        .ok_or_else(|| AsmError::Unsupported(format!("lea dst {dst_text:?}: not a register")))?;
+    // `lea` always takes a memory operand for the source, even without a
+    // size prefix. The CE convention is to write `lea rax, [rbx+8]` plain.
+    let body = src_text.trim();
+    if !body.starts_with('[') || !body.ends_with(']') {
+        return Err(AsmError::Unsupported(format!(
+            "lea {dst_text}, {src_text:?}: source must be a `[...]` memory expression"
+        )));
+    }
+    let inner = &body[1..body.len() - 1];
+    let mem = parse_addr_inside_brackets(inner.trim(), syms)?;
+    let mut a = CodeAssembler::new(64)?;
+    match dst {
+        TypedReg::R64(r) => a.lea(r, mem)?,
+        TypedReg::R32(r) => a.lea(r, mem)?,
+        _ => {
+            return Err(AsmError::Unsupported(format!(
+                "lea {dst_text}: 8/16-bit destination not supported"
+            )));
+        }
+    }
+    Ok(a.assemble(base)?)
 }
 
 // ---- memory operand parsing --------------------------------------------
@@ -921,9 +1024,9 @@ mod tests {
 
     #[test]
     fn unknown_mnemonic_returns_none() {
-        // `lea` is still Phase B v2.3 territory — must fall through to None
+        // `imul` isn't in the Phase B subset — must fall through to None
         // so the executor's compile_raw can surface its own Unsupported.
-        let bytes = compile_line("lea rax, [rbx+8]", &HashMap::new(), 0).unwrap();
+        let bytes = compile_line("imul rax, rbx, 4", &HashMap::new(), 0).unwrap();
         assert!(bytes.is_none());
     }
 
@@ -1074,5 +1177,90 @@ mod tests {
         // Without brackets, the parser sees a non-register dest and rejects
         // it as an unsupported source.
         assert!(matches!(err, AsmError::Unsupported(_)));
+    }
+
+    // -- Phase B v2.3 (final): lea / add / sub / xor + EM fixture --
+
+    #[test]
+    fn lea_reg64_with_reg_disp() {
+        // lea rax, [rbx+8] → 48 8D 43 08
+        let bytes = compile_line("lea rax, [rbx+8]", &HashMap::new(), 0)
+            .unwrap()
+            .unwrap();
+        assert_eq!(bytes, vec![0x48, 0x8D, 0x43, 0x08]);
+    }
+
+    #[test]
+    fn add_reg64_imm() {
+        // add rax, 1 — iced picks the imm32 form for the rax special-case
+        // (48 05 01 00 00 00, 6 bytes) over the imm8 sext form
+        // (48 83 C0 01, 4 bytes). Both decode to the same operation.
+        let bytes = compile_line("add rax, 1", &HashMap::new(), 0)
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(
+                bytes.as_slice(),
+                [0x48, 0x83, 0xC0, 0x01] | [0x48, 0x05, 0x01, 0, 0, 0]
+            ),
+            "unexpected add encoding: {bytes:02X?}"
+        );
+    }
+
+    #[test]
+    fn sub_reg64_reg64() {
+        // sub rax, rbx → 48 29 D8
+        let bytes = compile_line("sub rax, rbx", &HashMap::new(), 0)
+            .unwrap()
+            .unwrap();
+        assert_eq!(bytes, vec![0x48, 0x29, 0xD8]);
+    }
+
+    #[test]
+    fn xor_zeros_register() {
+        // xor eax, eax → 31 C0 (the canonical 2-byte zeroing idiom).
+        let bytes = compile_line("xor eax, eax", &HashMap::new(), 0)
+            .unwrap()
+            .unwrap();
+        assert_eq!(bytes, vec![0x31, 0xC0]);
+    }
+
+    /// Real-world smoke: every asm Raw line of the Ender Magnolia
+    /// `unlHarvestFlag` Aurora trainer compiles to bytes with the asm
+    /// module — including the `cmp byte ptr [sym], 1`, the float-coerced
+    /// store, and the `jne @f` after the parser rewrites `@f` to a real
+    /// label. This is the line-level half of "the dialect is good enough
+    /// for a real Aurora codecave"; the full Engine::enable round-trip
+    /// against a live process is in the executor's ptrace-gated tests.
+    #[test]
+    fn em_fixture_codecave_body_all_lines_compile() {
+        // Parser-resolved equivalent of the fixture's codecave block.
+        // `@f` would have been rewritten by `resolve_anonymous_refs` to
+        // `code` (the next label in the script). The asm module sees only
+        // the post-resolution form.
+        let lines = [
+            "push ebx",
+            "cmp byte ptr [unlHarvestFlag],1",
+            "jne code",
+            "mov dword ptr [r13+13C],(float)100",
+            "pop r13d",
+            "jmp return",
+            "jmp codecave",
+        ];
+        let syms = symtab(&[
+            ("unlHarvestFlag", 0x1000_0000),
+            ("code", 0x2000_0000),
+            ("return", 0x3000_0000),
+            ("codecave", 0x4000_0000),
+        ]);
+        for line in lines {
+            let bytes = compile_line(line, &syms, 0)
+                .unwrap_or_else(|e| panic!("{line:?} should compile: {e}"))
+                .unwrap_or_else(|| panic!("{line:?} should be recognised as asm"));
+            assert!(
+                !bytes.is_empty(),
+                "{line:?} produced zero bytes — encoder dropped something"
+            );
+        }
     }
 }
