@@ -9,6 +9,57 @@ function gameNameFor(gameId) {
   return fromNonSteam?.name || "";
 }
 
+function fmtKB(bytes) {
+  if (!Number.isFinite(bytes)) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function renderCeBanner(status) {
+  const kind = status?.kind;
+  if (kind === "installed") {
+    return `<div class="ce-banner ce-banner-ok">CE Linux ${esc(status.version)} installed</div>`;
+  }
+  if (kind === "corrupt") {
+    return `<div class="ce-banner ce-banner-err">CE install corrupt: ${esc(status.reason || "")} <button class="ce-install-btn" data-action="install">Reinstall</button></div>`;
+  }
+  return `<div class="ce-banner ce-banner-warn">CE Linux not installed <button class="ce-install-btn" data-action="install">Install CE 7.6.6</button></div>`;
+}
+
+function renderTablesSection(gameId, tables) {
+  if (!tables.length) {
+    return (
+      `<div class="ce-tables-section">` +
+        `<div class="ce-tables-header">Available .CT tables` +
+          `<button class="ce-refresh-btn" data-action="refresh-tables">Refresh</button>` +
+        `</div>` +
+        `<div class="ach-empty">` +
+          `No .CT files in <code>~/.config/backlog-tracker/cheat-tables/${esc(String(gameId))}/</code>` +
+        `</div>` +
+      `</div>`
+    );
+  }
+  let html =
+    `<div class="ce-tables-section">` +
+      `<div class="ce-tables-header">Available .CT tables` +
+        `<button class="ce-refresh-btn" data-action="refresh-tables">Refresh</button>` +
+      `</div>` +
+      `<ul class="ce-tables-list">`;
+  for (const t of tables) {
+    html +=
+      `<li class="ce-table-row">` +
+        `<div class="ce-table-info">` +
+          `<div class="ce-table-name">${esc(t.name)}</div>` +
+          `<div class="ce-table-meta">${esc(fmtKB(t.size_bytes))}</div>` +
+        `</div>` +
+        `<button class="ce-open-btn" data-table="${esc(t.name)}">Open CE</button>` +
+      `</li>`;
+  }
+  html += `</ul></div>`;
+  return html;
+}
+
 function renderSearchBar(gameId) {
   const name = gameNameFor(gameId);
   if (!name) return "";
@@ -19,6 +70,48 @@ function renderSearchBar(gameId) {
       `</button>` +
     `</div>`
   );
+}
+
+function wireBanner(panel, gameId) {
+  const btn = panel.querySelector(".ce-install-btn");
+  if (!btn) return;
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    const original = btn.textContent;
+    btn.textContent = "Installing...";
+    try {
+      await invoke("ce_install_trigger");
+      await loadCheats(gameId);
+    } catch (e) {
+      btn.textContent = "Failed";
+      btn.title = String(e);
+      setTimeout(() => { btn.textContent = original; btn.disabled = false; btn.removeAttribute("title"); }, 2500);
+    }
+  });
+}
+
+function wireTables(panel, gameId) {
+  const refresh = panel.querySelector(".ce-refresh-btn");
+  if (refresh) {
+    refresh.addEventListener("click", () => loadCheats(gameId));
+  }
+  panel.querySelectorAll(".ce-open-btn").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const tableName = btn.dataset.table;
+      const original = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = "Opening...";
+      try {
+        await invoke("ce_open_for_game", { appId: String(gameId), tableName });
+        btn.textContent = "✓ Launched";
+        setTimeout(() => { btn.textContent = original; btn.disabled = false; }, 1500);
+      } catch (e) {
+        btn.textContent = "✗ Error";
+        btn.title = String(e);
+        setTimeout(() => { btn.textContent = original; btn.disabled = false; btn.removeAttribute("title"); }, 3000);
+      }
+    });
+  });
 }
 
 function wireSearchButton(panel) {
@@ -42,58 +135,64 @@ export async function loadCheats(gameId) {
   if (!panel) return;
 
   try {
-    const [status, list] = await Promise.all([
+    const [ceStatus, tables, status, list] = await Promise.all([
+      invoke("ce_install_status").catch(() => ({ kind: "not_installed" })),
+      invoke("ce_list_tables_for_game", { appId: String(gameId) }).catch(() => []),
       invoke("cheat_status", { appId: gameId }),
       invoke("cheat_list", { appId: gameId }).catch(() => null),
     ]);
 
     if (state.panelGameId !== gameId) return;
 
+    const banner = renderCeBanner(ceStatus);
+    const tablesSection = renderTablesSection(gameId, tables);
     const searchBar = renderSearchBar(gameId);
 
+    let nativeBlock;
     if (!status.has_cheats || !list) {
-      panel.innerHTML =
-        searchBar +
+      nativeBlock =
         `<div class="ach-empty">` +
-          `No hay cheats configurados para este juego.<br>` +
+          `No native cheats configured for this game.<br>` +
           `<small style="color:var(--fg-muted);display:block;margin-top:0.5rem">` +
-            `Crear archivo <code>~/.config/backlog-tracker/cheats/${gameId}.json</code>` +
+            `Create <code>~/.config/backlog-tracker/cheats/${gameId}.json</code>` +
           `</small>` +
         `</div>`;
-      wireSearchButton(panel);
-      return;
+    } else {
+      const freezeIds = list.filter(c => c.action_kind === "Freeze").map(c => c.id);
+      const freezeStates = await Promise.all(
+        freezeIds.map(id =>
+          invoke("cheat_freeze_status", { appId: gameId, cheatId: id }).catch(() => false)
+        )
+      );
+      if (state.panelGameId !== gameId) return;
+      const frozen = new Map(freezeIds.map((id, i) => [id, freezeStates[i]]));
+
+      const pillCls = status.process_running ? "cheat-pill-on" : "cheat-pill-off";
+      const pillTxt = status.process_running ? "\u{1F7E2} Game running" : "\u{1F534} Game not running";
+      nativeBlock = `<div class="cheat-status-bar"><span class="cheat-pill ${pillCls}">${pillTxt}</span></div><ul class="cheat-list">`;
+      for (const c of list) {
+        const desc = c.description ? `<div class="cheat-desc">${esc(c.description)}</div>` : "";
+        const dis = status.process_running ? "" : "disabled";
+        const control = c.action_kind === "Freeze"
+          ? renderFreezeSwitch(c.id, frozen.get(c.id) === true, dis)
+          : renderTriggerButton(c.id, dis);
+        nativeBlock +=
+          `<li class="cheat-item">` +
+            `<div class="cheat-info">` +
+              `<div class="cheat-name">${esc(c.name)} <span class="cheat-type">${esc(c.value_type)}</span></div>` +
+              desc +
+            `</div>` +
+            control +
+          `</li>`;
+      }
+      nativeBlock += `</ul>`;
     }
 
-    const freezeIds = list.filter(c => c.action_kind === "Freeze").map(c => c.id);
-    const freezeStates = await Promise.all(
-      freezeIds.map(id =>
-        invoke("cheat_freeze_status", { appId: gameId, cheatId: id }).catch(() => false)
-      )
-    );
-    if (state.panelGameId !== gameId) return;
-    const frozen = new Map(freezeIds.map((id, i) => [id, freezeStates[i]]));
+    panel.innerHTML = banner + tablesSection + searchBar + nativeBlock;
 
-    const pillCls = status.process_running ? "cheat-pill-on" : "cheat-pill-off";
-    const pillTxt = status.process_running ? "\u{1F7E2} Game running" : "\u{1F534} Game not running";
-    let html = searchBar + `<div class="cheat-status-bar"><span class="cheat-pill ${pillCls}">${pillTxt}</span></div>`;
-    html += `<ul class="cheat-list">`;
-    for (const c of list) {
-      const desc = c.description ? `<div class="cheat-desc">${esc(c.description)}</div>` : "";
-      const dis = status.process_running ? "" : "disabled";
-      const control = c.action_kind === "Freeze"
-        ? renderFreezeSwitch(c.id, frozen.get(c.id) === true, dis)
-        : renderTriggerButton(c.id, dis);
-      html +=
-        `<li class="cheat-item">` +
-          `<div class="cheat-info">` +
-            `<div class="cheat-name">${esc(c.name)} <span class="cheat-type">${esc(c.value_type)}</span></div>` +
-            desc +
-          `</div>` +
-          control +
-        `</li>`;
-    }
-    html += `</ul>`;
-    panel.innerHTML = html;
+    wireBanner(panel, gameId);
+    wireTables(panel, gameId);
+    wireSearchButton(panel);
 
     panel.querySelectorAll(".cheat-trigger-btn").forEach(btn => {
       btn.addEventListener("click", () => triggerCheat(gameId, btn.dataset.cheatId, btn));
@@ -101,10 +200,9 @@ export async function loadCheats(gameId) {
     panel.querySelectorAll(".cheat-switch input").forEach(input => {
       input.addEventListener("change", () => toggleFreeze(gameId, input.dataset.cheatId, input));
     });
-    wireSearchButton(panel);
   } catch (e) {
     if (state.panelGameId !== gameId) return;
-    panel.innerHTML = `<div class="ach-empty">Error al cargar cheats: ${esc(String(e))}</div>`;
+    panel.innerHTML = `<div class="ach-empty">Error loading cheats: ${esc(String(e))}</div>`;
   }
 }
 
