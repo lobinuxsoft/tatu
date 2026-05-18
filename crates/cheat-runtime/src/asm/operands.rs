@@ -127,14 +127,18 @@ pub(super) enum MemSize {
 pub(super) fn try_parse_memory_operand(
     text: &str,
     syms: &HashMap<String, u64>,
-) -> Result<Option<(MemSize, AsmMemoryOperand)>, AsmError> {
+) -> Result<Option<(Option<MemSize>, AsmMemoryOperand)>, AsmError> {
     let t = text.trim();
     let (size, body) = match split_size_prefix(t) {
-        Some((s, b)) => (s, b),
+        Some((s, b)) => (Some(s), b),
         None => {
-            // Allow the `[expr]` shorthand without an explicit size prefix.
+            // Allow the `[expr]` shorthand without an explicit size prefix —
+            // CE Auto-Assembler infers the width from the OTHER operand
+            // (the register's size in `mov [foo], rax`, or the immediate's
+            // explicit width otherwise). Callers receive `None` and must
+            // resolve it before encoding.
             if t.starts_with('[') && t.ends_with(']') {
-                (MemSize::Dword, t)
+                (None, t)
             } else {
                 return Ok(None);
             }

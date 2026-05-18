@@ -171,6 +171,9 @@ impl Engine {
                     self.symbols.insert(symbol.clone(), addr);
                 }
                 Statement::Alloc { symbol, size, near } => {
+                    // Explicit `near` propagates as the mmap hint. Without
+                    // it `alloc_remote` falls back to MAP_32BIT so
+                    // disp32-encoded `mov [imm], reg` stays legal.
                     let hint = near.as_ref().and_then(|n| {
                         self.symbols
                             .get(n)

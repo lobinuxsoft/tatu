@@ -2,11 +2,12 @@
 
 use std::collections::HashMap;
 
-use iced_x86::code_asm::CodeAssembler;
+use iced_x86::code_asm::{CodeAssembler, qword_ptr};
 
 use super::AsmError;
-use super::operands::resolve_target;
+use super::operands::{MemSize, resolve_target, try_parse_memory_operand};
 
+#[derive(Debug)]
 pub(super) enum Mnemonic {
     Jmp,
     Call,
@@ -39,8 +40,28 @@ pub(super) fn emit_unary_target(
     base: u64,
     m: Mnemonic,
 ) -> Result<Vec<u8>, AsmError> {
-    let target = resolve_target(rest, syms)?;
     let mut a = CodeAssembler::new(64)?;
+
+    // Indirect call/jmp through memory: `call qword ptr [rax+370]`. CE
+    // tables use this for vtable dispatch hooks. iced-x86 distinguishes
+    // `a.call(addr)` (rel32 to absolute) from `a.call(qword_ptr(mem))`
+    // (FF /2 modrm) — pick the right one based on whether the operand
+    // parses as a memory operand.
+    if let Some((size_opt, mem)) = try_parse_memory_operand(rest.trim(), syms)? {
+        let size = size_opt.unwrap_or(MemSize::Qword);
+        if size != MemSize::Qword {
+            return Err(AsmError::Unsupported(format!(
+                "indirect {m:?} target {rest:?}: only qword ptr memory operands are supported"
+            )));
+        }
+        match m {
+            Mnemonic::Jmp => a.jmp(qword_ptr(mem))?,
+            Mnemonic::Call => a.call(qword_ptr(mem))?,
+        };
+        return Ok(a.assemble(base)?);
+    }
+
+    let target = resolve_target(rest, syms)?;
     match m {
         Mnemonic::Jmp => a.jmp(target)?,
         Mnemonic::Call => a.call(target)?,

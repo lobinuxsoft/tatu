@@ -34,7 +34,9 @@
 //!   that statically links libc has no `libc.so` mapping and will fail with
 //!   `SymbolNotFound`. Real-world games invariably link glibc dynamically.
 
-use nix::libc::{MAP_ANONYMOUS, MAP_PRIVATE, PROT_EXEC, PROT_READ, PROT_WRITE, user_regs_struct};
+use nix::libc::{
+    MAP_32BIT, MAP_ANONYMOUS, MAP_PRIVATE, PROT_EXEC, PROT_READ, PROT_WRITE, user_regs_struct,
+};
 use nix::sys::ptrace::{self, AddressType};
 use nix::sys::signal::Signal;
 use nix::sys::wait::{WaitStatus, waitpid};
@@ -73,7 +75,20 @@ pub fn alloc_remote(
 ) -> Result<u64, AllocError> {
     let mmap_addr = elfsym::find_libc_symbol(pid, "mmap")?;
     let prot = prot.unwrap_or(PROT_RWX);
-    let flags = MAP_PRIVATE | MAP_ANONYMOUS;
+    // When the caller didn't pin a near-address, force the kernel to pick
+    // an address inside the first 2 GiB so subsequent `mov [imm], reg`
+    // encodings stay within disp32 reach. CE-style trampoline scripts (EM's
+    // master toggle is the canonical example) routinely store the saved
+    // pointer into a freshly-allocated singleton via `mov [base_address],
+    // rax`; without MAP_32BIT, mmap returns high-half addresses and that
+    // instruction has no legal encoding for non-rAX registers.
+    //
+    // When the caller did supply a hint we trust it — the script author
+    // explicitly picked the location (typically `near pBase`).
+    let mut flags = MAP_PRIVATE | MAP_ANONYMOUS;
+    if hint.is_none() {
+        flags |= MAP_32BIT;
+    }
 
     attach_and_wait(pid)?;
     let original = ptrace::getregs(pid)?;
