@@ -3,6 +3,13 @@ name = "cheat-runtime"
 version = "0.1.0"
 edition = "2024"
 publish = false
+description = "Linux-native Cheat Engine Auto-Assembler runtime. Reusable from any Rust binary or FFI wrapper (Decky Loader plugin, CLI, etc.)."
+
+[lib]
+# rlib for normal Rust dependents (the tracker, a sibling Decky wrapper crate).
+# cdylib enables `cargo build --release` to emit `libcheat_runtime.so` so a
+# Python/C FFI layer (Decky's Python backend) can dlopen it directly.
+crate-type = ["rlib", "cdylib"]
 
 [dependencies]
 dirs = "6"
