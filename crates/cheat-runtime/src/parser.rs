@@ -114,11 +114,7 @@ fn section_after(input: &str, start: usize, end: Option<usize>) -> &str {
     }
     let e = match end {
         // `end` points past `[DISABLE]`, so back up to the start of that line.
-        Some(e) => {
-            let needle = b"[DISABLE]";
-            let header_start = e - needle.len();
-            header_start
-        }
+        Some(e) => e - b"[DISABLE]".len(),
         None => bytes.len(),
     };
     &input[s..e]
