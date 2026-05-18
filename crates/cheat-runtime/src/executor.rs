@@ -416,7 +416,7 @@ mod tests {
     /// arbitrary byte patterns).
     #[test]
     fn enable_then_disable_roundtrips_a_byte_overwrite() {
-        let mut victim = vec![0u8; 64];
+        let mut victim = [0u8; 64];
         let original: [u8; 16] = [
             0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE,
             0xFF, 0x00,
@@ -460,7 +460,7 @@ mod tests {
     /// the earlier statements applied.
     #[test]
     fn failed_statement_rolls_back_prior_writes() {
-        let mut victim = vec![0u8; 32];
+        let mut victim = [0u8; 32];
         let original: [u8; 8] = [0xCA, 0xFE, 0xBA, 0xBE, 0xDE, 0xAD, 0xBE, 0xEF];
         victim[8..16].copy_from_slice(&original);
         let target_addr = victim.as_ptr() as u64 + 8;
