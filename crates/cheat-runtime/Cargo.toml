@@ -14,6 +14,7 @@ crate-type = ["rlib", "cdylib"]
 [dependencies]
 dirs = "6"
 goblin = { version = "0.10", default-features = false, features = ["std", "elf32", "elf64", "endian_fd"] }
+iced-x86 = { version = "1", default-features = false, features = ["std", "decoder", "encoder", "code_asm"] }
 memchr = "2"
 nix = { version = "0.30", features = ["uio", "process", "ptrace", "signal"] }
 serde = { version = "1", features = ["derive"] }

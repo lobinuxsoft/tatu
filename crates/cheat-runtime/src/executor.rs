@@ -21,6 +21,7 @@ use std::collections::HashMap;
 use nix::unistd::Pid;
 
 use crate::alloc::{self, AllocError};
+use crate::asm::{self, AsmError};
 use crate::maps::{MemoryRegion, read_maps};
 use crate::memory::{self, RuntimeError};
 use crate::parser::{Script, Statement};
@@ -34,6 +35,8 @@ pub enum ExecError {
     Memory(#[from] RuntimeError),
     #[error("remote alloc: {0}")]
     Alloc(#[from] AllocError),
+    #[error("asm compile: {0}")]
+    Asm(#[from] AsmError),
     #[error("aobscanmodule({symbol}): no match in any executable region")]
     PatternNotFound { symbol: String },
     #[error("aobscanmodule({symbol}): {count} matches found, pattern must be unique")]
@@ -150,7 +153,7 @@ impl Engine {
                 let Some(base) = *cursor else {
                     return Err(ExecError::OrphanWrite(line.clone()));
                 };
-                let bytes = compile_raw(line, &self.symbols, self.pid)?;
+                let bytes = compile_raw(line, &self.symbols, self.pid, base)?;
                 let original = memory::read_bytes(self.pid, base, bytes.len())?;
                 memory::write_bytes(self.pid, base, &bytes)?;
                 active.undo.push((base, original));
@@ -246,8 +249,16 @@ fn rollback(active: &mut ActiveCheat) {
 }
 
 /// Compile a raw assembler line to the bytes that should be written at the
-/// current cursor. Supports `db`, `dq`, `nop N`, and `readmem(symbol, len)`.
-fn compile_raw(line: &str, symbols: &HashMap<String, u64>, pid: Pid) -> Result<Vec<u8>, ExecError> {
+/// current cursor. Supports `db`, `dq`, `nop N`, `readmem(symbol, len)`, plus
+/// the asm subset covered by [`crate::asm::compile_line`] (`jmp`, `call`,
+/// `ret`). `base` is the absolute target address — required for rip-relative
+/// encodings.
+fn compile_raw(
+    line: &str,
+    symbols: &HashMap<String, u64>,
+    pid: Pid,
+    base: u64,
+) -> Result<Vec<u8>, ExecError> {
     let trimmed = line.trim();
     if let Some(rest) = trimmed
         .strip_prefix("db ")
@@ -283,8 +294,11 @@ fn compile_raw(line: &str, symbols: &HashMap<String, u64>, pid: Pid) -> Result<V
     {
         return readmem_bytes(args, symbols, pid);
     }
+    if let Some(bytes) = asm::compile_line(trimmed, symbols, base)? {
+        return Ok(bytes);
+    }
     Err(ExecError::Unsupported(format!(
-        "asm/raw not supported in subtask 4: {line:?}"
+        "asm/raw not supported: {line:?}"
     )))
 }
 
@@ -443,30 +457,35 @@ mod tests {
     #[test]
     fn compile_raw_db_dq_nop_succeeds() {
         let syms = HashMap::new();
+        let pid = Pid::this();
         assert_eq!(
-            compile_raw("db 90 90 90", &syms, Pid::this()).unwrap(),
+            compile_raw("db 90 90 90", &syms, pid, 0).unwrap(),
             vec![0x90; 3]
         );
-        assert_eq!(
-            compile_raw("dq 0", &syms, Pid::this()).unwrap(),
-            vec![0u8; 8]
-        );
-        assert_eq!(
-            compile_raw("nop 5", &syms, Pid::this()).unwrap(),
-            vec![0x90; 5]
-        );
-        assert_eq!(compile_raw("nop", &syms, Pid::this()).unwrap(), vec![0x90]);
+        assert_eq!(compile_raw("dq 0", &syms, pid, 0).unwrap(), vec![0u8; 8]);
+        assert_eq!(compile_raw("nop 5", &syms, pid, 0).unwrap(), vec![0x90; 5]);
+        assert_eq!(compile_raw("nop", &syms, pid, 0).unwrap(), vec![0x90]);
     }
 
     #[test]
-    fn compile_raw_rejects_asm() {
+    fn compile_raw_jmp_via_asm_module() {
         let syms = HashMap::new();
+        let bytes = compile_raw("jmp 0x1000", &syms, Pid::this(), 0x500).unwrap();
+        assert_eq!(bytes, vec![0xE9, 0xFB, 0x0A, 0x00, 0x00]);
+    }
+
+    #[test]
+    fn compile_raw_rejects_unsupported_asm() {
+        let syms = HashMap::new();
+        let pid = Pid::this();
+        // `mov` / `push` aren't covered by Phase B v1; they should still
+        // fall through to Unsupported until Phase B v2 broadens coverage.
         assert!(matches!(
-            compile_raw("push ebx", &syms, Pid::this()),
+            compile_raw("push ebx", &syms, pid, 0),
             Err(ExecError::Unsupported(_))
         ));
         assert!(matches!(
-            compile_raw("mov dword ptr [r13+13C],(float)100", &syms, Pid::this()),
+            compile_raw("mov dword ptr [r13+13C],(float)100", &syms, pid, 0),
             Err(ExecError::Unsupported(_))
         ));
     }
