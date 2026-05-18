@@ -107,9 +107,14 @@ DESKTOP
 
 echo -e "${YELLOW}[4/5]${NC} Bundling libraries..."
 
-# Bundle shared libraries with linuxdeploy
+# Bundle shared libraries with linuxdeploy.
+# NO_STRIP=1: linuxdeploy bundles an old binutils strip that can't parse RELR
+# relocations used on modern distros (Fedora 40+, Bazzite, etc.). Without this,
+# strip fails on every system .so with "unknown type [0x13] section .relr.dyn"
+# and `set -e` aborts the script before step [5/5]. Cost: ~10 MB extra in the
+# AppImage (debug symbols not stripped from bundled libs).
 echo "  Running linuxdeploy..."
-APPIMAGE_EXTRACT_AND_RUN=1 "$LINUXDEPLOY" \
+NO_STRIP=1 APPIMAGE_EXTRACT_AND_RUN=1 "$LINUXDEPLOY" \
     --appdir "$APPDIR" \
     --executable "$APPDIR/usr/bin/$BINARY_NAME" \
     --desktop-file "$APPDIR/$DESKTOP_ID.desktop" \
