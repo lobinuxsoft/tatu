@@ -16,6 +16,7 @@
 pub mod alloc;
 pub mod asm;
 pub mod aurora;
+pub mod elfsym;
 pub mod executor;
 pub mod freeze;
 pub mod manifest;
@@ -26,9 +27,10 @@ pub mod parser;
 pub mod process;
 pub mod scanner;
 
-pub use alloc::{AllocError, alloc_remote, dealloc_remote, find_libc_symbol};
+pub use alloc::{AllocError, alloc_remote, dealloc_remote};
 pub use asm::{AsmError, compile_line as compile_asm_line};
 pub use aurora::{AuroraError, Feature, Trainer, load_trainer, load_trainer_file};
+pub use elfsym::{ElfSymError, find_libc_symbol, find_module_base, find_module_symbol};
 pub use executor::{ActiveCheat, Engine, ExecError};
 pub use freeze::{FreezeError, FreezeHandle, FreezeKey, FreezeRegistry};
 pub use manifest::{
