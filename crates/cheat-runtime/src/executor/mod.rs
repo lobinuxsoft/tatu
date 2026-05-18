@@ -237,6 +237,16 @@ impl Engine {
                     };
                     let bytes = compile_raw(line, &self.symbols, self.pid, base)?;
                     let original = memory::read_bytes(self.pid, base, bytes.len())?;
+                    if std::env::var_os("CHEAT_RUNTIME_TRACE").is_some() {
+                        eprintln!(
+                            "[trace] @0x{:x} write {:>2}B {:02X?}  was {:02X?}  ← {}",
+                            base,
+                            bytes.len(),
+                            bytes,
+                            original,
+                            line
+                        );
+                    }
                     memory::write_bytes(self.pid, base, &bytes)?;
                     active.undo.push((base, original));
                     cursor = Some(base + bytes.len() as u64);
