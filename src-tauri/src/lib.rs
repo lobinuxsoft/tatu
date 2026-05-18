@@ -87,6 +87,9 @@ pub fn run() {
             commands::cheat_runtime_cmd::cheat_runtime_list_features,
             commands::cheat_runtime_cmd::cheat_runtime_enable,
             commands::cheat_runtime_cmd::cheat_runtime_disable,
+            commands::cheat_runtime_cmd::cheat_runtime_value_read,
+            commands::cheat_runtime_cmd::cheat_runtime_value_write,
+            commands::cheat_runtime_cmd::cheat_runtime_value_freeze,
             commands::cheat_search_cmd::open_fearless_search,
         ])
         .run(tauri::generate_context!())

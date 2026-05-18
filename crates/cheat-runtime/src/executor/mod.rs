@@ -76,7 +76,27 @@ pub struct ActiveCheat {
     /// and need to be released with `munmap` when the cheat is disabled. Keyed
     /// by the AA symbol name so `Statement::Dealloc(symbol)` can find them.
     allocs: HashMap<String, (u64, usize)>,
+    /// Snapshot of every symbol the Engine bound during ENABLE — both AOB-scan
+    /// results and allocs. Kept on the live cheat so downstream features
+    /// (pointer-chain `Value` reads in particular) can look up
+    /// `base_address` / `shop` / etc. while the master toggle is active. Goes
+    /// stale on `.disable()`; the registry should drop the entry then.
+    symbols: HashMap<String, u64>,
     disabled: bool,
+}
+
+impl ActiveCheat {
+    /// Read-only view of the symbol table this cheat established. The map
+    /// is a snapshot taken at ENABLE time — it doesn't update if the game
+    /// re-locates code afterwards (rare for AOB-scan-bound symbols, which
+    /// pin to fixed module offsets) but a re-enable will refresh it.
+    pub fn symbols(&self) -> &HashMap<String, u64> {
+        &self.symbols
+    }
+
+    pub fn pid(&self) -> Pid {
+        self.pid
+    }
 }
 
 impl Engine {
@@ -119,6 +139,7 @@ impl Engine {
             pid: self.pid,
             undo: Vec::new(),
             allocs: HashMap::new(),
+            symbols: HashMap::new(),
             disabled: false,
         };
 
@@ -130,6 +151,7 @@ impl Engine {
             rollback(&mut active);
             return Err(e);
         }
+        active.symbols = self.symbols.clone();
         Ok(active)
     }
 

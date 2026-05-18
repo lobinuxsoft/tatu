@@ -54,6 +54,7 @@ pub use manifest::{
 pub use maps::{MemoryRegion, Perms, parse_maps, read_maps};
 pub use memory::{RuntimeError, read_bytes, write_bytes};
 pub use migrate::{MigrateError, MigrateReport, migrate_default_dirs, migrate_dirs};
+pub use nix::unistd::Pid;
 pub use parser::{ParseError as ScriptParseError, Script, Statement, parse as parse_script};
 pub use process::{find_pid_by_exe, find_pids_by_exe};
 pub use scanner::{ParseError as PatternParseError, Pattern, scan, scan_in_process};
