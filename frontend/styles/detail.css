@@ -111,3 +111,11 @@
 .ce-open-btn { background: var(--accent); color: var(--bg-panel); border: none; padding: 0.35rem 0.7rem; border-radius: var(--r); font-family: var(--font-display); font-size: 0.7rem; font-weight: 700; text-transform: var(--display-transform); letter-spacing: var(--display-tracking); cursor: pointer; flex-shrink: 0; transition: opacity var(--t-fast); }
 .ce-open-btn:hover:not(:disabled) { opacity: 0.85; }
 .ce-open-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.cheat-runtime-section { margin-bottom: 1rem; }
+.cheat-runtime-header { display: flex; align-items: center; gap: 0.5rem; font-family: var(--font-display); font-size: 0.72rem; font-weight: 700; text-transform: var(--display-transform); letter-spacing: var(--display-tracking); color: var(--fg-muted); margin-bottom: 0.4rem; }
+.cheat-runtime-list { list-style: none; padding: 0; margin: 0; }
+.cheat-runtime-item { display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0; border-bottom: 1px solid var(--border-subtle); }
+.cheat-runtime-info { flex: 1; min-width: 0; }
+.cheat-runtime-name { font-size: 0.85rem; font-weight: 600; color: var(--fg); }
+.cheat-runtime-meta { font-size: 0.65rem; color: var(--fg-dim); margin-top: 0.15rem; font-family: var(--font-display); }
