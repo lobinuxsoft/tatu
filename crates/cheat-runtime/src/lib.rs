@@ -15,6 +15,8 @@
 
 pub mod maps;
 pub mod memory;
+pub mod scanner;
 
 pub use maps::{MemoryRegion, Perms, parse_maps, read_maps};
 pub use memory::{RuntimeError, read_bytes, write_bytes};
+pub use scanner::{ParseError as PatternParseError, Pattern, scan, scan_in_process};
