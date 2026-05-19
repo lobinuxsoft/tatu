@@ -26,6 +26,7 @@
 //!    - `rsi = RTLD_NOW`  (= 2)
 //!    - `rdx = 0`         (no caller info — Linux ignores it)
 //!    - `rsp` aligned with the implicit push of the sentinel return.
+//!
 //!    Write the sentinel `0xCE0` at rsp.
 //! 5. PTRACE_CONT(SIGCONT), wait for the target to fault on the sentinel.
 //! 6. Read `rax` — that's the `dlopen` return value (`void *handle`, or
