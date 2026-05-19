@@ -55,6 +55,9 @@ pub fn cheat_runtime_list_features(
     app_id: String,
     active: State<'_, ActiveCheats>,
 ) -> Result<Vec<FeatureView>, String> {
+    // Drop registry entries whose PID is gone — the UI must not paint
+    // toggles as active when the game has been relaunched out-of-band.
+    purge_stale_cheats(&active)?;
     let manifests = load_manifests_for(&app_id).map_err(|e| e.to_string())?;
     let (active_keys, registered_symbols) = {
         let guard = active
@@ -110,12 +113,43 @@ fn master_symbol_for_value(f: &ManifestFeature) -> Option<String> {
     }
 }
 
+/// True if `/proc/<pid>/` still exists — the lightest possible liveness
+/// check. Used to detect when the user closed and re-launched the game
+/// out-of-band; without this the enable shortcut returns the registry
+/// entry from the dead PID and the new game never gets hooked.
+fn pid_is_alive(pid: Pid) -> bool {
+    std::path::Path::new(&format!("/proc/{}", pid.as_raw())).exists()
+}
+
+/// Drop every active cheat whose PID is gone. Their `Drop` impl will try
+/// to roll back writes against the dead process; those calls fail silently
+/// (ESRCH) so the only effect is freeing the in-memory registry slot.
+fn purge_stale_cheats(active: &ActiveCheats) -> Result<(), String> {
+    let mut guard = active
+        .lock()
+        .map_err(|e| format!("active registry poisoned: {e}"))?;
+    let stale: Vec<String> = guard
+        .iter()
+        .filter(|(_, c)| !pid_is_alive(c.pid()))
+        .map(|(k, _)| k.clone())
+        .collect();
+    for uuid in stale {
+        guard.remove(&uuid);
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn cheat_runtime_enable(
     app_id: String,
     feature_uuid: String,
     active: State<'_, ActiveCheats>,
 ) -> Result<(), String> {
+    // The user may have closed and re-launched the game out-of-band. Any
+    // ActiveCheat still in the registry is bound to a PID that no longer
+    // exists, and re-applying would otherwise short-circuit on its
+    // presence without ever hooking the new game process.
+    purge_stale_cheats(&active)?;
     {
         let guard = active
             .lock()
