@@ -159,12 +159,34 @@ pub fn cheat_runtime_enable(
         }
     }
 
-    let (exe, script_src) = locate_feature_script(&app_id, &feature_uuid)?;
-    let pid = find_pid_by_exe(&exe)
-        .ok_or_else(|| format!("game process '{exe}' is not running; launch the game first"))?;
-    let script = parse_script(&script_src).map_err(|e| format!("parse: {e}"))?;
+    let (exe, script_src) = locate_feature_script(&app_id, &feature_uuid).map_err(|e| {
+        eprintln!("[enable {feature_uuid}] locate_feature_script: {e}");
+        e
+    })?;
+    let pid = find_pid_by_exe(&exe).ok_or_else(|| {
+        let msg = format!("game process '{exe}' is not running; launch the game first");
+        eprintln!("[enable {feature_uuid}] {msg}");
+        msg
+    })?;
+    eprintln!(
+        "[enable {feature_uuid}] starting against pid {}",
+        pid.as_raw()
+    );
+    let script = parse_script(&script_src).map_err(|e| {
+        let msg = format!("parse: {e}");
+        eprintln!("[enable {feature_uuid}] {msg}");
+        msg
+    })?;
     let mut engine = Engine::new(pid);
-    let cheat = engine.enable(&script).map_err(|e| format!("enable: {e}"))?;
+    let cheat = engine.enable(&script).map_err(|e| {
+        let msg = format!("enable: {e}");
+        eprintln!("[enable {feature_uuid}] {msg}");
+        msg
+    })?;
+    eprintln!(
+        "[enable {feature_uuid}] success, symbols={:?}",
+        cheat.symbols().keys().collect::<Vec<_>>()
+    );
 
     let mut guard = active
         .lock()
