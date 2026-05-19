@@ -149,6 +149,25 @@ fn write_bytes_ptrace(pid: Pid, addr: u64, data: &[u8]) -> Result<(), RuntimeErr
     result
 }
 
+/// Write `data` to `addr` assuming `pid` is **already ptrace-attached
+/// and stopped** by the caller. Uses `PTRACE_POKEDATA` directly without
+/// an internal attach/detach dance — that's the fast path callers like
+/// [`crate::executor::Engine::enable`] want when they're wrapping a
+/// whole batch of writes in a single attach.
+///
+/// CE on Linux follows the same pattern: `autoassembler.pas:4116` pauses
+/// the process once, then writes every assembled block under that one
+/// pause so the target never observes a half-applied trampoline. The
+/// ceserver Linux backend uses `PTRACE_POKEDATA` for those writes
+/// (`api.c::WriteProcessMemory`), which bypasses page protections — no
+/// `mprotect` dance needed to touch a read-only `.text` page.
+pub fn write_bytes_attached(pid: Pid, addr: u64, data: &[u8]) -> Result<(), RuntimeError> {
+    if data.is_empty() {
+        return Ok(());
+    }
+    pokedata_chunks(pid, addr, data)
+}
+
 fn pokedata_chunks(pid: Pid, addr: u64, data: &[u8]) -> Result<(), RuntimeError> {
     let word_size = std::mem::size_of::<usize>();
     let mut offset = 0;
