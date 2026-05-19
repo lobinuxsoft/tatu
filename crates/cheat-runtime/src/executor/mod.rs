@@ -151,7 +151,7 @@ impl Engine {
         };
 
         if let Err(e) = self.pre_resolve_symbols(script, &mut active) {
-            rollback(&mut active);
+            let _ = rollback(&mut active);
             return Err(e);
         }
         // Attach to the main thread ONCE for the duration of the write
@@ -175,7 +175,7 @@ impl Engine {
             let _ = ptrace::detach(self.pid, None);
         }
         if let Err(e) = write_result {
-            rollback(&mut active);
+            let _ = rollback(&mut active);
             return Err(e);
         }
         active.symbols = self.symbols.clone();
@@ -364,17 +364,23 @@ impl ActiveCheat {
         if self.disabled {
             return Ok(());
         }
-        rollback(&mut self);
+        let result = rollback(&mut self);
         self.disabled = true;
-        Ok(())
+        result
     }
 }
 
 impl Drop for ActiveCheat {
     fn drop(&mut self) {
         if !self.disabled && !self.undo.is_empty() {
-            // Best-effort revert; we cannot return an error from Drop.
-            rollback(self);
+            // Best-effort revert; we cannot return an error from Drop, but
+            // we surface anything that fails so the user sees half-applied
+            // hooks instead of a silent leak.
+            if let Err(e) = rollback(self) {
+                eprintln!(
+                    "[cheat-runtime] WARNING: best-effort rollback on drop failed: {e} — the game may still carry trampoline bytes from this cheat. Re-launching the game restores the original .text."
+                );
+            }
         }
     }
 }
@@ -408,16 +414,56 @@ fn attach_main_thread(pid: Pid) -> bool {
     }
 }
 
-fn rollback(active: &mut ActiveCheat) {
-    while let Some((addr, bytes)) = active.undo.pop() {
-        let _ = memory::write_bytes(active.pid, addr, &bytes);
+/// Restore every byte the active cheat overwrote and release every
+/// codecave it allocated. Mirrors the ENABLE write-pass structure: one
+/// ptrace attach for the whole undo batch, POKEDATA writes under that
+/// pause, detach once at the end.
+///
+/// Errors no longer get swallowed — the first restore failure aborts and
+/// returns, leaving the remaining undo entries on the stack so a caller
+/// can decide whether to retry. The dealloc loop runs regardless because
+/// dealloc has its own attach lifecycle (CE-style remote `munmap`).
+fn rollback(active: &mut ActiveCheat) -> Result<(), ExecError> {
+    let attached = attach_main_thread(active.pid);
+    let restore_result = restore_all_writes(active, attached);
+    if attached {
+        let _ = ptrace::detach(active.pid, None);
     }
-    // Release any codecaves we allocated. Best-effort: a failure here would
-    // leak ~pages in the target, not a correctness issue for the host. The
-    // map is drained so a second rollback is a no-op.
+    // Always drain allocs even if a restore failed — leaving codecaves
+    // mapped in the game would compound the problem, and `dealloc_remote`
+    // owns its own ptrace attach so we don't need ours.
+    let mut dealloc_err: Option<ExecError> = None;
     for (_, (addr, size)) in active.allocs.drain() {
-        let _ = alloc::dealloc_remote(active.pid, addr, size);
+        if let Err(e) = alloc::dealloc_remote(active.pid, addr, size) {
+            // Keep the first error; subsequent ones are likely the same
+            // root cause (e.g. game already exited).
+            if dealloc_err.is_none() {
+                dealloc_err = Some(ExecError::Alloc(e));
+            }
+        }
     }
+    restore_result
+        .or_else(|e| Err(e))
+        .and_then(|()| match dealloc_err {
+            Some(e) => Err(e),
+            None => Ok(()),
+        })
+}
+
+fn restore_all_writes(active: &mut ActiveCheat, attached: bool) -> Result<(), ExecError> {
+    while let Some((addr, bytes)) = active.undo.pop() {
+        let result = if attached {
+            memory::write_bytes_attached(active.pid, addr, &bytes)
+        } else {
+            memory::write_bytes(active.pid, addr, &bytes)
+        };
+        if let Err(e) = result {
+            // Push the entry back so a retry can resume from here.
+            active.undo.push((addr, bytes));
+            return Err(ExecError::Memory(e));
+        }
+    }
+    Ok(())
 }
 
 fn parse_numeric_token(token: &str) -> Option<u64> {
