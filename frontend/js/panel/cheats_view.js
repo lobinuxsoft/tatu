@@ -333,7 +333,7 @@ function wireRuntimeSwitches(panel, gameId) {
         if (desired) {
           await invoke("cheat_runtime_enable", { appId: String(gameId), featureUuid: uuid });
         } else {
-          await invoke("cheat_runtime_disable", { featureUuid: uuid });
+          await invoke("cheat_runtime_disable", { appId: String(gameId), featureUuid: uuid });
         }
         // Master toggles register / unregister symbols that gate Value rows.
         // Refresh so symbol_ready reflects the new state.
@@ -365,15 +365,88 @@ function wireSearchButton(panel) {
   });
 }
 
+function renderOrphansBanner(orphans, gameId) {
+  if (!orphans || !orphans.length) return "";
+  const ours = orphans.filter(o => String(o.app_id) === String(gameId));
+  if (!ours.length) return "";
+  const itemsHtml = ours
+    .map(
+      o =>
+        `<li class="orphans-item" data-uuid="${esc(o.feature_uuid)}">` +
+          `<div class="orphans-name">${esc(o.name || o.feature_uuid)}</div>` +
+          `<div class="orphans-meta">pid ${o.pid} • ${o.writes} writes • ${o.allocs} allocs</div>` +
+          `<button class="orphans-restore" data-uuid="${esc(o.feature_uuid)}">Restore</button>` +
+          `<button class="orphans-dismiss" data-uuid="${esc(o.feature_uuid)}">Dismiss</button>` +
+        `</li>`
+    )
+    .join("");
+  return (
+    `<div class="orphans-banner">` +
+      `<div class="orphans-title">⚠ Orphan hooks from a previous session</div>` +
+      `<div class="orphans-help">` +
+        `The tracker exited before these hooks were disabled. Restore reverts the trampoline ` +
+        `bytes back to the original code; Dismiss only drops the record (use this if you've ` +
+        `already re-launched the game and the bytes are fresh anyway).` +
+      `</div>` +
+      `<ul class="orphans-list">${itemsHtml}</ul>` +
+    `</div>`
+  );
+}
+
+function wireOrphansBanner(panel, gameId) {
+  panel.querySelectorAll(".orphans-restore").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const uuid = btn.dataset.uuid;
+      btn.disabled = true;
+      const original = btn.textContent;
+      btn.textContent = "Restoring…";
+      try {
+        await invoke("cheat_runtime_orphans_restore", {
+          appId: String(gameId),
+          featureUuid: uuid,
+        });
+        loadCheats(gameId);
+      } catch (e) {
+        btn.textContent = "✗ Error";
+        btn.title = String(e);
+        setTimeout(() => {
+          btn.textContent = original;
+          btn.disabled = false;
+          btn.removeAttribute("title");
+        }, 3000);
+      }
+    });
+  });
+  panel.querySelectorAll(".orphans-dismiss").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const uuid = btn.dataset.uuid;
+      btn.disabled = true;
+      try {
+        await invoke("cheat_runtime_orphans_dismiss", {
+          appId: String(gameId),
+          featureUuid: uuid,
+        });
+        loadCheats(gameId);
+      } catch (e) {
+        btn.title = String(e);
+        setTimeout(() => btn.removeAttribute("title"), 3000);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  });
+}
+
 export async function loadCheats(gameId) {
   const panel = document.getElementById("dpCheats");
   if (!panel) return;
 
   try {
-    const [ceStatus, tables, runtimeFeatures] = await Promise.all([
+    const [ceStatus, tables, runtimeFeatures, orphans] = await Promise.all([
       invoke("ce_install_status").catch(() => ({ kind: "not_installed" })),
       invoke("ce_list_tables_for_game", { appId: String(gameId) }).catch(() => []),
       invoke("cheat_runtime_list_features", { appId: String(gameId) }).catch(() => []),
+      invoke("cheat_runtime_orphans_list").catch(() => []),
     ]);
 
     if (state.panelGameId !== gameId) return;
@@ -383,9 +456,11 @@ export async function loadCheats(gameId) {
     const tablesSection = renderTablesSection(gameId, tables);
     const searchBar = renderSearchBar(gameId);
 
-    panel.innerHTML = banner + runtimeSection + tablesSection + searchBar;
+    const orphansBanner = renderOrphansBanner(orphans, gameId);
+    panel.innerHTML = banner + orphansBanner + runtimeSection + tablesSection + searchBar;
 
     wireBanner(panel, gameId);
+    wireOrphansBanner(panel, gameId);
     wireRuntimeSwitches(panel, gameId);
     wireValueRows(panel, gameId);
     wireTables(panel, gameId);

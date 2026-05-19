@@ -28,6 +28,7 @@ use crate::asm::AsmError;
 use crate::maps::{MemoryRegion, read_maps};
 use crate::memory::{self, RuntimeError};
 use crate::parser::{Script, Statement};
+use crate::persisted_hook::{PersistedAlloc, PersistedHook, PersistedWrite};
 use crate::scanner::{self, Pattern};
 use crate::threads::ThreadPauseError;
 
@@ -103,6 +104,66 @@ impl ActiveCheat {
 
     pub fn pid(&self) -> Pid {
         self.pid
+    }
+
+    /// Capture the undo state into a serialisable record so a future
+    /// process can replay the rollback even if this `ActiveCheat`'s
+    /// owning runtime has been torn down. Caller fills in `app_id`,
+    /// `feature_uuid`, `exe`, and `started_at` from its own context.
+    pub fn to_persisted(
+        &self,
+        app_id: String,
+        feature_uuid: String,
+        exe: String,
+        started_at: Option<String>,
+    ) -> PersistedHook {
+        PersistedHook {
+            app_id,
+            feature_uuid,
+            pid: self.pid.as_raw(),
+            exe,
+            started_at,
+            writes: self
+                .undo
+                .iter()
+                .map(|(addr, bytes)| PersistedWrite {
+                    addr: *addr,
+                    original: bytes.clone(),
+                })
+                .collect(),
+            allocs: self
+                .allocs
+                .iter()
+                .map(|(symbol, (addr, size))| PersistedAlloc {
+                    symbol: symbol.clone(),
+                    addr: *addr,
+                    size: *size,
+                })
+                .collect(),
+        }
+    }
+
+    /// Build an `ActiveCheat` from a persisted record. The returned
+    /// cheat carries no live symbol table (recovery doesn't need it) and
+    /// is immediately ready for [`Self::disable`] to walk the undo log.
+    pub fn from_persisted(record: &PersistedHook) -> Self {
+        let undo = record
+            .writes
+            .iter()
+            .map(|w| (w.addr, w.original.clone()))
+            .collect();
+        let allocs = record
+            .allocs
+            .iter()
+            .map(|a| (a.symbol.clone(), (a.addr, a.size)))
+            .collect();
+        Self {
+            pid: record.pid_typed(),
+            undo,
+            allocs,
+            symbols: HashMap::new(),
+            disabled: false,
+        }
     }
 }
 
