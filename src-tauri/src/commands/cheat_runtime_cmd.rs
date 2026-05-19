@@ -281,12 +281,31 @@ pub struct OrphanHook {
 /// Scan the persist directory; delete records for dead PIDs; return the
 /// rest tagged with their feature name. Called by the frontend at app
 /// startup to surface a "restore orphan hooks" banner.
+///
+/// **Critical**: records whose `feature_uuid` is currently in the live
+/// `ActiveCheats` registry are NOT orphans — they're the in-memory copy
+/// of the same hook, persisted to disk for crash recovery. Including
+/// them in the banner and letting the user click "Restore" would roll
+/// back a hook the engine still considers active (#100).
 #[tauri::command]
-pub fn cheat_runtime_orphans_list() -> Result<Vec<OrphanHook>, String> {
+pub fn cheat_runtime_orphans_list(
+    active: State<'_, ActiveCheats>,
+) -> Result<Vec<OrphanHook>, String> {
+    let live_uuids: std::collections::HashSet<String> = active
+        .lock()
+        .map_err(|e| format!("active registry poisoned: {e}"))?
+        .keys()
+        .cloned()
+        .collect();
     let mut report = load_all_persisted_hooks().map_err(|e| e.to_string())?;
     let mut out = Vec::new();
     let mut name_cache: HashMap<String, HashMap<String, String>> = HashMap::new();
     for record in report.records.drain(..) {
+        if live_uuids.contains(&record.feature_uuid) {
+            // Record matches a cheat that's still active in this session
+            // — not an orphan, suppress.
+            continue;
+        }
         if !record.pid_alive() {
             // Game already exited — kernel reclaimed memory, nothing to
             // restore. Drop the file silently.
