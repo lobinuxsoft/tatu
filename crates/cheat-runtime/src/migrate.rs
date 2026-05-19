@@ -216,6 +216,7 @@ fn migrate_one(
             category: cheat.description.clone(),
             kind: crate::manifest::FeatureKind::Toggle,
             script: Some(synth_script(address, &cheat.action.value().to_le_bytes())),
+            value: None,
         });
     }
 

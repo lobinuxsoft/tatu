@@ -15,7 +15,11 @@ use crate::asm;
 /// returns the correct 5 bytes before the symbol is bound. Returns `None`
 /// for anything we cannot size; pass 2 surfaces the clear `Unsupported`
 /// error.
-pub(super) fn estimate_raw_length(line: &str, symbols: &HashMap<String, u64>) -> Option<usize> {
+pub(super) fn estimate_raw_length(
+    line: &str,
+    symbols: &HashMap<String, u64>,
+    base: u64,
+) -> Option<usize> {
     let trimmed = line.trim();
     if let Some(rest) = trimmed
         .strip_prefix("db ")
@@ -46,20 +50,26 @@ pub(super) fn estimate_raw_length(line: &str, symbols: &HashMap<String, u64>) ->
         return None;
     }
 
-    // Asm line: speculatively compile. Unresolved symbols (forward refs)
-    // get a temporary placeholder address. We use `0x10000` (not zero) so
-    // iced-x86 does not pick a short-form `rel8` encoding for a `jmp 0`
-    // self-loop — pass 2's real address will be a far page-aligned vaddr,
-    // which always wants `rel32`. Choosing the placeholder to match the
-    // real form is what keeps pass-1 length predictions accurate.
-    const FAR_PLACEHOLDER: u64 = 0x10000;
+    // Asm line: speculatively compile with the REAL cursor as the base
+    // address. This is critical for control-flow encodings — iced-x86
+    // picks the 5-byte `jmp rel32` form only when the target is within
+    // ±2 GiB of `base`; with base=0 a near target like 0x143...ea0 looks
+    // 5 GiB away and iced falls back to a 14-byte `jmp [rip+disp32]`,
+    // inflating pass-1 length and stomping the cursor for any LabelSite
+    // that lands after the trampoline.
+    //
+    // Unresolved symbols (forward refs declared later in the script) get
+    // a placeholder near `base` so their speculative encoding matches the
+    // real one — pass 2 substitutes the bound address and produces the
+    // same byte count.
+    let placeholder = base.wrapping_add(0x10000);
     let mut perm = symbols.clone();
     for _ in 0..16 {
-        match asm::compile_line(trimmed, &perm, 0) {
+        match asm::compile_line(trimmed, &perm, base) {
             Ok(Some(bytes)) => return Some(bytes.len()),
             Ok(None) => return None,
             Err(asm::AsmError::UnknownSymbol(name)) => {
-                perm.insert(name, FAR_PLACEHOLDER);
+                perm.insert(name, placeholder);
             }
             Err(_) => return None,
         }
@@ -74,32 +84,42 @@ mod tests {
     #[test]
     fn estimate_raw_length_covers_db_dq_nop_readmem_and_asm() {
         let empty: HashMap<String, u64> = HashMap::new();
-        assert_eq!(estimate_raw_length("db 90 90 90", &empty), Some(3));
-        assert_eq!(estimate_raw_length("dq 0", &empty), Some(8));
-        assert_eq!(estimate_raw_length("nop 5", &empty), Some(5));
-        assert_eq!(estimate_raw_length("nop", &empty), Some(1));
-        assert_eq!(estimate_raw_length("readmem(orig, 8)", &empty), Some(8));
-        assert_eq!(estimate_raw_length("jmp codecave", &empty), Some(5));
-        assert_eq!(estimate_raw_length("call helper", &empty), Some(5));
-        assert_eq!(estimate_raw_length("ret", &empty), Some(1));
-        // Phase B v2.1 mnemonics — now sized exactly via speculative compile.
-        assert_eq!(estimate_raw_length("push ebx", &empty), Some(1));
-        assert_eq!(estimate_raw_length("push r13d", &empty), Some(2));
-        assert_eq!(estimate_raw_length("pop rax", &empty), Some(1));
-        assert_eq!(estimate_raw_length("mov rax, rbx", &empty), Some(3));
-        assert_eq!(estimate_raw_length("mov eax, 1", &empty), Some(5));
-        assert_eq!(estimate_raw_length("jne target", &empty), Some(6));
-        // Phase B v2.2: memory operands estimate via speculative compile.
-        // `cmp byte ptr [foo], 1` resolves `foo` to the placeholder and
-        // produces an 8-byte encoding (iced picks `cmp r/m8, imm8` with a
-        // SIB-less disp32 and explicit 64-bit absolute via the placeholder).
+        assert_eq!(estimate_raw_length("db 90 90 90", &empty, 0), Some(3));
+        assert_eq!(estimate_raw_length("dq 0", &empty, 0), Some(8));
+        assert_eq!(estimate_raw_length("nop 5", &empty, 0), Some(5));
+        assert_eq!(estimate_raw_length("nop", &empty, 0), Some(1));
+        assert_eq!(estimate_raw_length("readmem(orig, 8)", &empty, 0), Some(8));
+        assert_eq!(estimate_raw_length("jmp codecave", &empty, 0), Some(5));
+        assert_eq!(estimate_raw_length("call helper", &empty, 0), Some(5));
+        assert_eq!(estimate_raw_length("ret", &empty, 0), Some(1));
+        assert_eq!(estimate_raw_length("push ebx", &empty, 0), Some(1));
+        assert_eq!(estimate_raw_length("push r13d", &empty, 0), Some(2));
+        assert_eq!(estimate_raw_length("pop rax", &empty, 0), Some(1));
+        assert_eq!(estimate_raw_length("mov rax, rbx", &empty, 0), Some(3));
+        assert_eq!(estimate_raw_length("mov eax, 1", &empty, 0), Some(5));
+        assert_eq!(estimate_raw_length("jne target", &empty, 0), Some(6));
         assert_eq!(
-            estimate_raw_length("cmp byte ptr [foo], 1", &empty),
+            estimate_raw_length("cmp byte ptr [foo], 1", &empty, 0),
             Some(8)
         );
-        // `imul rax, rbx, 4` is outside the Phase B subset — None.
-        assert_eq!(estimate_raw_length("imul rax, rbx, 4", &empty), None);
-        // `lea rax, [rbx+8]` is now supported (4 bytes: 48 8D 43 08).
-        assert_eq!(estimate_raw_length("lea rax, [rbx+8]", &empty), Some(4));
+        assert_eq!(estimate_raw_length("imul rax, rbx, 4", &empty, 0), None);
+        assert_eq!(estimate_raw_length("lea rax, [rbx+8]", &empty, 0), Some(4));
+    }
+
+    /// Regression: a `jmp` to a target within ±2 GiB of `base` must be
+    /// estimated at 5 bytes (rel32), not the 14-byte indirect form iced
+    /// falls back to when the target overflows i32 from base=0. The EM
+    /// master toggle relied on this — base=0 produced an 11-byte
+    /// over-estimate that shifted every label that followed.
+    #[test]
+    fn estimate_uses_base_to_keep_rel32_short() {
+        let mut syms = HashMap::new();
+        syms.insert("newmem_1".to_string(), 0x13ffff000);
+        // base=0 ⇒ target is 5 GiB away ⇒ iced falls back to long form.
+        let long = estimate_raw_length("jmp newmem_1", &syms, 0).unwrap();
+        assert!(long > 5, "expected fallback form, got {long}");
+        // Real cursor at the trampoline site ⇒ rel32 fits ⇒ 5 bytes.
+        let short = estimate_raw_length("jmp newmem_1", &syms, 0x143006e96).unwrap();
+        assert_eq!(short, 5);
     }
 }

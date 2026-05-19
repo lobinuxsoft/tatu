@@ -16,7 +16,17 @@ fn main() {
         let kind = match f.kind {
             cheat_runtime::FeatureKind::Toggle => "toggle",
             cheat_runtime::FeatureKind::Header => "header",
+            cheat_runtime::FeatureKind::Value => "value",
         };
-        println!("  - [{kind}] {}", f.name);
+        let extra = match f.value.as_ref() {
+            Some(v) => format!(
+                " :: {} offsets={:X?} @ {}",
+                format!("{:?}", v.vtype).to_lowercase(),
+                v.offsets,
+                v.base_expr
+            ),
+            None => String::new(),
+        };
+        println!("  - [{kind}] {}{extra}", f.name);
     }
 }

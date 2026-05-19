@@ -48,6 +48,7 @@ fn downstream_can_drive_full_enable_disable_via_public_root() {
                  unregistersymbol(victim)\n"
                     .into(),
             ),
+            value: None,
         }],
     };
 

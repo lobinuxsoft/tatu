@@ -19,7 +19,18 @@ pub(super) fn emit_cmp(
     let mut a = CodeAssembler::new(64)?;
 
     // `cmp <mem>, <reg|imm>` — memory left.
-    if let Some((size, mem)) = try_parse_memory_operand(lhs_text, syms)? {
+    if let Some((size_opt, mem)) = try_parse_memory_operand(lhs_text, syms)? {
+        let size = match size_opt {
+            Some(s) => s,
+            None => parse_register(rhs_text).map(|r| match r {
+                TypedReg::R64(_) => MemSize::Qword,
+                TypedReg::R32(_) => MemSize::Dword,
+                TypedReg::R16(_) => MemSize::Word,
+                TypedReg::R8(_) => MemSize::Byte,
+            }).ok_or_else(|| AsmError::Unsupported(format!(
+                "cmp {lhs_text}, {rhs_text:?}: cannot infer memory size — add a `qword/dword/word/byte ptr` prefix"
+            )))?,
+        };
         let sized = apply_size(size, mem);
         if let Some(reg) = parse_register(rhs_text) {
             match (size, reg) {
@@ -56,7 +67,8 @@ pub(super) fn emit_cmp(
         TypedReg::R64(l) => {
             if let Some(TypedReg::R64(r)) = parse_register(rhs_text) {
                 a.cmp(l, r)?;
-            } else if let Some((size, mem)) = try_parse_memory_operand(rhs_text, syms)? {
+            } else if let Some((size_opt, mem)) = try_parse_memory_operand(rhs_text, syms)? {
+                let size = size_opt.unwrap_or(MemSize::Qword);
                 if size != MemSize::Qword {
                     return Err(AsmError::Unsupported(format!(
                         "cmp {lhs_text}, {rhs_text:?}: r64 needs qword ptr"
@@ -74,7 +86,8 @@ pub(super) fn emit_cmp(
         TypedReg::R32(l) => {
             if let Some(TypedReg::R32(r)) = parse_register(rhs_text) {
                 a.cmp(l, r)?;
-            } else if let Some((size, mem)) = try_parse_memory_operand(rhs_text, syms)? {
+            } else if let Some((size_opt, mem)) = try_parse_memory_operand(rhs_text, syms)? {
+                let size = size_opt.unwrap_or(MemSize::Dword);
                 if size != MemSize::Dword {
                     return Err(AsmError::Unsupported(format!(
                         "cmp {lhs_text}, {rhs_text:?}: r32 needs dword ptr"

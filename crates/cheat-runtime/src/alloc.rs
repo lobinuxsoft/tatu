@@ -34,7 +34,10 @@
 //!   that statically links libc has no `libc.so` mapping and will fail with
 //!   `SymbolNotFound`. Real-world games invariably link glibc dynamically.
 
-use nix::libc::{MAP_ANONYMOUS, MAP_PRIVATE, PROT_EXEC, PROT_READ, PROT_WRITE, user_regs_struct};
+use nix::libc::{
+    MAP_32BIT, MAP_ANONYMOUS, MAP_FIXED_NOREPLACE, MAP_PRIVATE, PROT_EXEC, PROT_READ, PROT_WRITE,
+    user_regs_struct,
+};
 use nix::sys::ptrace::{self, AddressType};
 use nix::sys::signal::Signal;
 use nix::sys::wait::{WaitStatus, waitpid};
@@ -73,7 +76,21 @@ pub fn alloc_remote(
 ) -> Result<u64, AllocError> {
     let mmap_addr = elfsym::find_libc_symbol(pid, "mmap")?;
     let prot = prot.unwrap_or(PROT_RWX);
-    let flags = MAP_PRIVATE | MAP_ANONYMOUS;
+    // Two distinct address-placement requirements:
+    //
+    // - `hint == None`: caller wants any address but mov [imm], reg has
+    //   to encode in disp32 — force MAP_32BIT (first 2 GiB).
+    // - `hint == Some(near)`: caller has a trampoline at `near` and needs
+    //   the codecave within ±2 GiB so a 5-byte `jmp rel32` fits. mmap
+    //   without MAP_FIXED treats the hint as advisory and routinely
+    //   returns high-half addresses, breaking the trampoline. Use
+    //   MAP_FIXED_NOREPLACE and scan upward in 64 KiB strides until we
+    //   land in a free page within range — this is the same dance CE
+    //   does with VirtualAllocEx loops on Windows.
+    if let Some(near) = hint {
+        return alloc_near(pid, mmap_addr, size, prot, near);
+    }
+    let flags = MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT;
 
     attach_and_wait(pid)?;
     let original = ptrace::getregs(pid)?;
@@ -100,6 +117,101 @@ pub fn alloc_remote(
     let _ = ptrace::detach(pid, None);
     let raw = raw?;
     interpret_mmap_result(raw)
+}
+
+/// Allocate a region within ±2 GiB of `near` so a 5-byte `jmp rel32` from
+/// the trampoline site can reach it. Uses `MAP_FIXED_NOREPLACE` and walks
+/// page-aligned candidates outward — first above `near`, then below — until
+/// a free slot is found.
+///
+/// CE-AA scripts assume this placement (`alloc(newmem, $1000, pBase)`) but
+/// Linux's `mmap` without `MAP_FIXED_NOREPLACE` treats the hint as advisory
+/// and routinely places the codecave in the high-half, which forces
+/// iced-x86 to fall back to a 14-byte `jmp [rip+disp32]` indirect — that
+/// overflows the 10 bytes the AOB site has reserved for the trampoline and
+/// stomps the next instruction (the EM master toggle ran into this and
+/// crashed the game).
+fn alloc_near(
+    pid: Pid,
+    mmap_addr: u64,
+    size: usize,
+    prot: i32,
+    near: u64,
+) -> Result<u64, AllocError> {
+    // mmap-aligned page size; conservative 64 KiB stride (matches Windows
+    // VirtualAlloc granularity and stays safely above any reasonable page
+    // size — 4 KiB on x86_64 today).
+    const PAGE_STRIDE: u64 = 0x1000;
+    // ±1.75 GiB scan window — enough to land within the 2 GiB `jmp rel32`
+    // reach while leaving slack for the resulting allocation size.
+    const SCAN_WINDOW: u64 = 0x7000_0000;
+    const FLAGS: i32 = MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE;
+
+    attach_and_wait(pid)?;
+    let original = ptrace::getregs(pid)?;
+
+    let result = (|| -> Result<u64, AllocError> {
+        // Try a sequence of candidate addresses: near, near + stride,
+        // near - stride, near + 2*stride, near - 2*stride, … Each attempt
+        // costs one remote mmap syscall, which is cheap (~µs) compared to
+        // the seconds-long AOB scan that just ran.
+        let near_page = near & !(PAGE_STRIDE - 1);
+        let mut up = near_page;
+        let mut down = near_page;
+        for _step in 0..(SCAN_WINDOW / PAGE_STRIDE) {
+            for &candidate in &[up, down] {
+                let raw = remote_mmap(pid, mmap_addr, &original, candidate, size, prot, FLAGS)?;
+                // `interpret_mmap_result` errors on MAP_FAILED; with
+                // MAP_FIXED_NOREPLACE that includes EEXIST when the page
+                // is already mapped — retry the next candidate.
+                match interpret_mmap_result(raw) {
+                    Ok(addr) => return Ok(addr),
+                    Err(AllocError::RemoteMmapFailed { .. }) => continue,
+                    Err(e) => return Err(e),
+                }
+            }
+            up = up.saturating_add(PAGE_STRIDE);
+            down = down.saturating_sub(PAGE_STRIDE);
+        }
+        Err(AllocError::RemoteMmapFailed {
+            raw: u64::MAX,
+            errno: nix::libc::ENOMEM,
+        })
+    })();
+
+    let _ = ptrace::setregs(pid, original);
+    let _ = ptrace::detach(pid, None);
+    result
+}
+
+/// Inner helper: one remote `mmap` syscall with a fully prepared register
+/// frame. Used only by [`alloc_near`] — the bare `alloc_remote` path
+/// inlines this because it owns the attach/detach lifecycle differently
+/// (one syscall per call).
+fn remote_mmap(
+    pid: Pid,
+    mmap_addr: u64,
+    original: &user_regs_struct,
+    hint: u64,
+    size: usize,
+    prot: i32,
+    flags: i32,
+) -> Result<u64, AllocError> {
+    let mut new = *original;
+    prepare_call_stack(pid, &mut new)?;
+    new.rip = mmap_addr;
+    new.rax = 0;
+    new.rdi = hint;
+    new.rsi = size as u64;
+    new.rdx = prot as u64;
+    new.rcx = flags as u64;
+    new.r8 = u64::MAX;
+    new.r9 = 0;
+    ptrace::setregs(pid, new)?;
+    ptrace::cont(pid, Signal::SIGCONT)?;
+    wait_for_sentinel_stop(pid)?;
+    let after = ptrace::getregs(pid)?;
+    Ok(after.rax)
 }
 
 /// Release a previously allocated region.

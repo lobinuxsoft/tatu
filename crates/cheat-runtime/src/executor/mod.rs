@@ -29,6 +29,11 @@ use crate::maps::{MemoryRegion, read_maps};
 use crate::memory::{self, RuntimeError};
 use crate::parser::{Script, Statement};
 use crate::scanner::{self, Pattern};
+use crate::threads::ThreadPauseError;
+
+use nix::sys::ptrace;
+use nix::sys::signal::Signal;
+use nix::sys::wait::{WaitStatus, waitpid};
 
 use self::length::estimate_raw_length;
 use self::raw_compiler::compile_raw;
@@ -55,6 +60,8 @@ pub enum ExecError {
     OrphanWrite(String),
     #[error("unsupported statement: {0}")]
     Unsupported(String),
+    #[error("thread pause: {0}")]
+    ThreadPause(#[from] ThreadPauseError),
 }
 
 /// A live execution context bound to a target PID. Holds the symbol table
@@ -76,7 +83,27 @@ pub struct ActiveCheat {
     /// and need to be released with `munmap` when the cheat is disabled. Keyed
     /// by the AA symbol name so `Statement::Dealloc(symbol)` can find them.
     allocs: HashMap<String, (u64, usize)>,
+    /// Snapshot of every symbol the Engine bound during ENABLE — both AOB-scan
+    /// results and allocs. Kept on the live cheat so downstream features
+    /// (pointer-chain `Value` reads in particular) can look up
+    /// `base_address` / `shop` / etc. while the master toggle is active. Goes
+    /// stale on `.disable()`; the registry should drop the entry then.
+    symbols: HashMap<String, u64>,
     disabled: bool,
+}
+
+impl ActiveCheat {
+    /// Read-only view of the symbol table this cheat established. The map
+    /// is a snapshot taken at ENABLE time — it doesn't update if the game
+    /// re-locates code afterwards (rare for AOB-scan-bound symbols, which
+    /// pin to fixed module offsets) but a re-enable will refresh it.
+    pub fn symbols(&self) -> &HashMap<String, u64> {
+        &self.symbols
+    }
+
+    pub fn pid(&self) -> Pid {
+        self.pid
+    }
 }
 
 impl Engine {
@@ -119,6 +146,7 @@ impl Engine {
             pid: self.pid,
             undo: Vec::new(),
             allocs: HashMap::new(),
+            symbols: HashMap::new(),
             disabled: false,
         };
 
@@ -126,10 +154,31 @@ impl Engine {
             rollback(&mut active);
             return Err(e);
         }
-        if let Err(e) = self.write_pass(script, &mut active) {
+        // Attach to the main thread ONCE for the duration of the write
+        // pass. This mirrors CE Linux's autoassembler.pas:4116 dance:
+        // `ntsuspendProcess(processhandle)` / ceserver pauseProcess wraps
+        // the entire batch of writes, so the target never observes a
+        // half-applied trampoline (newmem populated but pBase still
+        // pristine, or pBase patched while newmem is half-written).
+        //
+        // Inside the attach window we use PTRACE_POKEDATA for every byte,
+        // which bypasses page protections — no `mprotect` round-trip for
+        // .text writes, and the writes are atomic relative to the paused
+        // main thread.
+        //
+        // Self-PID (tests) skips the attach: Linux refuses ptrace-on-self
+        // with EPERM and we fall back to process_vm_writev for in-process
+        // smoke tests.
+        let attached = attach_main_thread(self.pid);
+        let write_result = self.write_pass(script, &mut active, attached);
+        if attached {
+            let _ = ptrace::detach(self.pid, None);
+        }
+        if let Err(e) = write_result {
             rollback(&mut active);
             return Err(e);
         }
+        active.symbols = self.symbols.clone();
         Ok(active)
     }
 
@@ -149,6 +198,9 @@ impl Engine {
                     self.symbols.insert(symbol.clone(), addr);
                 }
                 Statement::Alloc { symbol, size, near } => {
+                    // Explicit `near` propagates as the mmap hint. Without
+                    // it `alloc_remote` falls back to MAP_32BIT so
+                    // disp32-encoded `mov [imm], reg` stays legal.
                     let hint = near.as_ref().and_then(|n| {
                         self.symbols
                             .get(n)
@@ -173,11 +225,12 @@ impl Engine {
                 }
                 Statement::Raw(line) => {
                     if let Some(c) = cursor.as_mut() {
-                        let len = estimate_raw_length(line, &self.symbols).ok_or_else(|| {
-                            ExecError::Unsupported(format!(
-                                "cannot estimate length for pass 1: {line:?}"
-                            ))
-                        })?;
+                        let len =
+                            estimate_raw_length(line, &self.symbols, *c).ok_or_else(|| {
+                                ExecError::Unsupported(format!(
+                                    "cannot estimate length for pass 1: {line:?}"
+                                ))
+                            })?;
                         *c = c.wrapping_add(len as u64);
                     }
                 }
@@ -192,7 +245,16 @@ impl Engine {
     }
 
     /// Pass 2: with every symbol now bound, walk again and emit the bytes.
-    fn write_pass(&mut self, script: &Script, active: &mut ActiveCheat) -> Result<(), ExecError> {
+    /// `attached == true` means the caller has the main thread ptrace-stopped
+    /// and writes go through PTRACE_POKEDATA (no page-perm dance, atomic
+    /// against the paused thread). `attached == false` falls back to
+    /// process_vm_writev for self-pid test scenarios.
+    fn write_pass(
+        &mut self,
+        script: &Script,
+        active: &mut ActiveCheat,
+        attached: bool,
+    ) -> Result<(), ExecError> {
         let mut cursor: Option<u64> = None;
         for stmt in &script.enable {
             match stmt {
@@ -212,7 +274,21 @@ impl Engine {
                     };
                     let bytes = compile_raw(line, &self.symbols, self.pid, base)?;
                     let original = memory::read_bytes(self.pid, base, bytes.len())?;
-                    memory::write_bytes(self.pid, base, &bytes)?;
+                    if std::env::var_os("CHEAT_RUNTIME_TRACE").is_some() {
+                        eprintln!(
+                            "[trace] @0x{:x} write {:>2}B {:02X?}  was {:02X?}  ← {}",
+                            base,
+                            bytes.len(),
+                            bytes,
+                            original,
+                            line
+                        );
+                    }
+                    if attached {
+                        memory::write_bytes_attached(self.pid, base, &bytes)?;
+                    } else {
+                        memory::write_bytes(self.pid, base, &bytes)?;
+                    }
                     active.undo.push((base, original));
                     cursor = Some(base + bytes.len() as u64);
                 }
@@ -299,6 +375,35 @@ impl Drop for ActiveCheat {
         if !self.disabled && !self.undo.is_empty() {
             // Best-effort revert; we cannot return an error from Drop.
             rollback(self);
+        }
+    }
+}
+
+/// Attach to the main thread of `pid` and wait for it to stop on SIGSTOP.
+/// Returns `true` on success — the caller must `ptrace::detach` later.
+/// Returns `false` if the attach is impossible (self-pid, EPERM, ESRCH);
+/// the caller falls back to a non-attached write path in that case.
+fn attach_main_thread(pid: Pid) -> bool {
+    if pid == Pid::this() {
+        return false;
+    }
+    if ptrace::attach(pid).is_err() {
+        return false;
+    }
+    loop {
+        match waitpid(pid, None) {
+            Ok(WaitStatus::Stopped(_, Signal::SIGSTOP)) => return true,
+            Ok(WaitStatus::Stopped(_, sig)) => {
+                // Spurious signal arrived first — forward and keep waiting
+                // for our SIGSTOP.
+                if ptrace::cont(pid, sig).is_err() {
+                    return false;
+                }
+            }
+            Ok(_) | Err(_) => {
+                let _ = ptrace::detach(pid, None);
+                return false;
+            }
         }
     }
 }

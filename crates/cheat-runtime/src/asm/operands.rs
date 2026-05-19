@@ -127,14 +127,18 @@ pub(super) enum MemSize {
 pub(super) fn try_parse_memory_operand(
     text: &str,
     syms: &HashMap<String, u64>,
-) -> Result<Option<(MemSize, AsmMemoryOperand)>, AsmError> {
+) -> Result<Option<(Option<MemSize>, AsmMemoryOperand)>, AsmError> {
     let t = text.trim();
     let (size, body) = match split_size_prefix(t) {
-        Some((s, b)) => (s, b),
+        Some((s, b)) => (Some(s), b),
         None => {
-            // Allow the `[expr]` shorthand without an explicit size prefix.
+            // Allow the `[expr]` shorthand without an explicit size prefix —
+            // CE Auto-Assembler infers the width from the OTHER operand
+            // (the register's size in `mov [foo], rax`, or the immediate's
+            // explicit width otherwise). Callers receive `None` and must
+            // resolve it before encoding.
             if t.starts_with('[') && t.ends_with(']') {
-                (MemSize::Dword, t)
+                (None, t)
             } else {
                 return Ok(None);
             }
@@ -189,14 +193,17 @@ pub(super) fn parse_addr_inside_brackets(
         let lhs = lhs.trim();
         let disp_text = disp_text.trim();
         if let Some(reg) = parse_register(lhs) {
-            // Inside `[reg+disp]`, CE Auto-Assembler treats unprefixed
-            // tokens as hex (`[r13+13C]` means displacement `0x13C`).
-            // `parse_numeric` already accepts `0x` / `$` / decimal; we add
-            // the hex-by-default fallback as the third try, after the
-            // symbol table.
-            let raw = parse_numeric(disp_text)
+            // Inside `[reg+disp]`, CE Auto-Assembler treats **every**
+            // unprefixed token as hex — that's the canonical convention
+            // shared with MASM/IDA/CE-AA, and the only way `[rax+00000370]`
+            // (a vtable offset) decodes to `0x370` instead of decimal 370
+            // (= `0x172`, a different vtable slot that crashes the game).
+            // `parse_numeric` keeps its decimal fallback for explicit
+            // `(int)N` callers; here we prefer hex first.
+            let raw = u64::from_str_radix(disp_text, 16)
+                .ok()
+                .or_else(|| parse_numeric(disp_text))
                 .or_else(|| syms.get(disp_text).copied())
-                .or_else(|| u64::from_str_radix(disp_text, 16).ok())
                 .ok_or_else(|| AsmError::BadOperand(inner.into()))?;
             let disp = if op == "-" {
                 -(raw as i64) as i32
@@ -207,8 +214,12 @@ pub(super) fn parse_addr_inside_brackets(
         }
     }
 
-    // Absolute numeric or symbol → bare displacement.
-    if let Some(v) = parse_numeric(inner) {
+    // Absolute numeric or symbol → bare displacement. Bare `[N]` is hex by
+    // CE-AA convention, matching the `[reg+N]` rule above.
+    if let Some(v) = u64::from_str_radix(inner, 16)
+        .ok()
+        .or_else(|| parse_numeric(inner))
+    {
         return Ok(v.into());
     }
     if let Some(&v) = syms.get(inner) {

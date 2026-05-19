@@ -10,6 +10,18 @@ use super::operands::{
     promote_to_r64, resolve_numeric_or_symbol, split_two_operands, try_parse_memory_operand,
 };
 
+/// CE-AA infers the memory width of an unprefixed `[mem]` operand from
+/// the OTHER operand's register width. Returns `None` if the partner isn't
+/// a sized register (e.g. an immediate-into-mem move).
+fn infer_size_from_register(partner: &str) -> Option<MemSize> {
+    parse_register(partner).map(|r| match r {
+        TypedReg::R64(_) => MemSize::Qword,
+        TypedReg::R32(_) => MemSize::Dword,
+        TypedReg::R16(_) => MemSize::Word,
+        TypedReg::R8(_) => MemSize::Byte,
+    })
+}
+
 pub(super) fn emit_push(
     rest: &str,
     syms: &HashMap<String, u64>,
@@ -66,7 +78,16 @@ pub(super) fn emit_mov(
     let mut a = CodeAssembler::new(64)?;
 
     // `mov <mem>, <...>` — memory destination.
-    if let Some((size, mem)) = try_parse_memory_operand(dst_text, syms)? {
+    if let Some((size_opt, mem)) = try_parse_memory_operand(dst_text, syms)? {
+        // CE-AA infers an unprefixed `[mem]` size from the source register.
+        let size = match size_opt {
+            Some(s) => s,
+            None => infer_size_from_register(src_text).ok_or_else(|| {
+                AsmError::Unsupported(format!(
+                    "mov {dst_text}, {src_text:?}: cannot infer memory size — add a `qword/dword/word/byte ptr` prefix"
+                ))
+            })?,
+        };
         let sized = apply_size(size, mem);
         return emit_mov_into_mem(&mut a, sized, size, src_text, syms, base, dst_text);
     }
@@ -78,7 +99,8 @@ pub(super) fn emit_mov(
         TypedReg::R64(dst_r) => {
             if let Some(TypedReg::R64(src_r)) = parse_register(src_text) {
                 a.mov(dst_r, src_r)?;
-            } else if let Some((size, mem)) = try_parse_memory_operand(src_text, syms)? {
+            } else if let Some((size_opt, mem)) = try_parse_memory_operand(src_text, syms)? {
+                let size = size_opt.unwrap_or(MemSize::Qword);
                 if size != MemSize::Qword {
                     return Err(AsmError::Unsupported(format!(
                         "mov {dst_text}, {src_text:?}: r64 destination needs qword ptr source"
@@ -96,7 +118,8 @@ pub(super) fn emit_mov(
         TypedReg::R32(dst_r) => {
             if let Some(TypedReg::R32(src_r)) = parse_register(src_text) {
                 a.mov(dst_r, src_r)?;
-            } else if let Some((size, mem)) = try_parse_memory_operand(src_text, syms)? {
+            } else if let Some((size_opt, mem)) = try_parse_memory_operand(src_text, syms)? {
+                let size = size_opt.unwrap_or(MemSize::Dword);
                 if size != MemSize::Dword {
                     return Err(AsmError::Unsupported(format!(
                         "mov {dst_text}, {src_text:?}: r32 destination needs dword ptr source"

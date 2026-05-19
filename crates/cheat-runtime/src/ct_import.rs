@@ -15,9 +15,10 @@
 //! | CT entry shape | Manifest output |
 //! |---|---|
 //! | `Auto Assembler Script` whose body contains real AA (`aobscanmodule`, `alloc(`, `db `, `registersymbol`) | `Toggle` with the script body verbatim |
-//! | `GroupHeader=1` | `Header` (description only, no script) |
+//! | `GroupHeader=1` (and not pure ornament) | `Header` (description only, no script) |
 //! | Lua-only script (no AA primitives detected) | skipped |
-//! | Value / pointer entry (`<Address>` + typed `<VariableType>`) | skipped (no value-edit UI yet) |
+//! | `<Address>` + numeric `<VariableType>` (`4 Bytes` / `8 Bytes` / `Float` / `Double`) | `Value` with [`ValueSpec`] — base expression + pointer-chain offsets + [`VType`] |
+//! | Anything else (`Byte`, `String`, `Binary`, custom types) | skipped |
 //!
 //! ### Exe binding
 //!
@@ -31,7 +32,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::manifest::{FeatureKind, Manifest, ManifestFeature};
+use crate::manifest::{FeatureKind, Manifest, ManifestFeature, VType, ValueSpec};
 
 const CT_SUBDIR: &str = "backlog-tracker/cheat-tables";
 const MANIFEST_SUBDIR: &str = "backlog-tracker/trainers";
@@ -138,25 +139,93 @@ fn entry_to_feature(entry: roxmltree::Node, stem: &str) -> Option<ManifestFeatur
             category: None,
             kind: FeatureKind::Header,
             script: None,
+            value: None,
         });
     }
 
-    let kind = child_text(entry, "VariableType").unwrap_or_default();
-    if kind.trim() != "Auto Assembler Script" {
-        return None;
+    let vtype_text = child_text(entry, "VariableType").unwrap_or_default();
+    let vtype_text = vtype_text.trim();
+
+    if vtype_text == "Auto Assembler Script" {
+        let script = child_text(entry, "AssemblerScript").unwrap_or_default();
+        if !is_real_aa_script(&script) {
+            return None;
+        }
+        return Some(ManifestFeature {
+            uuid,
+            name: description,
+            category: None,
+            kind: FeatureKind::Toggle,
+            script: Some(script),
+            value: None,
+        });
     }
-    let script = child_text(entry, "AssemblerScript").unwrap_or_default();
-    if !is_real_aa_script(&script) {
-        return None;
-    }
+
+    // Numeric value entry — CE pointer-chain. Requires both <Address> and
+    // a supported <VariableType>. Without <Address> the entry can't be
+    // located in target memory.
+    let base_expr = child_text(entry, "Address")?;
+    let vtype = vtype_from_ce(vtype_text, signed_from_show_as_signed(entry))?;
+    let offsets = parse_offsets(entry);
 
     Some(ManifestFeature {
         uuid,
         name: description,
         category: None,
-        kind: FeatureKind::Toggle,
-        script: Some(script),
+        kind: FeatureKind::Value,
+        script: None,
+        value: Some(ValueSpec {
+            base_expr,
+            offsets,
+            vtype,
+        }),
     })
+}
+
+/// CE's `<ShowAsSigned>` is a per-entry override of the global Settings
+/// checkbox; on disk it's present only when the author flipped it. Missing
+/// element means "use default" — we treat that as unsigned, matching the
+/// default checkbox state.
+fn signed_from_show_as_signed(entry: roxmltree::Node) -> bool {
+    child_text(entry, "ShowAsSigned").is_some_and(|v| v.trim() == "1")
+}
+
+/// Map CE's `<VariableType>` string + signed flag into our [`VType`].
+/// CE accepts "Byte" / "2 Bytes" / "String" / "Binary" / etc. — those are
+/// outside the importer's current scope, so they return `None` and the
+/// caller skips the entry.
+fn vtype_from_ce(text: &str, signed: bool) -> Option<VType> {
+    Some(match text {
+        "4 Bytes" if signed => VType::I32,
+        "4 Bytes" => VType::U32,
+        "8 Bytes" if signed => VType::I64,
+        "8 Bytes" => VType::U64,
+        "Float" => VType::F32,
+        "Double" => VType::F64,
+        _ => return None,
+    })
+}
+
+/// Collect `<Offset>` children in document order. Each offset is parsed as
+/// hex (CE stores them without the `0x` prefix). Malformed entries get
+/// silently dropped; that matches CE's own tolerance — it skips the chain
+/// rather than refusing to load the table.
+fn parse_offsets(entry: roxmltree::Node) -> Vec<u64> {
+    let Some(offsets_node) = entry.children().find(|c| c.has_tag_name("Offsets")) else {
+        return Vec::new();
+    };
+    offsets_node
+        .children()
+        .filter(|c| c.has_tag_name("Offset"))
+        .filter_map(|n| {
+            let raw = n.text().unwrap_or("").trim();
+            let body = raw
+                .strip_prefix("0x")
+                .or_else(|| raw.strip_prefix("0X"))
+                .unwrap_or(raw);
+            u64::from_str_radix(body, 16).ok()
+        })
+        .collect()
 }
 
 /// Direct-child text accessor: returns the trimmed text of the first
@@ -403,13 +472,13 @@ shellExecute("https://store.steampowered.com/app/1")
     }
 
     #[test]
-    fn convert_keeps_header_and_aa_script_and_skips_lua_and_value() {
+    fn convert_emits_header_toggle_and_value_skipping_lua() {
         let tmp = TempDir::new().unwrap();
         let ct = write_fixture(tmp.path(), "Game.ct", FIXTURE);
         let manifest = convert_ct_file(&ct).unwrap();
         assert_eq!(manifest.exe, "Game.exe");
         assert_eq!(manifest.title, "Game");
-        assert_eq!(manifest.features.len(), 2);
+        assert_eq!(manifest.features.len(), 3);
 
         assert_eq!(manifest.features[0].kind, FeatureKind::Header);
         assert_eq!(manifest.features[0].name, "=== Player ===");
@@ -419,7 +488,83 @@ shellExecute("https://store.steampowered.com/app/1")
         assert_eq!(manifest.features[1].name, "Invincibility");
         let script = manifest.features[1].script.as_deref().unwrap();
         assert!(script.contains("aobscanmodule(INJECT,Game.exe"));
-        assert!(script.contains("[DISABLE]"));
+
+        assert_eq!(manifest.features[2].kind, FeatureKind::Value);
+        assert_eq!(manifest.features[2].name, "HP");
+        let v = manifest.features[2].value.as_ref().unwrap();
+        assert_eq!(v.base_expr, "0x12345678");
+        assert_eq!(v.vtype, VType::U32);
+        assert!(v.offsets.is_empty());
+    }
+
+    #[test]
+    fn value_entry_with_offsets_preserves_document_order() {
+        let tmp = TempDir::new().unwrap();
+        let ct = write_fixture(
+            tmp.path(),
+            "Values.ct",
+            r#"<?xml version="1.0"?>
+<CheatTable>
+  <CheatEntries>
+    <CheatEntry>
+      <ID>1</ID>
+      <Description>"Bootstrap"</Description>
+      <VariableType>Auto Assembler Script</VariableType>
+      <AssemblerScript>[ENABLE]
+aobscanmodule(INJECT,Game.exe,90 90 90)
+alloc(base_address,8)
+[DISABLE]
+</AssemblerScript>
+    </CheatEntry>
+    <CheatEntry>
+      <ID>2</ID>
+      <Description>"Current HP"</Description>
+      <VariableType>4 Bytes</VariableType>
+      <Address>[base_address]+30</Address>
+      <Offsets>
+        <Offset>13C</Offset>
+        <Offset>8B8</Offset>
+        <Offset>2D0</Offset>
+      </Offsets>
+    </CheatEntry>
+    <CheatEntry>
+      <ID>3</ID>
+      <Description>"Signed Counter"</Description>
+      <ShowAsSigned>1</ShowAsSigned>
+      <VariableType>4 Bytes</VariableType>
+      <Address>[base_address]+8</Address>
+    </CheatEntry>
+    <CheatEntry>
+      <ID>4</ID>
+      <Description>"World X"</Description>
+      <VariableType>Float</VariableType>
+      <Address>[base_address]+10</Address>
+    </CheatEntry>
+    <CheatEntry>
+      <ID>5</ID>
+      <Description>"Inventory Ptr"</Description>
+      <VariableType>8 Bytes</VariableType>
+      <Address>[base_address]+18</Address>
+    </CheatEntry>
+  </CheatEntries>
+</CheatTable>"#,
+        );
+        let m = convert_ct_file(&ct).unwrap();
+        // Toggle + 4 values
+        assert_eq!(m.features.len(), 5);
+        let hp = m.features[1].value.as_ref().unwrap();
+        assert_eq!(hp.base_expr, "[base_address]+30");
+        // Document order preserved (NOT reversed at parse time — the walker
+        // reverses, the schema stores them as the .CT does).
+        assert_eq!(hp.offsets, vec![0x13C, 0x8B8, 0x2D0]);
+        assert_eq!(hp.vtype, VType::U32);
+
+        let signed = m.features[2].value.as_ref().unwrap();
+        assert_eq!(signed.vtype, VType::I32);
+        assert!(signed.offsets.is_empty());
+
+        assert_eq!(m.features[3].value.as_ref().unwrap().vtype, VType::F32);
+        assert_eq!(m.features[4].value.as_ref().unwrap().vtype, VType::U64);
     }
 
     #[test]
