@@ -96,3 +96,32 @@ jobs:
           name: build-${{ matrix.target }}
           path: src-tauri/target/release/${{ matrix.binary }}
           retention-days: 7
+
+  dll-build:
+    name: Build cheat-runtime-dll (Win64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-gnu
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: cheat-runtime-dll
+
+      - name: Install mingw-w64 cross toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-mingw-w64-x86-64
+
+      - name: Cross-compile cheat-runtime-dll
+        run: ./scripts/build-dll.sh
+
+      - name: Upload .dll artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cheat-runtime-dll
+          path: target/dist/cheat_runtime_dll.dll
+          retention-days: 7
