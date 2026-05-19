@@ -1,0 +1,11 @@
+[package]
+name = "cheat-runtime-proto"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Wire types shared by the Linux tracker and the in-process Windows DLL backend (#102)."
+
+[dependencies]
+bincode = { version = "2", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
