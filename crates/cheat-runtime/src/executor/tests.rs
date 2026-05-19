@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::parser::parse;
+use nix::unistd::Pid;
 
 fn engine_for_self() -> Engine {
     Engine::new(Pid::this())
