@@ -29,7 +29,7 @@ use crate::maps::{MemoryRegion, read_maps};
 use crate::memory::{self, RuntimeError};
 use crate::parser::{Script, Statement};
 use crate::scanner::{self, Pattern};
-use crate::threads::{PausedTarget, ThreadPauseError};
+use crate::threads::ThreadPauseError;
 
 use self::length::estimate_raw_length;
 use self::raw_compiler::compile_raw;
@@ -150,27 +150,10 @@ impl Engine {
             rollback(&mut active);
             return Err(e);
         }
-        // Pause every thread of the target before patching code pages.
-        // Without this, a sibling thread that happens to be decoding the
-        // 10 bytes we're about to rewrite can fetch a partial mix of old
-        // and new bytes and execute an invalid instruction — the cause
-        // of "trampoline works for a while, then random fatal error"
-        // smokes on EM. CE on Linux pauses with ptrace_attach + waitpid
-        // around mmap; we extend the same dance across every TID for the
-        // duration of the write pass (ceserver/extensionloader.c:178).
-        let pause = match PausedTarget::pause(self.pid) {
-            Ok(p) => p,
-            Err(e) => {
-                rollback(&mut active);
-                return Err(e.into());
-            }
-        };
         if let Err(e) = self.write_pass(script, &mut active) {
-            drop(pause);
             rollback(&mut active);
             return Err(e);
         }
-        drop(pause);
         active.symbols = self.symbols.clone();
         Ok(active)
     }
