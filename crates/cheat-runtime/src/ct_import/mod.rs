@@ -3,9 +3,9 @@
 //! Cheat Engine stores tables as XML with a `<CheatTable>` root containing
 //! arbitrarily nested `<CheatEntry>` elements. Each entry can be a value
 //! tweak (typed `<Address>` + `<VariableType>` like `4 Bytes`), an
-//! Auto-Assembler script (`<VariableType>Auto Assembler Script</VariableType>`
-//! + `<AssemblerScript>`), a group header (`<GroupHeader>1</GroupHeader>`,
-//! description only), or a Lua-shim entry (uses `luacall(...)` or `{$lua}`
+//! Auto-Assembler script (paired `<VariableType>Auto Assembler Script</VariableType>`
+//! and `<AssemblerScript>`), a group header (`<GroupHeader>1</GroupHeader>`,
+//! description only), or a Lua-shim entry (using `luacall(...)` or `{$lua}`
 //! blocks). The runtime only understands compiled AA scripts, so we project
 //! the table down to the subset our [`crate::executor`] can execute and skip
 //! everything else.

@@ -276,7 +276,7 @@ fn is_meaningful_header_filters_ornament_but_keeps_real_sections() {
     assert!(is_meaningful_header("Equipment"));
     assert!(is_meaningful_header("【X】👈〖 All Relics 〗"));
     // Pure separators with no letters: drop.
-    assert!(!is_meaningful_header("◣⫘⫘⫘⫘⫘⫘⫘⫘⫘⫘⫘​⫘⫘◢"));
+    assert!(!is_meaningful_header("◣⫘⫘⫘⫘⫘⫘⫘⫘⫘⫘⫘\u{200B}⫘⫘◢"));
     assert!(!is_meaningful_header(
         "----------------------------------------"
     ));

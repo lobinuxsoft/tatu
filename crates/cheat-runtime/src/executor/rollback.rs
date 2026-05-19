@@ -70,10 +70,11 @@ pub(super) fn rollback(active: &mut ActiveCheat) -> Result<(), ExecError> {
             }
         }
     }
-    restore_result.and_then(|()| match dealloc_err {
+    restore_result?;
+    match dealloc_err {
         Some(e) => Err(e),
         None => Ok(()),
-    })
+    }
 }
 
 fn restore_all_writes(active: &mut ActiveCheat, attached: bool) -> Result<(), ExecError> {

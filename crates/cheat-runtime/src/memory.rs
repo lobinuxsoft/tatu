@@ -130,7 +130,7 @@ pub fn write_bytes(pid: Pid, addr: u64, data: &[u8]) -> Result<(), RuntimeError>
 /// when the payload isn't 8-aligned to avoid clobbering surrounding
 /// bytes), detaches. Slow (~1μs/word) but pages-perms-agnostic.
 fn write_bytes_ptrace(pid: Pid, addr: u64, data: &[u8]) -> Result<(), RuntimeError> {
-    ptrace::attach(pid).map_err(nix::Error::from)?;
+    ptrace::attach(pid)?;
     match waitpid(pid, None) {
         Ok(WaitStatus::Stopped(_, Signal::SIGSTOP)) => {}
         Ok(other) => {
@@ -181,12 +181,12 @@ fn pokedata_chunks(pid: Pid, addr: u64, data: &[u8]) -> Result<(), RuntimeError>
         } else {
             // Tail: read current word, merge new bytes into the leading
             // positions, write back so we don't clobber adjacent code.
-            let current = ptrace::read(pid, word_addr as AddressType).map_err(nix::Error::from)?;
+            let current = ptrace::read(pid, word_addr as AddressType)?;
             let mut bytes = current.to_le_bytes();
             bytes[..remaining].copy_from_slice(&data[offset..]);
             i64::from_le_bytes(bytes)
         };
-        ptrace::write(pid, word_addr as AddressType, word).map_err(nix::Error::from)?;
+        ptrace::write(pid, word_addr as AddressType, word)?;
         offset += word_size.min(remaining);
     }
     Ok(())

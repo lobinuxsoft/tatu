@@ -100,7 +100,7 @@ pub(super) fn has_word_token(haystack: &str, needle: &str) -> bool {
     let mut i = 0;
     while i + n.len() <= bytes.len() {
         if &bytes[i..i + n.len()] == n {
-            let after_ok = bytes.get(i + n.len()).map_or(true, |c| !is_token_char(*c));
+            let after_ok = bytes.get(i + n.len()).is_none_or(|c| !is_token_char(*c));
             if after_ok {
                 return true;
             }
@@ -117,7 +117,7 @@ pub(super) fn replace_word_token(haystack: &str, needle: &str, replacement: &str
     let mut i = 0;
     while i + n.len() <= bytes.len() {
         if &bytes[i..i + n.len()] == n {
-            let after_ok = bytes.get(i + n.len()).map_or(true, |c| !is_token_char(*c));
+            let after_ok = bytes.get(i + n.len()).is_none_or(|c| !is_token_char(*c));
             if after_ok {
                 out.push_str(replacement);
                 i += n.len();

@@ -185,7 +185,7 @@ pub(super) fn parse_addr_inside_brackets(
 
     // `register +/- displacement`. Pick the rightmost `+` or `-` so that
     // hex displacements containing letters don't trip the split.
-    if let Some(idx) = inner.rfind(|c| c == '+' || c == '-')
+    if let Some(idx) = inner.rfind(['+', '-'])
         && idx > 0
     {
         let (lhs, op_disp) = inner.split_at(idx);
@@ -315,7 +315,7 @@ pub(super) fn resolve_target(
     if let Some(addr) = parse_numeric(t) {
         return Ok(addr);
     }
-    if let Some(idx) = t.rfind(|c| c == '+' || c == '-')
+    if let Some(idx) = t.rfind(['+', '-'])
         && idx > 0
     {
         let (sym, op_and_off) = t.split_at(idx);
