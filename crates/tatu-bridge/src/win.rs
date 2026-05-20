@@ -495,6 +495,20 @@ fn dispatch(req: tatu_proto::Request, ctx: Option<BridgeCtx>) -> tatu_proto::Res
             Ok(c) => handle_patch_bytes(c, addr, &bytes, suspend_threads),
         },
 
+        Request::RemoteAlloc {
+            hint,
+            size,
+            executable,
+        } => match require_ctx(ctx) {
+            Err(e) => e,
+            Ok(c) => handle_remote_alloc(c, hint, size, executable),
+        },
+
+        Request::RemoteFree { addr } => match require_ctx(ctx) {
+            Err(e) => e,
+            Ok(c) => handle_remote_free(c, addr),
+        },
+
         other => Response::Err {
             message: format!("{other:?} not implemented in Phase 3 of #106"),
         },
@@ -547,6 +561,29 @@ fn handle_patch_bytes(
         Ok(()) => tatu_proto::Response::PatchBytes,
         Err(e) => tatu_proto::Response::Err {
             message: format!("PatchBytes: {e}"),
+        },
+    }
+}
+
+fn handle_remote_alloc(
+    ctx: BridgeCtx,
+    hint: Option<u64>,
+    size: u64,
+    executable: bool,
+) -> tatu_proto::Response {
+    match super::alloc::alloc_remote(ctx.process, hint, size, executable) {
+        Ok(addr) => tatu_proto::Response::RemoteAlloc { addr },
+        Err(e) => tatu_proto::Response::Err {
+            message: format!("RemoteAlloc: {e}"),
+        },
+    }
+}
+
+fn handle_remote_free(ctx: BridgeCtx, addr: u64) -> tatu_proto::Response {
+    match super::alloc::free_remote(ctx.process, addr) {
+        Ok(()) => tatu_proto::Response::RemoteFreed,
+        Err(e) => tatu_proto::Response::Err {
+            message: format!("RemoteFree: {e}"),
         },
     }
 }
