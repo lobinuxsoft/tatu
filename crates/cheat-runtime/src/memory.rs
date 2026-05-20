@@ -245,6 +245,12 @@ mod tests {
     /// mapped image, which must be the ELF magic `7F 45 4C 46`. Relies on
     /// `kernel.yama.ptrace_scope <= 0` (Bazzite default) so we can attach
     /// process_vm_readv to a same-uid child.
+    ///
+    /// The ELF header lives in the read-only region with `offset == 0`,
+    /// NOT in the first executable region: modern binaries compiled with
+    /// `-fcf-protection` start `.text` with `endbr64` (`f3 0f 1e fa`), so
+    /// matching on `perms.execute` reads CET landing pad bytes instead of
+    /// the magic.
     #[test]
     fn read_child_process_elf_magic() {
         let mut child = Command::new("sleep")
@@ -259,18 +265,18 @@ mod tests {
 
         let pid = Pid::from_raw(child.id() as i32);
         let regions = crate::maps::read_maps(pid).expect("read child maps");
-        let exec = regions
+        let header = regions
             .iter()
-            .find(|r| r.perms.execute && r.path.to_string_lossy().contains("sleep"))
-            .expect("expected an executable region pointing at the sleep binary");
+            .find(|r| r.offset == 0 && r.path.to_string_lossy().contains("sleep"))
+            .expect("expected the ELF header region (offset==0) backed by the sleep binary");
 
-        let head = read_bytes(pid, exec.start, 4).expect("read child memory");
+        let head = read_bytes(pid, header.start, 4).expect("read child memory");
         let _ = child.kill();
         let _ = child.wait();
 
         assert_eq!(
             &head, b"\x7fELF",
-            "expected ELF magic at start of text segment"
+            "expected ELF magic at start of mapped image (offset==0 region)"
         );
     }
 }
