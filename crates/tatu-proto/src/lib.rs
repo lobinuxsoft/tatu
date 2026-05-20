@@ -58,6 +58,83 @@ pub fn bridge_socket_path_linux(prefix: &std::path::Path) -> std::path::PathBuf 
 pub const HANDSHAKE_MAGIC: [u8; 4] = *b"CHRT";
 pub const PROTOCOL_VERSION: u32 = 1;
 
+/// Type tag for [`WireValue`] payloads — the wire-format mirror of
+/// `cheat_runtime::manifest::VType`. Replicated here so `tatu-bridge`
+/// (cross-compiled to `x86_64-pc-windows-gnu`, no nix dep) and the
+/// Linux tracker speak the same vocabulary without importing
+/// `cheat-runtime`.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum WireVType {
+    U32,
+    I32,
+    U64,
+    I64,
+    F32,
+    F64,
+}
+
+impl WireVType {
+    pub const fn size_bytes(self) -> usize {
+        match self {
+            WireVType::U32 | WireVType::I32 | WireVType::F32 => 4,
+            WireVType::U64 | WireVType::I64 | WireVType::F64 => 8,
+        }
+    }
+}
+
+/// Type-tagged numeric value — wire-format mirror of
+/// `cheat_runtime::chain::Value`. See [`WireVType`].
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub enum WireValue {
+    U32(u32),
+    I32(i32),
+    U64(u64),
+    I64(i64),
+    F32(f32),
+    F64(f64),
+}
+
+impl WireValue {
+    pub const fn vtype(&self) -> WireVType {
+        match self {
+            WireValue::U32(_) => WireVType::U32,
+            WireValue::I32(_) => WireVType::I32,
+            WireValue::U64(_) => WireVType::U64,
+            WireValue::I64(_) => WireVType::I64,
+            WireValue::F32(_) => WireVType::F32,
+            WireValue::F64(_) => WireVType::F64,
+        }
+    }
+
+    /// Little-endian serialised form. Length matches `vtype().size_bytes()`.
+    pub fn to_le_bytes(self) -> Vec<u8> {
+        match self {
+            WireValue::U32(v) => v.to_le_bytes().to_vec(),
+            WireValue::I32(v) => v.to_le_bytes().to_vec(),
+            WireValue::U64(v) => v.to_le_bytes().to_vec(),
+            WireValue::I64(v) => v.to_le_bytes().to_vec(),
+            WireValue::F32(v) => v.to_le_bytes().to_vec(),
+            WireValue::F64(v) => v.to_le_bytes().to_vec(),
+        }
+    }
+
+    /// Decode an LE slice of the right width into a typed value. Returns
+    /// `None` if `bytes.len() != vtype.size_bytes()`.
+    pub fn from_le_bytes(vtype: WireVType, bytes: &[u8]) -> Option<Self> {
+        if bytes.len() != vtype.size_bytes() {
+            return None;
+        }
+        Some(match vtype {
+            WireVType::U32 => WireValue::U32(u32::from_le_bytes(bytes.try_into().ok()?)),
+            WireVType::I32 => WireValue::I32(i32::from_le_bytes(bytes.try_into().ok()?)),
+            WireVType::U64 => WireValue::U64(u64::from_le_bytes(bytes.try_into().ok()?)),
+            WireVType::I64 => WireValue::I64(i64::from_le_bytes(bytes.try_into().ok()?)),
+            WireVType::F32 => WireValue::F32(f32::from_le_bytes(bytes.try_into().ok()?)),
+            WireVType::F64 => WireValue::F64(f64::from_le_bytes(bytes.try_into().ok()?)),
+        })
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum Request {
     /// Liveness probe — replies with [`Response::Pong`].
@@ -78,6 +155,51 @@ pub enum Request {
     /// `factor < 1.0` slower; `factor == 0.0` pauses.
     /// `None` disengages the hook entirely (restores real `clock_gettime`).
     SetSpeedhack { factor: Option<f64> },
+
+    // ---- Phase 4 (#106) — Win32 bridge in-process primitives -----------
+    /// Scan an AOB (array-of-bytes) pattern across the target. If
+    /// `module` is `Some`, restricts the scan to that module's loaded
+    /// range; otherwise sweeps every R/X region of the target. Pattern
+    /// syntax: pairs of hex with `??` wildcards, whitespace ignored —
+    /// e.g. `"48 8B ?? 24 ?? E8"`.
+    AobScan { module: Option<String>, pattern: String },
+    /// Write `bytes` at `addr` after lifting page protection. If
+    /// `suspend_threads` is true, every thread of the target is
+    /// suspended before the write and resumed after — the same
+    /// atomicity guard CE's autoassembler uses.
+    PatchBytes {
+        addr: u64,
+        bytes: Vec<u8>,
+        suspend_threads: bool,
+    },
+    /// `VirtualAllocEx` against the target. `hint` lets Win32 pick a
+    /// region near the hint (handy for jmp-rel32 codecaves);
+    /// `executable == true` selects `PAGE_EXECUTE_READWRITE` versus
+    /// `PAGE_READWRITE`.
+    RemoteAlloc {
+        hint: Option<u64>,
+        size: u64,
+        executable: bool,
+    },
+    /// `VirtualFreeEx` with `MEM_RELEASE`. Mirror of [`Request::RemoteAlloc`].
+    RemoteFree { addr: u64 },
+    /// Resolve a pointer chain: starting from `base`, walk `offsets` in
+    /// reverse (CE convention — see `cheat_runtime::chain::walk_chain`).
+    /// Returns the final pointer address (no value read).
+    WalkChain { base: u64, offsets: Vec<u64> },
+    /// Walk the chain and read the typed value at the final address.
+    ReadChainValue {
+        base: u64,
+        offsets: Vec<u64>,
+        vtype: WireVType,
+    },
+    /// Walk the chain and write `value` at the final address.
+    WriteChainValue {
+        base: u64,
+        offsets: Vec<u64>,
+        value: WireValue,
+    },
+
     /// Tell the server to stop accepting new connections and unbind the
     /// socket. The extension stays loaded — only the IPC channel closes.
     Shutdown,
@@ -90,6 +212,16 @@ pub enum Response {
     Freed,
     State { value: Option<Vec<u8>> },
     Speedhack { factor: Option<f64> },
+
+    // ---- Phase 4 (#106) — Win32 bridge in-process primitives -----------
+    AobScan { matches: Vec<u64> },
+    PatchBytes,
+    RemoteAlloc { addr: u64 },
+    RemoteFreed,
+    WalkChain { addr: u64 },
+    ChainValue { value: WireValue },
+    ChainWritten,
+
     ShutdownAck,
     Err { message: String },
 }
@@ -245,5 +377,116 @@ mod tests {
             socket_path_for(1234),
             std::path::PathBuf::from("/tmp/cheat-runtime-1234.sock")
         );
+    }
+
+    #[test]
+    fn wire_value_roundtrip_le_bytes_per_vtype() {
+        let cases: &[(WireValue, &[u8])] = &[
+            (WireValue::U32(0x1122_3344), &[0x44, 0x33, 0x22, 0x11]),
+            (WireValue::I32(-1), &[0xff, 0xff, 0xff, 0xff]),
+            (
+                WireValue::U64(0x0102_0304_0506_0708),
+                &[0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01],
+            ),
+            (
+                WireValue::F32(1.0),
+                &1.0_f32.to_le_bytes(),
+            ),
+            (
+                WireValue::F64(-2.5),
+                &(-2.5_f64).to_le_bytes(),
+            ),
+        ];
+        for (value, expected) in cases {
+            assert_eq!(value.to_le_bytes(), *expected, "{value:?} → LE bytes");
+            let parsed = WireValue::from_le_bytes(value.vtype(), expected)
+                .expect("matched width must decode");
+            assert_eq!(parsed, *value, "round-trip through LE bytes");
+            assert_eq!(value.vtype().size_bytes(), expected.len());
+        }
+    }
+
+    #[test]
+    fn wire_value_from_le_bytes_rejects_wrong_width() {
+        assert!(WireValue::from_le_bytes(WireVType::U32, &[1, 2, 3]).is_none());
+        assert!(WireValue::from_le_bytes(WireVType::U64, &[1; 9]).is_none());
+    }
+
+    #[test]
+    fn phase4_requests_roundtrip_over_frames() {
+        let frames: &[Request] = &[
+            Request::AobScan {
+                module: Some("game.exe".into()),
+                pattern: "48 8B ?? 24".into(),
+            },
+            Request::PatchBytes {
+                addr: 0x1400_0000,
+                bytes: vec![0x90, 0x90, 0xC3],
+                suspend_threads: true,
+            },
+            Request::RemoteAlloc {
+                hint: Some(0x1400_0000),
+                size: 4096,
+                executable: true,
+            },
+            Request::RemoteFree {
+                addr: 0x1400_1000,
+            },
+            Request::WalkChain {
+                base: 0x1400_0000,
+                offsets: vec![0x30, 0x8B8, 0x2D0],
+            },
+            Request::ReadChainValue {
+                base: 0x1400_0000,
+                offsets: vec![0x30],
+                vtype: WireVType::F32,
+            },
+            Request::WriteChainValue {
+                base: 0x1400_0000,
+                offsets: vec![],
+                value: WireValue::I64(-12345),
+            },
+        ];
+
+        let mut buf = Vec::new();
+        for req in frames {
+            write_frame(&mut buf, req).unwrap();
+        }
+        let mut cur = Cursor::new(buf);
+        for expected in frames {
+            let got: Request = read_frame(&mut cur).unwrap();
+            assert_eq!(&got, expected);
+        }
+    }
+
+    #[test]
+    fn phase4_responses_roundtrip_over_frames() {
+        let frames: &[Response] = &[
+            Response::AobScan {
+                matches: vec![0x1400_1000, 0x1400_2000],
+            },
+            Response::PatchBytes,
+            Response::RemoteAlloc {
+                addr: 0x1400_5000,
+            },
+            Response::RemoteFreed,
+            Response::WalkChain {
+                addr: 0x1400_DEAD,
+            },
+            Response::ChainValue {
+                value: WireValue::U32(42),
+            },
+            Response::ChainWritten,
+        ];
+
+        let mut buf = Vec::new();
+        for resp in frames {
+            write_frame(&mut buf, resp).unwrap();
+        }
+        let mut cur = Cursor::new(buf);
+        for expected in frames {
+            let got: Response = read_frame(&mut cur).unwrap();
+            assert_eq!(&got, expected);
+        }
     }
 }
