@@ -486,6 +486,15 @@ fn dispatch(req: tatu_proto::Request, ctx: Option<BridgeCtx>) -> tatu_proto::Res
             Ok(c) => handle_aob_scan(c, module.as_deref(), &pattern),
         },
 
+        Request::PatchBytes {
+            addr,
+            bytes,
+            suspend_threads,
+        } => match require_ctx(ctx) {
+            Err(e) => e,
+            Ok(c) => handle_patch_bytes(c, addr, &bytes, suspend_threads),
+        },
+
         other => Response::Err {
             message: format!("{other:?} not implemented in Phase 3 of #106"),
         },
@@ -526,6 +535,20 @@ fn handle_aob_scan(
         None => scan_all_readable(ctx.process, &parsed),
     };
     tatu_proto::Response::AobScan { matches }
+}
+
+fn handle_patch_bytes(
+    ctx: BridgeCtx,
+    addr: u64,
+    bytes: &[u8],
+    suspend_threads: bool,
+) -> tatu_proto::Response {
+    match super::patch::patch_bytes(ctx.process, ctx.target_pid, addr, bytes, suspend_threads) {
+        Ok(()) => tatu_proto::Response::PatchBytes,
+        Err(e) => tatu_proto::Response::Err {
+            message: format!("PatchBytes: {e}"),
+        },
+    }
 }
 
 fn run_loop(

@@ -16,6 +16,8 @@ mod aob;
 #[cfg(target_os = "windows")]
 mod modules;
 #[cfg(target_os = "windows")]
+mod patch;
+#[cfg(target_os = "windows")]
 mod remote_mem;
 #[cfg(target_os = "windows")]
 mod scan;
