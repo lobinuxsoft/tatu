@@ -364,7 +364,7 @@ mod tests {
             .unwrap()
             .unwrap();
         // Last byte of disp8 = -8 = 0xF8.
-        assert!(bytes.iter().any(|&b| b == 0xF8));
+        assert!(bytes.contains(&0xF8));
     }
 
     #[test]
