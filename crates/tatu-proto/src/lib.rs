@@ -34,6 +34,24 @@ pub fn socket_path_for(pid: i32) -> std::path::PathBuf {
     std::path::PathBuf::from(format!("/tmp/cheat-runtime-{pid}.sock"))
 }
 
+/// Win32-side path the bridge binds its AF_UNIX listener on. Wine
+/// translates `C:\users\Public\tatu-bridge.sock` to
+/// `<wineprefix>/drive_c/users/Public/tatu-bridge.sock` on the Linux
+/// filesystem; the tracker uses [`bridge_socket_path_linux`] to dial
+/// the same socket as a regular Unix domain socket.
+///
+/// One socket per wineprefix (= per game running). The path is
+/// stable, no PID suffix, so the tracker can compute it from
+/// `STEAM_COMPAT_DATA_PATH` without first scraping a PID.
+pub const BRIDGE_SOCKET_WIN_PATH: &str = r"C:\users\Public\tatu-bridge.sock";
+
+/// Linux-side view of the bridge AF_UNIX socket. `prefix` is the
+/// game's `STEAM_COMPAT_DATA_PATH` (i.e. `<steamapps>/compatdata/<appid>/pfx`
+/// up through the `pfx` directory).
+pub fn bridge_socket_path_linux(prefix: &std::path::Path) -> std::path::PathBuf {
+    prefix.join("drive_c/users/Public/tatu-bridge.sock")
+}
+
 /// Magic + protocol version sent as a preamble on a new connection.
 /// Lets either side reject a mismatched build cleanly before parsing
 /// anything else.
