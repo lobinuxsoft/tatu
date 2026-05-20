@@ -17,9 +17,18 @@
 //!
 //!   Bridge worker. Polls `ToolHelp32` for `<name>` (race-tolerant,
 //!   30 s deadline), opens the process, allocates a 4 KB R/W region
-//!   inside it, exercises `WriteProcessMemory` + `ReadProcessMemory`
-//!   for `--iters` iterations on a `--bytes` payload, reports the
-//!   round-trip count.
+//!   inside it. Then:
+//!
+//!   - With `--iters 0` (the Phase 3 default): bind an AF_UNIX
+//!     listener at `C:\users\Public\tatu-bridge.sock` (Wine forwards
+//!     AF_UNIX to the Linux kernel; the Linux tracker dials the same
+//!     socket via the wineprefix path) and serve the `CHRT v1`
+//!     protocol from `tatu_proto` until the peer sends `Shutdown` or
+//!     the bridge is terminated by the `--launch` parent.
+//!   - With `--iters N > 0`: legacy smoke benchmark — write/read a
+//!     `--bytes` payload against the allocated region for N
+//!     iterations and report round-trip count. Kept for regression
+//!     checks of the Win32 memory primitives.
 //!
 //! Both modes log to files inside the prefix
 //! (`C:\users\Public\tatu-bridge.log` / `…-launch.log`) because Win32
@@ -96,15 +105,17 @@ pub fn run() -> ExitCode {
 
 #[derive(Debug)]
 struct ConnectArgs {
-    target_exe: String,
+    target_exe: Option<String>,
     iters: u32,
     bytes: usize,
+    serve_only: bool,
 }
 
 fn parse_connect_args(argv: &[String]) -> Result<ConnectArgs, String> {
     let mut target_exe: Option<String> = None;
-    let mut iters = 1000u32;
+    let mut iters = 0u32;
     let mut bytes = 256usize;
+    let mut serve_only = false;
     let mut i = 0;
     while i < argv.len() {
         match argv[i].as_str() {
@@ -132,13 +143,21 @@ fn parse_connect_args(argv: &[String]) -> Result<ConnectArgs, String> {
                     .map_err(|e: std::num::ParseIntError| format!("--bytes: {e}"))?;
                 i += 2;
             }
+            "--serve-only" => {
+                serve_only = true;
+                i += 1;
+            }
             other => return Err(format!("unknown arg: {other}")),
         }
     }
+    if !serve_only && target_exe.is_none() {
+        return Err("--target-exe is required unless --serve-only".to_owned());
+    }
     Ok(ConnectArgs {
-        target_exe: target_exe.ok_or("--target-exe is required")?,
+        target_exe,
         iters,
         bytes,
+        serve_only,
     })
 }
 
@@ -162,6 +181,13 @@ fn launch_mode(argv: &[String]) -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    let target_exe = match connect_args.target_exe.as_deref() {
+        Some(t) => t,
+        None => {
+            log_to(LAUNCH_LOG, "launch: --target-exe is required");
+            return ExitCode::from(2);
+        }
+    };
 
     let self_exe = match std::env::current_exe() {
         Ok(p) => p.to_string_lossy().into_owned(),
@@ -173,14 +199,14 @@ fn launch_mode(argv: &[String]) -> ExitCode {
     log_to(
         LAUNCH_LOG,
         format_args!(
-            "launch: self={self_exe} game={game_exe} target={} iters={} bytes={}",
-            connect_args.target_exe, connect_args.iters, connect_args.bytes,
+            "launch: self={self_exe} game={game_exe} target={target_exe} iters={} bytes={}",
+            connect_args.iters, connect_args.bytes,
         ),
     );
 
     let bridge_cmdline = format!(
-        r#""{self_exe}" --connect --target-exe "{}" --iters {} --bytes {}"#,
-        connect_args.target_exe, connect_args.iters, connect_args.bytes,
+        r#""{self_exe}" --connect --target-exe "{target_exe}" --iters {} --bytes {}"#,
+        connect_args.iters, connect_args.bytes,
     );
     let bridge = match create_process(&bridge_cmdline) {
         Ok(info) => info,
@@ -248,22 +274,31 @@ fn connect_mode(argv: &[String]) -> ExitCode {
         }
     };
 
-    let pid = match wait_for_pid(&args.target_exe, Duration::from_secs(30)) {
+    // --serve-only skips game attach entirely — used by integration
+    // tests that just need the AF_UNIX listener up. Production paths
+    // pass --target-exe and go through the full attach below.
+    if args.serve_only {
+        log_to(CONNECT_LOG, "connect: --serve-only, skipping game attach");
+        return serve_mode();
+    }
+
+    let target = args
+        .target_exe
+        .as_deref()
+        .expect("parse_connect_args guarantees target_exe when not --serve-only");
+    let pid = match wait_for_pid(target, Duration::from_secs(30)) {
         Some(p) => p,
         None => {
             log_to(
                 CONNECT_LOG,
-                format_args!(
-                    "connect: no process matched '{}' after 30s",
-                    args.target_exe
-                ),
+                format_args!("connect: no process matched '{target}' after 30s"),
             );
             return ExitCode::from(3);
         }
     };
     log_to(
         CONNECT_LOG,
-        format_args!("connect: target '{}' is pid {pid}", args.target_exe),
+        format_args!("connect: target '{target}' is pid {pid}"),
     );
 
     let access = PROCESS_VM_OPERATION | PROCESS_VM_READ | PROCESS_VM_WRITE;
@@ -296,19 +331,26 @@ fn connect_mode(argv: &[String]) -> ExitCode {
         format_args!("connect: allocated {region_size}-byte region at {region:p}"),
     );
 
-    let result = run_loop(process, region, &args);
+    let exit = if args.iters > 0 {
+        smoke_mode(process, region, &args)
+    } else {
+        serve_mode()
+    };
 
     unsafe {
         VirtualFreeEx(process, region, 0, MEM_RELEASE);
         CloseHandle(process);
     }
+    exit
+}
 
-    match result {
+fn smoke_mode(process: HANDLE, region: *mut c_void, args: &ConnectArgs) -> ExitCode {
+    match run_loop(process, region, args) {
         Ok((matched, total, elapsed_us)) => {
             log_to(
                 CONNECT_LOG,
                 format_args!(
-                    "connect: {matched}/{total} round-trips matched ({} variance events, {} µs avg)",
+                    "connect: smoke {matched}/{total} round-trips matched ({} variance events, {} µs avg)",
                     total - matched,
                     elapsed_us / total as u128,
                 ),
@@ -320,9 +362,110 @@ fn connect_mode(argv: &[String]) -> ExitCode {
             }
         }
         Err(msg) => {
-            log_to(CONNECT_LOG, format_args!("connect: {msg}"));
+            log_to(CONNECT_LOG, format_args!("connect: smoke {msg}"));
             ExitCode::from(6)
         }
+    }
+}
+
+/// AF_UNIX server loop. Single-threaded, one client at a time. The
+/// tracker is the only legitimate peer; concurrency would only mask
+/// races. Wine forwards AF_UNIX bind/connect to the Linux kernel, so
+/// the socket file lives at
+/// `<wineprefix>/drive_c/users/Public/tatu-bridge.sock` as seen from
+/// Linux.
+///
+/// Lives until the peer sends `Request::Shutdown` or the `--launch`
+/// parent terminates us when the game exits.
+fn serve_mode() -> ExitCode {
+    use tatu_proto::BRIDGE_SOCKET_WIN_PATH;
+    use uds_windows::UnixListener;
+
+    // Clean stale socket from a prior crashed run. UnixListener::bind
+    // refuses to bind on top of an existing path.
+    let _ = std::fs::remove_file(BRIDGE_SOCKET_WIN_PATH);
+
+    let listener = match UnixListener::bind(BRIDGE_SOCKET_WIN_PATH) {
+        Ok(l) => l,
+        Err(e) => {
+            log_to(
+                CONNECT_LOG,
+                format_args!("connect: bind {BRIDGE_SOCKET_WIN_PATH}: {e}"),
+            );
+            return ExitCode::from(7);
+        }
+    };
+    log_to(
+        CONNECT_LOG,
+        format_args!("connect: listening on {BRIDGE_SOCKET_WIN_PATH}"),
+    );
+
+    for stream in listener.incoming() {
+        match stream {
+            Ok(mut s) => {
+                log_to(CONNECT_LOG, "connect: client connected");
+                match serve_client(&mut s) {
+                    Ok(ShouldStop::Yes) => {
+                        log_to(CONNECT_LOG, "connect: shutdown received, exiting");
+                        let _ = std::fs::remove_file(BRIDGE_SOCKET_WIN_PATH);
+                        return ExitCode::SUCCESS;
+                    }
+                    Ok(ShouldStop::No) => {
+                        log_to(CONNECT_LOG, "connect: client disconnected");
+                    }
+                    Err(e) => {
+                        log_to(CONNECT_LOG, format_args!("connect: client error: {e}"));
+                    }
+                }
+            }
+            Err(e) => {
+                log_to(CONNECT_LOG, format_args!("connect: accept: {e}"));
+                return ExitCode::from(8);
+            }
+        }
+    }
+    ExitCode::SUCCESS
+}
+
+#[derive(Debug)]
+enum ShouldStop {
+    Yes,
+    No,
+}
+
+fn serve_client(stream: &mut uds_windows::UnixStream) -> Result<ShouldStop, String> {
+    use tatu_proto::{Request, Response, read_frame, read_handshake, write_frame, write_handshake};
+
+    write_handshake(stream).map_err(|e| format!("write_handshake: {e}"))?;
+    read_handshake(stream).map_err(|e| format!("read_handshake: {e}"))?;
+
+    loop {
+        let req: Request = match read_frame(stream) {
+            Ok(r) => r,
+            Err(tatu_proto::ProtocolError::Io(e))
+                if e.kind() == std::io::ErrorKind::UnexpectedEof =>
+            {
+                return Ok(ShouldStop::No);
+            }
+            Err(e) => return Err(format!("read_frame: {e}")),
+        };
+        let resp = dispatch(req);
+        let stop = matches!(resp, Response::ShutdownAck);
+        write_frame(stream, &resp).map_err(|e| format!("write_frame: {e}"))?;
+        if stop {
+            return Ok(ShouldStop::Yes);
+        }
+    }
+}
+
+fn dispatch(req: tatu_proto::Request) -> tatu_proto::Response {
+    use tatu_proto::{Request, Response};
+    match req {
+        Request::Ping => Response::Pong,
+        Request::Shutdown => Response::ShutdownAck,
+        other => Response::Err {
+            message: format!("{other:?} not implemented in Phase 3 of #106"),
+        },
     }
 }
 
@@ -435,8 +578,10 @@ fn create_process(cmdline: &str) -> Result<PROCESS_INFORMATION, String> {
         .encode_wide()
         .chain(std::iter::once(0))
         .collect();
-    let mut si: STARTUPINFOW = unsafe { std::mem::zeroed() };
-    si.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
+    let si = STARTUPINFOW {
+        cb: std::mem::size_of::<STARTUPINFOW>() as u32,
+        ..unsafe { std::mem::zeroed() }
+    };
     let mut pi: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
     let ok = unsafe {
         CreateProcessW(
@@ -448,7 +593,7 @@ fn create_process(cmdline: &str) -> Result<PROCESS_INFORMATION, String> {
             0,
             ptr::null(),
             ptr::null(),
-            &mut si,
+            &si,
             &mut pi,
         )
     };

@@ -22,10 +22,15 @@
 //! share one definition of the wire format that way.
 
 pub mod alloc_helper;
-pub mod protocol;
 pub mod server;
 pub mod speedhack;
 pub mod state_store;
+
+/// Re-export so existing call sites (`crate::protocol::Request`, …)
+/// keep compiling after the protocol moved into the shared
+/// `tatu-proto` crate in Phase 3 of #106. New code should import from
+/// `tatu_proto` directly.
+pub use tatu_proto as protocol;
 
 /// Constructor that runs the first time `dlopen` loads this `.so` into
 /// the target process. `ctor::ctor` puts the function pointer in
