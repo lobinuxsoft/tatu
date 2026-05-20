@@ -17,15 +17,29 @@ use super::win::{ReadProcessMemory, WriteProcessMemory};
 #[derive(Debug, thiserror::Error)]
 pub enum RemoteMemError {
     #[error("ReadProcessMemory({addr:#x}, {len}) returned 0 (last os error: {os_error})")]
-    Read { addr: u64, len: usize, os_error: i32 },
-    #[error(
-        "WriteProcessMemory({addr:#x}, {len}) returned 0 (last os error: {os_error})"
-    )]
-    Write { addr: u64, len: usize, os_error: i32 },
+    Read {
+        addr: u64,
+        len: usize,
+        os_error: i32,
+    },
+    #[error("WriteProcessMemory({addr:#x}, {len}) returned 0 (last os error: {os_error})")]
+    Write {
+        addr: u64,
+        len: usize,
+        os_error: i32,
+    },
     #[error("short read at {addr:#x}: requested {requested}, got {got}")]
-    ShortRead { addr: u64, requested: usize, got: usize },
+    ShortRead {
+        addr: u64,
+        requested: usize,
+        got: usize,
+    },
     #[error("short write at {addr:#x}: requested {requested}, wrote {wrote}")]
-    ShortWrite { addr: u64, requested: usize, wrote: usize },
+    ShortWrite {
+        addr: u64,
+        requested: usize,
+        wrote: usize,
+    },
 }
 
 /// Read exactly `len` bytes from `addr` in the remote process. Short
@@ -89,11 +103,7 @@ pub fn read_remote_partial(process: HANDLE, addr: u64, len: usize) -> Vec<u8> {
     buf
 }
 
-pub fn write_remote(
-    process: HANDLE,
-    addr: u64,
-    bytes: &[u8],
-) -> Result<(), RemoteMemError> {
+pub fn write_remote(process: HANDLE, addr: u64, bytes: &[u8]) -> Result<(), RemoteMemError> {
     if bytes.is_empty() {
         return Ok(());
     }

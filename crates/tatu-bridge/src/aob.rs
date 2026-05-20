@@ -46,9 +46,11 @@ impl Pattern {
                     mask.push(false);
                 }
                 hex if hex.len() == 2 && hex.chars().all(|c| c.is_ascii_hexdigit()) => {
-                    bytes.push(u8::from_str_radix(hex, 16).map_err(|_| ParseError::BadToken {
-                        token: token.to_string(),
-                    })?);
+                    bytes.push(
+                        u8::from_str_radix(hex, 16).map_err(|_| ParseError::BadToken {
+                            token: token.to_string(),
+                        })?,
+                    );
                     mask.push(true);
                 }
                 _ => {
@@ -85,7 +87,9 @@ impl Pattern {
                 let literal_byte = self.bytes[literal_idx];
                 // Slide a memmem of one byte starting at the position
                 // where that first literal would land inside haystack.
-                let search_end = haystack.len().saturating_sub(self.bytes.len() - literal_idx);
+                let search_end = haystack
+                    .len()
+                    .saturating_sub(self.bytes.len() - literal_idx);
                 let needle = [literal_byte];
                 for hit in memmem::find_iter(&haystack[literal_idx..=search_end], &needle) {
                     let candidate_start = hit;

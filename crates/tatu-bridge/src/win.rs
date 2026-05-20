@@ -540,15 +540,13 @@ fn dispatch(req: tatu_proto::Request, ctx: Option<BridgeCtx>) -> tatu_proto::Res
 
 fn require_ctx(ctx: Option<BridgeCtx>) -> Result<BridgeCtx, tatu_proto::Response> {
     ctx.ok_or_else(|| tatu_proto::Response::Err {
-        message: "Phase 4 primitives require an attached target (bridge was started with --serve-only)".to_string(),
+        message:
+            "Phase 4 primitives require an attached target (bridge was started with --serve-only)"
+                .to_string(),
     })
 }
 
-fn handle_aob_scan(
-    ctx: BridgeCtx,
-    module: Option<&str>,
-    pattern: &str,
-) -> tatu_proto::Response {
+fn handle_aob_scan(ctx: BridgeCtx, module: Option<&str>, pattern: &str) -> tatu_proto::Response {
     use super::aob::Pattern;
     use super::scan::{scan_all_readable, scan_module};
 

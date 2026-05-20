@@ -88,17 +88,9 @@ pub fn find_module(process: HANDLE, name: &str) -> Result<Option<RemoteModule>, 
 
 fn base_name(process: HANDLE, module: HANDLE) -> String {
     let mut buf = [0u16; 260];
-    let len = unsafe {
-        GetModuleBaseNameW(
-            process,
-            module,
-            buf.as_mut_ptr(),
-            buf.len() as u32,
-        )
-    };
+    let len = unsafe { GetModuleBaseNameW(process, module, buf.as_mut_ptr(), buf.len() as u32) };
     if len == 0 {
         return String::new();
     }
     String::from_utf16_lossy(&buf[..len as usize])
 }
-

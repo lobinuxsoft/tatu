@@ -162,7 +162,10 @@ pub enum Request {
     /// range; otherwise sweeps every R/X region of the target. Pattern
     /// syntax: pairs of hex with `??` wildcards, whitespace ignored —
     /// e.g. `"48 8B ?? 24 ?? E8"`.
-    AobScan { module: Option<String>, pattern: String },
+    AobScan {
+        module: Option<String>,
+        pattern: String,
+    },
     /// Write `bytes` at `addr` after lifting page protection. If
     /// `suspend_threads` is true, every thread of the target is
     /// suspended before the write and resumed after — the same
@@ -388,14 +391,8 @@ mod tests {
                 WireValue::U64(0x0102_0304_0506_0708),
                 &[0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01],
             ),
-            (
-                WireValue::F32(1.0),
-                &1.0_f32.to_le_bytes(),
-            ),
-            (
-                WireValue::F64(-2.5),
-                &(-2.5_f64).to_le_bytes(),
-            ),
+            (WireValue::F32(1.0), &1.0_f32.to_le_bytes()),
+            (WireValue::F64(-2.5), &(-2.5_f64).to_le_bytes()),
         ];
         for (value, expected) in cases {
             assert_eq!(value.to_le_bytes(), *expected, "{value:?} → LE bytes");
@@ -429,9 +426,7 @@ mod tests {
                 size: 4096,
                 executable: true,
             },
-            Request::RemoteFree {
-                addr: 0x1400_1000,
-            },
+            Request::RemoteFree { addr: 0x1400_1000 },
             Request::WalkChain {
                 base: 0x1400_0000,
                 offsets: vec![0x30, 0x8B8, 0x2D0],
@@ -466,13 +461,9 @@ mod tests {
                 matches: vec![0x1400_1000, 0x1400_2000],
             },
             Response::PatchBytes,
-            Response::RemoteAlloc {
-                addr: 0x1400_5000,
-            },
+            Response::RemoteAlloc { addr: 0x1400_5000 },
             Response::RemoteFreed,
-            Response::WalkChain {
-                addr: 0x1400_DEAD,
-            },
+            Response::WalkChain { addr: 0x1400_DEAD },
             Response::ChainValue {
                 value: WireValue::U32(42),
             },

@@ -33,11 +33,7 @@ use windows_sys::Win32::System::Threading::{
 use super::remote_mem::{RemoteMemError, write_remote};
 
 unsafe extern "system" {
-    fn FlushInstructionCache(
-        hProcess: HANDLE,
-        lpBaseAddress: *const c_void,
-        dwSize: usize,
-    ) -> i32;
+    fn FlushInstructionCache(hProcess: HANDLE, lpBaseAddress: *const c_void, dwSize: usize) -> i32;
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -50,7 +46,11 @@ pub enum PatchError {
         os_error: i32,
     },
     #[error("FlushInstructionCache({addr:#x}, {len}) returned 0 (os error {os_error})")]
-    Flush { addr: u64, len: usize, os_error: i32 },
+    Flush {
+        addr: u64,
+        len: usize,
+        os_error: i32,
+    },
     #[error("remote memory: {0}")]
     Memory(#[from] RemoteMemError),
 }
