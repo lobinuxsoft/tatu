@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
     "src-tauri",
+    "crates/cheat-bootstrap",
     "crates/cheat-bridge",
     "crates/cheat-runtime",
     "crates/cheat-runtime-dll",

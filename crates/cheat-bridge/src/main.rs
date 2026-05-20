@@ -47,10 +47,27 @@
 
 #![cfg(target_os = "windows")]
 
+use std::io::Write;
 use std::os::raw::c_void;
 use std::process::ExitCode;
 use std::ptr;
 use std::time::Instant;
+
+const LOG_PATH: &str = r"C:\users\Public\cheat-bridge.log";
+
+/// File-based logging — Win32 console stdout doesn't survive
+/// Wine + SLR + CreateProcess inheritance reliably, so we write into
+/// the prefix where the host wrapper can read it back after the game
+/// exits.
+fn log(msg: impl std::fmt::Display) {
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(LOG_PATH)
+    {
+        let _ = writeln!(f, "{msg}");
+    }
+}
 
 use windows_sys::Win32::Foundation::{CloseHandle, FALSE, HANDLE, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::System::Diagnostics::ToolHelp::{
@@ -92,32 +109,36 @@ struct Args {
 }
 
 fn main() -> ExitCode {
+    let _ = std::fs::File::create(LOG_PATH);
+    log("bridge: start");
+
     let args = match parse_args() {
         Ok(a) => a,
         Err(msg) => {
-            eprintln!("{msg}");
-            eprintln!(
-                "usage: cheat-bridge --target-exe <name.exe> [--iters N] [--bytes N]"
-            );
+            log(format_args!("bridge: arg error: {msg}"));
             return ExitCode::from(2);
         }
     };
 
-    let pid = match find_pid(&args.target_exe) {
+    let pid = match wait_for_pid(&args.target_exe, std::time::Duration::from_secs(30)) {
         Some(p) => p,
         None => {
-            eprintln!("bridge: no process matched '{}'", args.target_exe);
+            log(format_args!(
+                "bridge: no process matched '{}' after 30s",
+                args.target_exe
+            ));
             return ExitCode::from(3);
         }
     };
-    println!("bridge: target '{}' is pid {}", args.target_exe, pid);
+    log(format_args!(
+        "bridge: target '{}' is pid {pid}",
+        args.target_exe
+    ));
 
     let access = PROCESS_VM_OPERATION | PROCESS_VM_READ | PROCESS_VM_WRITE;
     let process = unsafe { OpenProcess(access, FALSE, pid) };
     if process.is_null() {
-        eprintln!(
-            "bridge: OpenProcess({pid}) failed (last error code via Wine — check Proton logs)"
-        );
+        log(format_args!("bridge: OpenProcess({pid}) failed"));
         return ExitCode::from(4);
     }
 
@@ -132,11 +153,13 @@ fn main() -> ExitCode {
         )
     };
     if region.is_null() {
-        eprintln!("bridge: VirtualAllocEx failed");
+        log("bridge: VirtualAllocEx failed");
         unsafe { CloseHandle(process) };
         return ExitCode::from(5);
     }
-    println!("bridge: allocated {region_size}-byte region at {region:p}");
+    log(format_args!(
+        "bridge: allocated {region_size}-byte region at {region:p}"
+    ));
 
     let result = run_loop(process, region, &args);
 
@@ -147,11 +170,11 @@ fn main() -> ExitCode {
 
     match result {
         Ok((matched, total, elapsed_us)) => {
-            println!(
+            log(format_args!(
                 "bridge: {matched}/{total} round-trips matched ({} variance events, {} µs avg)",
                 total - matched,
                 elapsed_us / total as u128,
-            );
+            ));
             if matched == total {
                 ExitCode::SUCCESS
             } else {
@@ -159,7 +182,7 @@ fn main() -> ExitCode {
             }
         }
         Err(msg) => {
-            eprintln!("bridge: {msg}");
+            log(format_args!("bridge: {msg}"));
             ExitCode::from(6)
         }
     }
@@ -260,6 +283,22 @@ fn parse_args() -> Result<Args, String> {
         iters,
         bytes,
     })
+}
+
+/// Poll `find_pid` every 500 ms until it hits or the deadline expires.
+/// Used by the bootstrap path where the bridge can outrace the game's
+/// inner exe by a few seconds.
+fn wait_for_pid(name: &str, timeout: std::time::Duration) -> Option<u32> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if let Some(pid) = find_pid(name) {
+            return Some(pid);
+        }
+        if Instant::now() >= deadline {
+            return None;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
 }
 
 /// Walk the process snapshot and return the PID whose `szExeFile`

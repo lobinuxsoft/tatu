@@ -1,0 +1,16 @@
+[package]
+name = "cheat-bootstrap"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Win32 launcher EXE that replaces the game's entry point inside ONE Proton invocation, then CreateProcess-spawns cheat-bridge.exe and the real game.exe as siblings in the same wineserver / SLR container. Validates the Aurora-style co-launch pattern (#102 spike B)."
+
+[[bin]]
+name = "cheat-bootstrap"
+path = "src/main.rs"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_System_Threading",
+] }
