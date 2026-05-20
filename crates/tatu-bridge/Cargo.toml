@@ -1,0 +1,22 @@
+[package]
+name = "tatu-bridge"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Tatu Win32 backend. Single binary with two modes: --launch (bootstrap — CreateProcess self with --connect + CreateProcess game.exe inside one Proton invocation, so both children share the SLR container + wineserver) and --connect (the cheat worker — OpenProcess + VirtualAllocEx + memory ops against the game)."
+
+[[bin]]
+name = "tatu-bridge"
+path = "src/main.rs"
+
+# Windows-only deps under a target cfg so workspace `cargo build` from
+# a Linux host skips them silently.
+[target.'cfg(target_os = "windows")'.dependencies]
+tatu-proto = { path = "../tatu-proto" }
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_Memory",
+    "Win32_System_Threading",
+] }

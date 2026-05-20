@@ -1,5 +1,5 @@
 [package]
-name = "game-progress-tracker"
+name = "tatu-tracker"
 version = "0.1.0"
 edition = "2024"
 
