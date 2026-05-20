@@ -509,6 +509,29 @@ fn dispatch(req: tatu_proto::Request, ctx: Option<BridgeCtx>) -> tatu_proto::Res
             Ok(c) => handle_remote_free(c, addr),
         },
 
+        Request::WalkChain { base, offsets } => match require_ctx(ctx) {
+            Err(e) => e,
+            Ok(c) => handle_walk_chain(c, base, &offsets),
+        },
+
+        Request::ReadChainValue {
+            base,
+            offsets,
+            vtype,
+        } => match require_ctx(ctx) {
+            Err(e) => e,
+            Ok(c) => handle_read_chain_value(c, base, &offsets, vtype),
+        },
+
+        Request::WriteChainValue {
+            base,
+            offsets,
+            value,
+        } => match require_ctx(ctx) {
+            Err(e) => e,
+            Ok(c) => handle_write_chain_value(c, base, &offsets, value),
+        },
+
         other => Response::Err {
             message: format!("{other:?} not implemented in Phase 3 of #106"),
         },
@@ -584,6 +607,59 @@ fn handle_remote_free(ctx: BridgeCtx, addr: u64) -> tatu_proto::Response {
         Ok(()) => tatu_proto::Response::RemoteFreed,
         Err(e) => tatu_proto::Response::Err {
             message: format!("RemoteFree: {e}"),
+        },
+    }
+}
+
+fn handle_walk_chain(ctx: BridgeCtx, base: u64, offsets: &[u64]) -> tatu_proto::Response {
+    match super::chain::walk_chain(ctx.process, base, offsets) {
+        Ok(addr) => tatu_proto::Response::WalkChain { addr },
+        Err(e) => tatu_proto::Response::Err {
+            message: format!("WalkChain: {e}"),
+        },
+    }
+}
+
+fn handle_read_chain_value(
+    ctx: BridgeCtx,
+    base: u64,
+    offsets: &[u64],
+    vtype: tatu_proto::WireVType,
+) -> tatu_proto::Response {
+    let target = match super::chain::walk_chain(ctx.process, base, offsets) {
+        Ok(a) => a,
+        Err(e) => {
+            return tatu_proto::Response::Err {
+                message: format!("ReadChainValue: walk: {e}"),
+            };
+        }
+    };
+    match super::chain::read_value(ctx.process, target, vtype) {
+        Ok(value) => tatu_proto::Response::ChainValue { value },
+        Err(e) => tatu_proto::Response::Err {
+            message: format!("ReadChainValue: {e}"),
+        },
+    }
+}
+
+fn handle_write_chain_value(
+    ctx: BridgeCtx,
+    base: u64,
+    offsets: &[u64],
+    value: tatu_proto::WireValue,
+) -> tatu_proto::Response {
+    let target = match super::chain::walk_chain(ctx.process, base, offsets) {
+        Ok(a) => a,
+        Err(e) => {
+            return tatu_proto::Response::Err {
+                message: format!("WriteChainValue: walk: {e}"),
+            };
+        }
+    };
+    match super::chain::write_value(ctx.process, target, value) {
+        Ok(()) => tatu_proto::Response::ChainWritten,
+        Err(e) => tatu_proto::Response::Err {
+            message: format!("WriteChainValue: {e}"),
         },
     }
 }

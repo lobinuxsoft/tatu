@@ -16,6 +16,8 @@ mod aob;
 #[cfg(target_os = "windows")]
 mod alloc;
 #[cfg(target_os = "windows")]
+mod chain;
+#[cfg(target_os = "windows")]
 mod modules;
 #[cfg(target_os = "windows")]
 mod patch;
