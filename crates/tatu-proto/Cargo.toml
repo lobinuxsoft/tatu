@@ -1,9 +1,9 @@
 [package]
-name = "cheat-runtime-proto"
+name = "tatu-proto"
 version = "0.1.0"
 edition = "2024"
 publish = false
-description = "Wire types shared by the Linux tracker and the in-process Windows DLL backend (#102)."
+description = "Wire types shared by tatu-tracker (Linux Tauri client) and tatu-bridge (Win32 backend running under Wine). Encoded with bincode 2 + serde."
 
 [dependencies]
 bincode = { version = "2", features = ["serde"] }

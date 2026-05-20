@@ -3,8 +3,8 @@ resolver = "3"
 members = [
     "src-tauri",
     "crates/cheat-runtime",
-    "crates/cheat-runtime-dll",
     "crates/cheat-runtime-extension",
-    "crates/cheat-runtime-proto",
     "crates/ce-launcher",
+    "crates/tatu-bridge",
+    "crates/tatu-proto",
 ]
