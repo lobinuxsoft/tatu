@@ -19,7 +19,16 @@ tools/tatu-launcher/
 └── README.md                   # This file
 ```
 
-The Rust binary `tatu-launcher` ships next to these files after build.
+The Rust binary `tatu-launcher` ships next to these files after build,
+along with `install.sh` (idempotent drop-in installer). Build the
+staged dist tree with:
+
+```sh
+./scripts/build-tatu-bridge.sh    # Win32 PE, optional but required for handoff
+./scripts/build-tatu-launcher.sh  # Linux ELF + staged drop-in under target/dist/tatu-launcher/
+target/dist/tatu-launcher/install.sh
+```
+
 Drop-in install layout under Steam:
 
 ```
