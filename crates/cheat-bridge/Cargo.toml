@@ -1,0 +1,22 @@
+[package]
+name = "cheat-bridge"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Win32 EXE that runs under the same Wine prefix as the target game. Spike (#102 follow-up): validate that Win32↔Win32 cross-process memory ops inside Wine are Aurora-grade reliable, sidestepping the Linux↔Wine COW variance the cheat-runtime Linux backend hits."
+
+[[bin]]
+name = "cheat-bridge"
+path = "src/main.rs"
+
+# Windows-only deps live under a target cfg so workspace `cargo build`
+# from a Linux host skips them silently rather than pulling Win32 sysroot
+# headers it doesn't have.
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_Memory",
+    "Win32_System_Threading",
+] }

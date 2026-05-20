@@ -1,92 +1,78 @@
-//! `dinput8.dll` proxy mechanics.
+//! `winmm.dll` proxy mechanics.
 //!
-//! The game's Win32 loader resolves `dinput8.dll` against the game's
-//! own directory FIRST, then `%SYSTEMROOT%\System32\` (default search
-//! order). Dropping `cheat_runtime_dll.dll` into the game folder
-//! renamed as `dinput8.dll` puts us first, so the game loads US for
-//! every `dinput8.dll` import.
+//! Picked over `dinput8.dll` after a Phase 2 smoke against Ender
+//! Magnolia revealed the game's import table does **not** reference
+//! `dinput8.dll` (UE5 + xinput-only controller path). For a proxy to
+//! hijack the loader, the game must actually import the DLL we're
+//! impersonating. EM's import scan showed:
 //!
-//! We forward every export the real `dinput8.dll` ships with — the
-//! game must observe identical behaviour for `DirectInput8Create` &
-//! friends or controllers / DirectInput-based startup checks break.
-//! Failing the smoke ("game boots and plays identically") means a
-//! forwarder is misbehaving and Phase 3+ work piles on broken ground.
+//! - `WINMM.dll` → `timeBeginPeriod`, `timeEndPeriod`, `timeGetTime`
+//! - `VERSION.dll` → version-info helpers
+//! - `dxgi.dll`   → `CreateDXGIFactory`, `CreateDXGIFactory1`
+//!
+//! `winmm` won the tiebreak: BepInEx uses it as its primary proxy for
+//! Unreal Engine games, the three exported functions are pure timer
+//! API with no render-pipeline interaction (so vkd3d-proton / DXVK
+//! see no interference under Proton), and the implementation surface
+//! is minimal — three trampolines.
 //!
 //! ## How forwarding works
 //!
 //! 1. [`init`] runs from `DllMain` on `DLL_PROCESS_ATTACH`. It
-//!    `LoadLibraryA`s the real `C:\Windows\System32\dinput8.dll` (full
+//!    `LoadLibraryA`s the real `C:\Windows\System32\winmm.dll` (full
 //!    absolute path avoids loading our own proxy recursively) and
-//!    resolves the six standard exports via `GetProcAddress`.
-//! 2. The resolved pointers go into a [`OnceLock<Option<ProxyFns>>`]
-//!    so the forwarder functions can read them lock-free on every call.
+//!    resolves the three game-imported exports via `GetProcAddress`.
+//! 2. Resolved pointers go into a [`OnceLock<Option<ProxyFns>>`] so
+//!    the forwarder functions can read them lock-free on every call.
 //! 3. Each `#[unsafe(no_mangle)] pub unsafe extern "system" fn` below
 //!    is one of the exports the loader will look up against us; the
 //!    body is a thin trampoline that calls through to the real fn
-//!    pointer, returning `E_FAIL` only if `LoadLibrary` itself failed
-//!    (in which case `init` set the cell to `None`).
+//!    pointer, returning `0` only if `LoadLibrary` itself failed.
 //!
 //! ## Why a hard-coded absolute path
 //!
-//! `LoadLibraryA("dinput8.dll")` would re-enter our own search order
+//! `LoadLibraryA("winmm.dll")` would re-enter our own search order
 //! and resolve to us — infinite recursion. The system32 absolute path
 //! is the canonical Win32 idiom (REFramework, BepInEx, every CE
 //! plugin). On Wine/Proton the same path resolves to the Wine builtin
-//! `dinput8.dll` under the prefix; tested behaviour is identical.
+//! `winmm.dll` under the prefix; tested behaviour is identical.
 
 use std::os::raw::c_void;
 use std::sync::OnceLock;
 
-use windows_sys::Win32::Foundation::{HINSTANCE, HMODULE};
+use windows_sys::Win32::Foundation::HMODULE;
 use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryA};
 
-const REAL_DLL_PATH: &[u8] = b"C:\\Windows\\System32\\dinput8.dll\0";
+const REAL_DLL_PATH: &[u8] = b"C:\\Windows\\System32\\winmm.dll\0";
 
-/// HRESULT we return when proxy init failed and a forwarder is still
-/// being called (e.g. system32 doesn't carry `dinput8.dll`, which
-/// should never happen on a sane Wine prefix but we degrade safely).
-const E_FAIL: i32 = 0x80004005u32 as i32;
+/// `MMRESULT` we return when proxy init failed and a forwarder is
+/// still being called — `TIMERR_NOCANDO` (97 in mmsystem.h). Picks a
+/// real winmm error code rather than 0 so the game's error path can
+/// recognise it as a timer-API failure instead of "everything's fine".
+const TIMERR_NOCANDO: u32 = 97;
 
-// Function-pointer types for each export. Argument layouts come straight
-// from `dinput.h` / the COM ABI; we use `*const c_void` for GUID / IID /
-// CLSID pointers because the forwarder doesn't need to interpret them —
-// it just passes them through to the real implementation.
+// Function-pointer types for each export. Argument layouts come
+// straight from `mmsystem.h`. `MMRESULT` is `u32` (DWORD); `UINT` is
+// `u32` on Windows.
 
-type DirectInput8CreateFn = unsafe extern "system" fn(
-    hinst: HINSTANCE,
-    dw_version: u32,
-    riidltf: *const c_void,
-    ppv_out: *mut *mut c_void,
-    punk_outer: *mut c_void,
-) -> i32;
-
-type NoArgHResultFn = unsafe extern "system" fn() -> i32;
-
-type DllGetClassObjectFn = unsafe extern "system" fn(
-    rclsid: *const c_void,
-    riid: *const c_void,
-    ppv: *mut *mut c_void,
-) -> i32;
-
-type GetdfDIJoystickFn = unsafe extern "system" fn() -> *const c_void;
+type TimeBeginPeriodFn = unsafe extern "system" fn(u_period: u32) -> u32;
+type TimeEndPeriodFn = unsafe extern "system" fn(u_period: u32) -> u32;
+type TimeGetTimeFn = unsafe extern "system" fn() -> u32;
 
 struct ProxyFns {
-    direct_input8_create: DirectInput8CreateFn,
-    dll_can_unload_now: NoArgHResultFn,
-    dll_get_class_object: DllGetClassObjectFn,
-    dll_register_server: NoArgHResultFn,
-    dll_unregister_server: NoArgHResultFn,
-    getdf_di_joystick: GetdfDIJoystickFn,
+    time_begin_period: TimeBeginPeriodFn,
+    time_end_period: TimeEndPeriodFn,
+    time_get_time: TimeGetTimeFn,
 }
 
 static PROXY_FNS: OnceLock<Option<ProxyFns>> = OnceLock::new();
 
-/// Resolve the real `dinput8.dll` once. Called from `DllMain`. Safe to
+/// Resolve the real `winmm.dll` once. Called from `DllMain`. Safe to
 /// call repeatedly — `OnceLock` swallows the duplicate. If the load
 /// fails for any reason (system32 missing the DLL, GetProcAddress
 /// returning null), the cell is initialised to `None` and every
-/// forwarder degrades to returning `E_FAIL` instead of trampolining
-/// through a null pointer.
+/// forwarder degrades to returning `TIMERR_NOCANDO` instead of
+/// dereferencing a null pointer.
 pub(crate) fn init() {
     let _ = PROXY_FNS.get_or_init(try_load);
 }
@@ -101,12 +87,9 @@ fn try_load() -> Option<ProxyFns> {
             return None;
         }
         Some(ProxyFns {
-            direct_input8_create: resolve(hmod, b"DirectInput8Create\0")?,
-            dll_can_unload_now: resolve(hmod, b"DllCanUnloadNow\0")?,
-            dll_get_class_object: resolve(hmod, b"DllGetClassObject\0")?,
-            dll_register_server: resolve(hmod, b"DllRegisterServer\0")?,
-            dll_unregister_server: resolve(hmod, b"DllUnregisterServer\0")?,
-            getdf_di_joystick: resolve(hmod, b"GetdfDIJoystick\0")?,
+            time_begin_period: resolve(hmod, b"timeBeginPeriod\0")?,
+            time_end_period: resolve(hmod, b"timeEndPeriod\0")?,
+            time_get_time: resolve(hmod, b"timeGetTime\0")?,
         })
     }
 }
@@ -119,13 +102,13 @@ fn try_load() -> Option<ProxyFns> {
 unsafe fn resolve<F: Copy>(hmod: HMODULE, name: &[u8]) -> Option<F> {
     let raw = unsafe { GetProcAddress(hmod, name.as_ptr()) }?;
     // Safety: every export we ask for is a known C-ABI function in
-    // dinput8.dll; the caller's type annotation matches the real
-    // signature documented in dinput.h.
+    // winmm.dll; the caller's type annotation matches the real
+    // signature documented in mmsystem.h.
     Some(unsafe { std::mem::transmute_copy(&raw) })
 }
 
 /// Helper used by every forwarder: read the proxy cell, unwrap the
-/// optional, and return `E_FAIL` if init never populated it. Inlined
+/// optional, and return `None` if init never populated it. Inlined
 /// so the trampoline stays a few instructions.
 #[inline(always)]
 fn fns() -> Option<&'static ProxyFns> {
@@ -137,65 +120,29 @@ fn fns() -> Option<&'static ProxyFns> {
 // Each `#[unsafe(no_mangle)] pub unsafe extern "system" fn` lands in the
 // produced DLL's export table under the un-decorated symbol name, which
 // is what the game's import table is looking for. Phase 2 acceptance:
-// `objdump -p target/dist/cheat_runtime_dll.dll | grep -i ordinal`
-// must list all six names.
+// `objdump -p target/dist/cheat_runtime_dll.dll` must list all three
+// names in the Export Table.
 
 #[unsafe(no_mangle)]
-pub unsafe extern "system" fn DirectInput8Create(
-    hinst: HINSTANCE,
-    dw_version: u32,
-    riidltf: *const c_void,
-    ppv_out: *mut *mut c_void,
-    punk_outer: *mut c_void,
-) -> i32 {
+pub unsafe extern "system" fn timeBeginPeriod(u_period: u32) -> u32 {
     match fns() {
-        Some(p) => unsafe {
-            (p.direct_input8_create)(hinst, dw_version, riidltf, ppv_out, punk_outer)
-        },
-        None => E_FAIL,
+        Some(p) => unsafe { (p.time_begin_period)(u_period) },
+        None => TIMERR_NOCANDO,
     }
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "system" fn DllCanUnloadNow() -> i32 {
+pub unsafe extern "system" fn timeEndPeriod(u_period: u32) -> u32 {
     match fns() {
-        Some(p) => unsafe { (p.dll_can_unload_now)() },
-        None => E_FAIL,
+        Some(p) => unsafe { (p.time_end_period)(u_period) },
+        None => TIMERR_NOCANDO,
     }
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "system" fn DllGetClassObject(
-    rclsid: *const c_void,
-    riid: *const c_void,
-    ppv: *mut *mut c_void,
-) -> i32 {
+pub unsafe extern "system" fn timeGetTime() -> u32 {
     match fns() {
-        Some(p) => unsafe { (p.dll_get_class_object)(rclsid, riid, ppv) },
-        None => E_FAIL,
-    }
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "system" fn DllRegisterServer() -> i32 {
-    match fns() {
-        Some(p) => unsafe { (p.dll_register_server)() },
-        None => E_FAIL,
-    }
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "system" fn DllUnregisterServer() -> i32 {
-    match fns() {
-        Some(p) => unsafe { (p.dll_unregister_server)() },
-        None => E_FAIL,
-    }
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "system" fn GetdfDIJoystick() -> *const c_void {
-    match fns() {
-        Some(p) => unsafe { (p.getdf_di_joystick)() },
-        None => std::ptr::null(),
+        Some(p) => unsafe { (p.time_get_time)() },
+        None => 0,
     }
 }
