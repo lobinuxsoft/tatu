@@ -27,9 +27,7 @@ jobs:
           - target: linux-amd64
             os: ubuntu-latest
             binary: tatu-tracker
-          - target: windows-amd64
-            os: windows-latest
-            binary: tatu-tracker.exe
+        # windows-amd64 disabled while the tool stays Linux-only.
     steps:
       - uses: actions/checkout@v6
         with:
@@ -373,11 +371,6 @@ jobs:
           chmod +x staging/linux/*
           tar -czf "release/tatu-tracker-linux-amd64.tar.gz" -C staging/linux .
 
-          # Windows zip
-          mkdir -p staging/windows
-          cp artifacts/binary-windows-amd64/tatu-tracker.exe staging/windows/
-          cd staging/windows && zip -r "../../release/tatu-tracker-windows-amd64.zip" . && cd ../..
-
           # AppImage
           cp artifacts/appimage/Game_Progress_Tracker.AppImage release/
           chmod +x release/*.AppImage
@@ -398,7 +391,6 @@ jobs:
             | File | Description |
             |------|-------------|
             | `tatu-tracker-linux-amd64.tar.gz` | Linux binary |
-            | `tatu-tracker-windows-amd64.zip` | Windows binary |
             | `Game_Progress_Tracker.AppImage` | Linux AppImage (auto-install support) |
             | `checksums-sha256.txt` | SHA-256 checksums |
           files: release/*
