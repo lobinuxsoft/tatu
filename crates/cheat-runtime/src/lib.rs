@@ -16,6 +16,7 @@
 pub mod alloc;
 pub mod asm;
 pub mod aurora;
+pub mod bridge_client;
 pub mod chain;
 pub mod ct_import;
 pub mod elfsym;

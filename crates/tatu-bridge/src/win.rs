@@ -105,15 +105,17 @@ pub fn run() -> ExitCode {
 
 #[derive(Debug)]
 struct ConnectArgs {
-    target_exe: String,
+    target_exe: Option<String>,
     iters: u32,
     bytes: usize,
+    serve_only: bool,
 }
 
 fn parse_connect_args(argv: &[String]) -> Result<ConnectArgs, String> {
     let mut target_exe: Option<String> = None;
     let mut iters = 0u32;
     let mut bytes = 256usize;
+    let mut serve_only = false;
     let mut i = 0;
     while i < argv.len() {
         match argv[i].as_str() {
@@ -141,13 +143,21 @@ fn parse_connect_args(argv: &[String]) -> Result<ConnectArgs, String> {
                     .map_err(|e: std::num::ParseIntError| format!("--bytes: {e}"))?;
                 i += 2;
             }
+            "--serve-only" => {
+                serve_only = true;
+                i += 1;
+            }
             other => return Err(format!("unknown arg: {other}")),
         }
     }
+    if !serve_only && target_exe.is_none() {
+        return Err("--target-exe is required unless --serve-only".to_owned());
+    }
     Ok(ConnectArgs {
-        target_exe: target_exe.ok_or("--target-exe is required")?,
+        target_exe,
         iters,
         bytes,
+        serve_only,
     })
 }
 
@@ -171,6 +181,13 @@ fn launch_mode(argv: &[String]) -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    let target_exe = match connect_args.target_exe.as_deref() {
+        Some(t) => t,
+        None => {
+            log_to(LAUNCH_LOG, "launch: --target-exe is required");
+            return ExitCode::from(2);
+        }
+    };
 
     let self_exe = match std::env::current_exe() {
         Ok(p) => p.to_string_lossy().into_owned(),
@@ -182,14 +199,14 @@ fn launch_mode(argv: &[String]) -> ExitCode {
     log_to(
         LAUNCH_LOG,
         format_args!(
-            "launch: self={self_exe} game={game_exe} target={} iters={} bytes={}",
-            connect_args.target_exe, connect_args.iters, connect_args.bytes,
+            "launch: self={self_exe} game={game_exe} target={target_exe} iters={} bytes={}",
+            connect_args.iters, connect_args.bytes,
         ),
     );
 
     let bridge_cmdline = format!(
-        r#""{self_exe}" --connect --target-exe "{}" --iters {} --bytes {}"#,
-        connect_args.target_exe, connect_args.iters, connect_args.bytes,
+        r#""{self_exe}" --connect --target-exe "{target_exe}" --iters {} --bytes {}"#,
+        connect_args.iters, connect_args.bytes,
     );
     let bridge = match create_process(&bridge_cmdline) {
         Ok(info) => info,
@@ -257,22 +274,31 @@ fn connect_mode(argv: &[String]) -> ExitCode {
         }
     };
 
-    let pid = match wait_for_pid(&args.target_exe, Duration::from_secs(30)) {
+    // --serve-only skips game attach entirely — used by integration
+    // tests that just need the AF_UNIX listener up. Production paths
+    // pass --target-exe and go through the full attach below.
+    if args.serve_only {
+        log_to(CONNECT_LOG, "connect: --serve-only, skipping game attach");
+        return serve_mode();
+    }
+
+    let target = args
+        .target_exe
+        .as_deref()
+        .expect("parse_connect_args guarantees target_exe when not --serve-only");
+    let pid = match wait_for_pid(target, Duration::from_secs(30)) {
         Some(p) => p,
         None => {
             log_to(
                 CONNECT_LOG,
-                format_args!(
-                    "connect: no process matched '{}' after 30s",
-                    args.target_exe
-                ),
+                format_args!("connect: no process matched '{target}' after 30s"),
             );
             return ExitCode::from(3);
         }
     };
     log_to(
         CONNECT_LOG,
-        format_args!("connect: target '{}' is pid {pid}", args.target_exe),
+        format_args!("connect: target '{target}' is pid {pid}"),
     );
 
     let access = PROCESS_VM_OPERATION | PROCESS_VM_READ | PROCESS_VM_WRITE;
