@@ -1,0 +1,91 @@
+name: Bug Report
+description: Report a bug or unexpected behavior
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug! Please fill out the sections below.
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which part of Tatu is affected?
+      options:
+        - tracker (Tauri desktop app)
+        - bridge (Win32 worker under Wine)
+        - launcher (Steam compatibility tool)
+        - cheat-runtime (Linux ptrace backend)
+        - proto (Wire types)
+        - .CT import
+        - ci (Workflows, build scripts)
+        - documentation
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: A clear description of what the bug is
+      placeholder: What happened? What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: How can we reproduce this issue?
+      placeholder: |
+        1. Install tatu-launcher via install.sh
+        2. Enable game in launcher.toml
+        3. Launch from Steam
+        4. See error
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Please provide your environment details
+      value: |
+        - OS: [e.g., Bazzite F43, Ubuntu 24.04, Windows 11]
+        - Tatu version: [git SHA or release tag]
+        - Proton version (if bridge involved): [e.g., Proton - Experimental, GE-Proton9-25]
+        - Game (if applicable): [name + Steam appid]
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Logs
+      description: Paste any error messages or logs here (bridge logs land under `<prefix>/drive_c/users/Public/tatu-bridge*.log`)
+      render: shell
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I have searched existing issues to ensure this is not a duplicate
+          required: true
+        - label: I have tested with the latest version
+          required: false
+        - label: I am willing to submit a PR to fix this issue
+          required: false
+
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        **Want to contribute a fix?** Great! Please:
+        1. Wait for the issue to be triaged and assigned to you
+        2. Create a branch: `fix/issue-XX-short-description`
+        3. Submit a PR targeting `development`
+
+        See [CONTRIBUTING.md](https://github.com/lobinuxsoft/tatu/blob/development/CONTRIBUTING.md) for details.
