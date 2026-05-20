@@ -180,7 +180,7 @@ pub fn load_manifests_for(app_id: &str) -> Result<Vec<Manifest>, ManifestError> 
             out.push(load_one(&path)?);
         }
     }
-    out.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
+    out.sort_by_key(|m| m.title.to_lowercase());
     Ok(out)
 }
 
