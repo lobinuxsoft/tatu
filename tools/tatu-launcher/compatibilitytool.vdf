@@ -1,0 +1,13 @@
+"compatibilitytools"
+{
+  "compat_tools"
+  {
+    "tatu-launcher"
+    {
+      "install_path" "."
+      "display_name" "Tatu Launcher"
+      "from_oslist"  "windows"
+      "to_oslist"    "linux"
+    }
+  }
+}

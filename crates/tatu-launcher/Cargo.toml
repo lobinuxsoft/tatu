@@ -1,0 +1,16 @@
+[package]
+name = "tatu-launcher"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Tatu Steam compatibility tool. Linux entry binary invoked by Steam via toolmanifest.vdf: parses ~/.config/tatu/launcher.toml, resolves the user's real Proton, and for opted-in appids rewrites `waitforexitandrun game.exe ...` into `waitforexitandrun tatu-bridge.exe --launch game.exe --target-exe ... ...` so the Aurora-style co-launch happens inside one Proton invocation (shared SLR container, shared wineserver). Other verbs and unopted games passthrough."
+
+[[bin]]
+name = "tatu-launcher"
+path = "src/main.rs"
+
+[dependencies]
+dirs = "6"
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+toml = "0.8"
