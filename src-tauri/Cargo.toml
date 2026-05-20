@@ -1,5 +1,5 @@
 [package]
-name = "game-progress-tracker"
+name = "tatu-tracker"
 version = "0.1.0"
 edition = "2024"
 
@@ -13,6 +13,12 @@ dirs = "6"
 tauri-plugin-opener = "2"
 regex = "1"
 steam-vdf-parser = "0.1.1"
+cheat-runtime = { path = "../crates/cheat-runtime" }
+ce-launcher = { path = "../crates/ce-launcher" }
+urlencoding = "2"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+
+[dev-dependencies]
+tempfile = "3"

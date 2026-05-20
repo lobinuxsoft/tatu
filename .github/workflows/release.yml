@@ -26,10 +26,10 @@ jobs:
         include:
           - target: linux-amd64
             os: ubuntu-latest
-            binary: game-progress-tracker
+            binary: tatu-tracker
           - target: windows-amd64
             os: windows-latest
-            binary: game-progress-tracker.exe
+            binary: tatu-tracker.exe
     steps:
       - uses: actions/checkout@v6
         with:
@@ -65,8 +65,8 @@ jobs:
     env:
       APPIMAGE_EXTRACT_AND_RUN: "1"
       APP_NAME: "Game Progress Tracker"
-      BINARY_NAME: "game-progress-tracker"
-      DESKTOP_ID: "com.lobinux.game-progress-tracker"
+      BINARY_NAME: "tatu-tracker"
+      DESKTOP_ID: "com.lobinux.tatu-tracker"
     steps:
       - uses: actions/checkout@v6
         with:
@@ -228,8 +228,8 @@ jobs:
           HERE=${SELF%/*}
           APPIMAGE="${APPIMAGE:-$SELF}"
           APP_NAME="Game Progress Tracker"
-          BINARY_NAME="game-progress-tracker"
-          DESKTOP_ID="com.lobinux.game-progress-tracker"
+          BINARY_NAME="tatu-tracker"
+          DESKTOP_ID="com.lobinux.tatu-tracker"
           INSTALL_DIR="$HOME/.local/bin"
           DESKTOP_DIR="$HOME/.local/share/applications"
           ICON_DIR="$HOME/.local/share/icons"
@@ -245,7 +245,7 @@ jobs:
               export GST_PLUGIN_PATH="${HERE}/usr/lib/gstreamer-1.0"
               export GST_PLUGIN_SYSTEM_PATH=""
               export GST_PLUGIN_SCANNER="${HERE}/usr/libexec/gstreamer-1.0/gst-plugin-scanner"
-              export GST_REGISTRY="${HOME}/.cache/game-progress-tracker/gst-registry.bin"
+              export GST_REGISTRY="${HOME}/.cache/tatu-tracker/gst-registry.bin"
               cd "${HERE}"
           }
 
@@ -282,10 +282,10 @@ jobs:
 
           uninstall_app() {
               echo "Uninstalling $APP_NAME..."
-              find "$INSTALL_DIR" -maxdepth 1 -iname "*game-progress-tracker*.AppImage" -delete 2>/dev/null
+              find "$INSTALL_DIR" -maxdepth 1 -iname "*tatu-tracker*.AppImage" -delete 2>/dev/null
               rm -f "$DESKTOP_DIR/$DESKTOP_ID.desktop"
               rm -f "$ICON_DIR/$DESKTOP_ID.png"
-              rm -rf "${HOME}/.cache/game-progress-tracker"
+              rm -rf "${HOME}/.cache/tatu-tracker"
               echo "Uninstalled."
           }
 
@@ -369,14 +369,14 @@ jobs:
 
           # Linux tar.gz
           mkdir -p staging/linux
-          cp artifacts/binary-linux-amd64/game-progress-tracker staging/linux/
+          cp artifacts/binary-linux-amd64/tatu-tracker staging/linux/
           chmod +x staging/linux/*
-          tar -czf "release/game-progress-tracker-linux-amd64.tar.gz" -C staging/linux .
+          tar -czf "release/tatu-tracker-linux-amd64.tar.gz" -C staging/linux .
 
           # Windows zip
           mkdir -p staging/windows
-          cp artifacts/binary-windows-amd64/game-progress-tracker.exe staging/windows/
-          cd staging/windows && zip -r "../../release/game-progress-tracker-windows-amd64.zip" . && cd ../..
+          cp artifacts/binary-windows-amd64/tatu-tracker.exe staging/windows/
+          cd staging/windows && zip -r "../../release/tatu-tracker-windows-amd64.zip" . && cd ../..
 
           # AppImage
           cp artifacts/appimage/Game_Progress_Tracker.AppImage release/
@@ -397,8 +397,8 @@ jobs:
 
             | File | Description |
             |------|-------------|
-            | `game-progress-tracker-linux-amd64.tar.gz` | Linux binary |
-            | `game-progress-tracker-windows-amd64.zip` | Windows binary |
+            | `tatu-tracker-linux-amd64.tar.gz` | Linux binary |
+            | `tatu-tracker-windows-amd64.zip` | Windows binary |
             | `Game_Progress_Tracker.AppImage` | Linux AppImage (auto-install support) |
             | `checksums-sha256.txt` | SHA-256 checksums |
           files: release/*
