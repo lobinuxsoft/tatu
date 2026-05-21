@@ -1,14 +1,42 @@
-//! Linux-native Cheat Engine Auto-Assembler runtime in Rust.
+//! Linux ptrace fallback backend for the Tatu cheat runtime.
 //!
-//! The crate is split into orthogonal layers; the lowest one (this PR) is
-//! `memory` + `maps`, providing out-of-process read/write to a target Linux
-//! process via `process_vm_readv` / `process_vm_writev` plus enumeration of
-//! mapped regions parsed from `/proc/<pid>/maps`.
+//! # Status
 //!
-//! Higher layers — pattern scanner, CE Auto-Assembler parser, executor and
-//! Aurora JSON loader — land in subsequent PRs of issue #64.
+//! This crate is the **fallback** path. The preferred backend for
+//! every Windows game running under Proton/Wine is `tatu-bridge`
+//! (the [`bridge_client`] module wires the tracker to it).
+//! `tatu-bridge` runs as a Win32 worker inside the same Proton
+//! invocation as the game; the atomic `WriteProcessMemory` +
+//! `SuspendThread` + `FlushInstructionCache` cycle hits the game's
+//! actual address space — the only safe way to patch `.text` on
+//! Win64 (the i-cache stays stale otherwise).
 //!
-//! Design constraints (see `feedback_rust_dod_mandatory` + project memory):
+//! Keep this crate for:
+//!
+//! - **Linux-native ELF games**, where no wineprefix exists and the
+//!   bridge has nothing to attach to. `process_vm_writev` +
+//!   `PTRACE_ATTACH` is the only available primitive.
+//! - **Tests + tooling** that operate on a local Linux process
+//!   without the cross-compile / Wine bootstrap dance the bridge
+//!   needs.
+//!
+//! Anti-cheat games (EAC / BattlEye / Vanguard) are explicitly out
+//! of scope on both backends.
+//!
+//! # Architecture
+//!
+//! The crate is split into orthogonal layers; the lowest one is
+//! `memory` + `maps`, providing out-of-process read/write to a
+//! target Linux process via `process_vm_readv` / `process_vm_writev`
+//! plus enumeration of mapped regions parsed from `/proc/<pid>/maps`.
+//!
+//! Higher layers — pattern scanner, executor, freeze registry and
+//! Aurora JSON loader — sit on top. The CE Auto-Assembler parser
+//! and single-line assembler now live in `tatu-engine` so the
+//! bridge can share them.
+//!
+//! Design constraints (see `feedback_rust_dod_mandatory` + project
+//! memory):
 //! - Plain-old-data structs, slice inputs, `io::Result` returns.
 //! - No `unwrap` in non-test code; errors bubble through `RuntimeError`.
 //! - The runtime is process-agnostic: any Linux PID, Proton or native.

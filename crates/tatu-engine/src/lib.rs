@@ -1,20 +1,24 @@
 //! Backend-agnostic CE Auto-Assembler engine.
 //!
-//! Currently exposes the two pure-Rust modules that have no
-//! platform-specific I/O:
+//! Hosts the pure-logic modules both backends share:
 //!
 //! - [`parser`] — CE Auto-Assembler script parser. Produces a
 //!   [`parser::Script`] from a `[ENABLE]` / `[DISABLE]` text body.
 //! - [`asm`] — single-line x86_64 assembler used by the executor to
-//!   compile `Statement::Raw` lines into bytes that the platform
-//!   backend will eventually write.
+//!   compile `Statement::Raw` lines into bytes the platform backend
+//!   writes.
+//! - [`backend`] — the `Backend` trait + the generic [`Engine<B>`]
+//!   that drives a script's lifecycle against any backend
+//!   implementing it.
 //!
-//! The platform-specific I/O (ptrace runtime on Linux, Win32 bridge
-//! under Wine) lives behind the [`tatu_mem::MemoryAccess`] trait plus
-//! the backend extension traits that land in PR 7A2 (`Backend`).
-//! Until those land, `cheat-runtime`'s `Engine` keeps its existing
-//! Linux-only state machine; this crate is the foundation other
-//! backends — and the upcoming generic `Engine<B>` — will share.
+//! Two backends consume the trait today: `cheat-runtime`'s
+//! `LinuxBackend` (ptrace fallback for Linux-native ELF games) and
+//! `tatu-bridge`'s `Win32Backend` (the preferred path for every
+//! Proton/Wine game — see the README's "Backend selection" section
+//! for the why). Memory I/O sits behind
+//! [`tatu_mem::MemoryAccess`]; the [`Backend`] trait adds
+//! cross-process primitives (allocate, suspend, scan) so the engine
+//! can drive both paths from one state machine.
 
 pub mod asm;
 pub mod backend;

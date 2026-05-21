@@ -54,15 +54,25 @@ pub struct AppState {
 
 /// Per-game cheat backend selection. Persisted in [`AppState`] so the
 /// user's per-title preference survives across tracker restarts.
+///
+/// See README's "Backend selection" section for the decision rules.
+/// In short: `Bridge` is the preferred path for every Windows game
+/// under Proton/Wine; `Linux` is the fallback kept for Linux-native
+/// ELF games (no wineprefix, nothing for the bridge to attach to).
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum GameBackend {
-    /// Native Linux ptrace runtime via `cheat-runtime`. Default.
+    /// Fallback Linux ptrace runtime via `cheat-runtime`. Default
+    /// when no per-game choice was persisted — also the only
+    /// applicable backend for Linux-native ELF games.
     #[default]
     Linux,
-    /// Bridge backend — `tatu-bridge --connect` under Wine. Requires
-    /// the wineprefix root so the tracker can compute the
-    /// `<prefix>/drive_c/users/Public/tatu-bridge.sock` path.
+    /// Preferred Bridge backend for Proton/Wine games — `tatu-bridge`
+    /// running as a Win32 worker inside the same Proton invocation.
+    /// Carries the wineprefix root so the tracker can resolve the
+    /// in-prefix port file written by the bridge on bind
+    /// (`<prefix>/drive_c/users/Public/tatu-bridge.port`, TCP
+    /// loopback Aurora-style — PR #121).
     Bridge { wineprefix: String },
 }
 
