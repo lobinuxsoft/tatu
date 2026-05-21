@@ -17,14 +17,26 @@ use crate::state::{AppState, GameBackend};
 use crate::steam::resolve_wineprefix;
 use crate::tatu_launcher::{TatuLauncherStatus, status as tatu_launcher_status};
 
+/// Wire shape of the cheat backend choice for the frontend. Mirrors
+/// [`crate::state::GameBackend`] — kept as a separate enum so the
+/// public TS-facing surface can evolve independently of the on-disk
+/// persistence layout.
+///
+/// Selection rules live in the README's "Backend selection" section:
+/// `Bridge` for Windows games under Proton/Wine (preferred path),
+/// `Linux` as the fallback for Linux-native ELF games.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum BackendChoice {
-    /// Default native Linux ptrace runtime.
+    /// Fallback Linux ptrace runtime. Default when nothing was set
+    /// for this appid; also the only applicable choice for native
+    /// Linux ELF games.
     Linux,
-    /// `tatu-bridge --connect` under Wine. `wineprefix` is the prefix
-    /// root (`$STEAM_COMPAT_DATA_PATH/pfx`) the bridge dialogue needs
-    /// to compute the AF_UNIX socket path.
+    /// Preferred `tatu-bridge --connect` worker under Wine.
+    /// `wineprefix` is the prefix root
+    /// (`$STEAM_COMPAT_DATA_PATH/pfx`) the bridge dialogue needs to
+    /// locate the in-prefix port file written by the bridge on bind
+    /// (TCP loopback, Aurora-style — PR #121).
     Bridge { wineprefix: String },
 }
 
