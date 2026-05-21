@@ -102,6 +102,10 @@ pub fn run() {
             commands::tatu_launcher_cmd::tatu_launcher_install,
             commands::tatu_launcher_cmd::tatu_launcher_set_for_app,
             commands::tatu_launcher_cmd::tatu_launcher_get_for_app,
+            commands::launcher_config_cmd::launcher_config_get_for_app,
+            commands::launcher_config_cmd::launcher_config_set_for_app,
+            commands::launcher_config_cmd::launcher_config_unset_app,
+            commands::launcher_config_cmd::launcher_list_protons,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

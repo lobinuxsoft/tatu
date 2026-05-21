@@ -11,17 +11,13 @@
 //! shape passes through verbatim so the Steam compat query verbs
 //! (getcompatpath / getnativepath / run) keep working.
 
-mod config;
-mod launch;
-mod proton;
-
 use std::env;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use crate::config::{Config, ConfigError, GameConfig};
-use crate::launch::LaunchError;
-use crate::proton::ProtonError;
+use tatu_launcher::config::{Config, ConfigError, GameConfig};
+use tatu_launcher::launch::{self, LaunchError};
+use tatu_launcher::proton::{self, ProtonError};
 
 const VERB_WAITFOREXITANDRUN: &str = "waitforexitandrun";
 

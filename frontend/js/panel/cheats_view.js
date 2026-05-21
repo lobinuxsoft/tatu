@@ -28,10 +28,11 @@ function renderCeBanner(status) {
 }
 
 // Render the Tatu Launcher backend banner: install state of the Steam
-// compat tool drop-in + per-game backend toggle. Sits above the CE
-// banner because "is the Bridge backend even available for this game"
-// is a precondition for everything else the cheats panel surfaces.
-function renderTatuBanner(launcherStatus, currentBackend) {
+// compat tool drop-in + per-game backend toggle + Proton picker. Sits
+// above the CE banner because "is the Bridge backend even available
+// for this game" is a precondition for everything else the cheats
+// panel surfaces.
+function renderTatuBanner(launcherStatus, currentBackend, launcherGame, protons) {
   const kind = launcherStatus?.kind;
   const usingBridge = currentBackend?.kind === "bridge";
 
@@ -53,23 +54,40 @@ function renderTatuBanner(launcherStatus, currentBackend) {
     );
   }
 
-  // Installed. Surface the per-game toggle.
+  // Installed. Surface the per-game toggle + Proton picker.
   const version = esc(launcherStatus.version || "?");
   const pillTxt = usingBridge ? `Tatu Launcher (bridge)` : `Linux ptrace`;
   const pillCls = usingBridge ? "tatu-pill-on" : "tatu-pill-off";
   const btnLabel = usingBridge ? "Revert to Linux" : "Switch to Tatu";
   const btnAction = usingBridge ? "tatu-disable" : "tatu-enable";
+
+  // Render the Proton picker even when the toggle is off so the user
+  // can pre-pick before flipping the switch. Disabled state is purely
+  // visual feedback that the choice won't be honoured until Switch.
+  const protonOpts = (protons || []).map(p => {
+    const sel = p.name === launcherGame?.proton ? " selected" : "";
+    return `<option value="${esc(p.name)}"${sel}>${esc(p.name)} (${esc(p.kind)})</option>`;
+  }).join("");
+  const protonSelector = launcherGame
+    ? `<label class="tatu-proton-label">Proton: ` +
+        `<select class="tatu-proton-select" ${usingBridge ? "" : "disabled"}>` +
+          protonOpts +
+        `</select>` +
+      `</label>`
+    : "";
+
   return (
     `<div class="ce-banner ce-banner-ok tatu-banner">` +
       `<span class="tatu-backend-label">Cheat backend:</span>` +
       `<span class="tatu-backend-pill ${pillCls}">${esc(pillTxt)}</span>` +
+      protonSelector +
       `<span class="tatu-version">Tatu ${version}</span>` +
       `<button class="ce-install-btn tatu-toggle-btn" data-action="${btnAction}">${esc(btnLabel)}</button>` +
     `</div>`
   );
 }
 
-function wireTatuBanner(panel, gameId) {
+function wireTatuBanner(panel, gameId, launcherGame) {
   panel.querySelectorAll(".tatu-install-btn, .tatu-toggle-btn").forEach(btn => {
     btn.addEventListener("click", async () => {
       const action = btn.dataset.action;
@@ -80,13 +98,26 @@ function wireTatuBanner(panel, gameId) {
         if (action === "tatu-install") {
           await invoke("tatu_launcher_install");
         } else if (action === "tatu-enable") {
-          // Make sure config.vdf is patched first so Steam picks the
-          // drop-in when the user next launches. Then persist the
-          // bridge backend recommendation in the tracker state.
+          // Patch order: config.vdf so Steam picks the drop-in on
+          // next launch, launcher.toml so the drop-in actually swaps
+          // to the bridge for this appid (without this the launcher
+          // passes through — Phase 7C bug), then state.json so the
+          // tracker routes value cheats through the bridge.
+          const select = panel.querySelector(".tatu-proton-select");
+          const proton = select?.value || launcherGame?.proton || "";
           await invoke("tatu_launcher_set_for_app", { appId: String(gameId) });
+          await invoke("launcher_config_set_for_app", {
+            appId: String(gameId),
+            view: { proton, target_exe: launcherGame?.target_exe || "", tatu_enabled: true },
+          });
           const choice = await invoke("cheat_runtime_backend_recommend", { appId: String(gameId) });
           await invoke("cheat_runtime_backend_set", { appId: String(gameId), backend: choice });
         } else if (action === "tatu-disable") {
+          // Drop the launcher.toml entry too so the launcher reverts
+          // to passthrough — without this the bridge would keep
+          // hooking the game on the next launch even though the
+          // tracker is no longer routing through it.
+          await invoke("launcher_config_unset_app", { appId: String(gameId) });
           await invoke("cheat_runtime_backend_set", {
             appId: String(gameId),
             backend: { kind: "linux" },
@@ -104,6 +135,36 @@ function wireTatuBanner(panel, gameId) {
       }
     });
   });
+
+  // Proton dropdown — only meaningful when tatu_enabled is on, but
+  // we still persist the choice so flipping the toggle later uses
+  // it. Saving is fire-and-forget; failures surface as a brief
+  // border flash on the select.
+  const select = panel.querySelector(".tatu-proton-select");
+  if (select && launcherGame) {
+    select.addEventListener("change", async () => {
+      const next = {
+        proton: select.value,
+        target_exe: launcherGame.target_exe || "",
+        tatu_enabled: launcherGame.tatu_enabled,
+      };
+      select.disabled = true;
+      try {
+        await invoke("launcher_config_set_for_app", { appId: String(gameId), view: next });
+        select.classList.add("tatu-proton-saved");
+        setTimeout(() => select.classList.remove("tatu-proton-saved"), 800);
+      } catch (e) {
+        select.classList.add("tatu-proton-error");
+        select.title = String(e);
+        setTimeout(() => {
+          select.classList.remove("tatu-proton-error");
+          select.removeAttribute("title");
+        }, 3000);
+      } finally {
+        select.disabled = false;
+      }
+    });
+  }
 }
 
 function renderTablesSection(gameId, tables) {
@@ -521,18 +582,20 @@ export async function loadCheats(gameId) {
   if (!panel) return;
 
   try {
-    const [ceStatus, tables, runtimeFeatures, orphans, tatuStatus, currentBackend] = await Promise.all([
+    const [ceStatus, tables, runtimeFeatures, orphans, tatuStatus, currentBackend, launcherGame, protons] = await Promise.all([
       invoke("ce_install_status").catch(() => ({ kind: "not_installed" })),
       invoke("ce_list_tables_for_game", { appId: String(gameId) }).catch(() => []),
       invoke("cheat_runtime_list_features", { appId: String(gameId) }).catch(() => []),
       invoke("cheat_runtime_orphans_list").catch(() => []),
       invoke("tatu_launcher_status").catch(() => ({ kind: "not_installed" })),
       invoke("cheat_runtime_backend_get", { appId: String(gameId) }).catch(() => ({ kind: "linux" })),
+      invoke("launcher_config_get_for_app", { appId: String(gameId) }).catch(() => null),
+      invoke("launcher_list_protons").catch(() => []),
     ]);
 
     if (state.panelGameId !== gameId) return;
 
-    const tatuBanner = renderTatuBanner(tatuStatus, currentBackend);
+    const tatuBanner = renderTatuBanner(tatuStatus, currentBackend, launcherGame, protons);
     const banner = renderCeBanner(ceStatus);
     const runtimeSection = renderRuntimeSection(runtimeFeatures);
     const tablesSection = renderTablesSection(gameId, tables);
@@ -541,7 +604,7 @@ export async function loadCheats(gameId) {
     const orphansBanner = renderOrphansBanner(orphans, gameId);
     panel.innerHTML = tatuBanner + banner + orphansBanner + runtimeSection + tablesSection + searchBar;
 
-    wireTatuBanner(panel, gameId);
+    wireTatuBanner(panel, gameId, launcherGame);
     wireBanner(panel, gameId);
     wireOrphansBanner(panel, gameId);
     wireRuntimeSwitches(panel, gameId);
