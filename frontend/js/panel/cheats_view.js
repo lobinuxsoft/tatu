@@ -27,6 +27,85 @@ function renderCeBanner(status) {
   return `<div class="ce-banner ce-banner-warn">CE Linux not installed <button class="ce-install-btn" data-action="install">Install CE 7.6.6</button></div>`;
 }
 
+// Render the Tatu Launcher backend banner: install state of the Steam
+// compat tool drop-in + per-game backend toggle. Sits above the CE
+// banner because "is the Bridge backend even available for this game"
+// is a precondition for everything else the cheats panel surfaces.
+function renderTatuBanner(launcherStatus, currentBackend) {
+  const kind = launcherStatus?.kind;
+  const usingBridge = currentBackend?.kind === "bridge";
+
+  if (kind === "not_installed") {
+    return (
+      `<div class="ce-banner ce-banner-warn tatu-banner">` +
+        `<span>Tatu Launcher backend not installed — bridge attach unavailable for Proton games.</span>` +
+        `<button class="ce-install-btn tatu-install-btn" data-action="tatu-install">Install Tatu</button>` +
+      `</div>`
+    );
+  }
+
+  if (kind === "corrupt") {
+    return (
+      `<div class="ce-banner ce-banner-err tatu-banner">` +
+        `<span>Tatu Launcher install corrupt: ${esc(launcherStatus.reason || "")}</span>` +
+        `<button class="ce-install-btn tatu-install-btn" data-action="tatu-install">Reinstall</button>` +
+      `</div>`
+    );
+  }
+
+  // Installed. Surface the per-game toggle.
+  const version = esc(launcherStatus.version || "?");
+  const pillTxt = usingBridge ? `Tatu Launcher (bridge)` : `Linux ptrace`;
+  const pillCls = usingBridge ? "tatu-pill-on" : "tatu-pill-off";
+  const btnLabel = usingBridge ? "Revert to Linux" : "Switch to Tatu";
+  const btnAction = usingBridge ? "tatu-disable" : "tatu-enable";
+  return (
+    `<div class="ce-banner ce-banner-ok tatu-banner">` +
+      `<span class="tatu-backend-label">Cheat backend:</span>` +
+      `<span class="tatu-backend-pill ${pillCls}">${esc(pillTxt)}</span>` +
+      `<span class="tatu-version">Tatu ${version}</span>` +
+      `<button class="ce-install-btn tatu-toggle-btn" data-action="${btnAction}">${esc(btnLabel)}</button>` +
+    `</div>`
+  );
+}
+
+function wireTatuBanner(panel, gameId) {
+  panel.querySelectorAll(".tatu-install-btn, .tatu-toggle-btn").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const action = btn.dataset.action;
+      btn.disabled = true;
+      const original = btn.textContent;
+      btn.textContent = "Working…";
+      try {
+        if (action === "tatu-install") {
+          await invoke("tatu_launcher_install");
+        } else if (action === "tatu-enable") {
+          // Make sure config.vdf is patched first so Steam picks the
+          // drop-in when the user next launches. Then persist the
+          // bridge backend recommendation in the tracker state.
+          await invoke("tatu_launcher_set_for_app", { appId: String(gameId) });
+          const choice = await invoke("cheat_runtime_backend_recommend", { appId: String(gameId) });
+          await invoke("cheat_runtime_backend_set", { appId: String(gameId), backend: choice });
+        } else if (action === "tatu-disable") {
+          await invoke("cheat_runtime_backend_set", {
+            appId: String(gameId),
+            backend: { kind: "linux" },
+          });
+        }
+        await loadCheats(gameId);
+      } catch (e) {
+        btn.textContent = "✗ " + (String(e).split("\n")[0] || "Error");
+        btn.title = String(e);
+        setTimeout(() => {
+          btn.textContent = original;
+          btn.disabled = false;
+          btn.removeAttribute("title");
+        }, 4000);
+      }
+    });
+  });
+}
+
 function renderTablesSection(gameId, tables) {
   if (!tables.length) {
     return (
@@ -442,23 +521,27 @@ export async function loadCheats(gameId) {
   if (!panel) return;
 
   try {
-    const [ceStatus, tables, runtimeFeatures, orphans] = await Promise.all([
+    const [ceStatus, tables, runtimeFeatures, orphans, tatuStatus, currentBackend] = await Promise.all([
       invoke("ce_install_status").catch(() => ({ kind: "not_installed" })),
       invoke("ce_list_tables_for_game", { appId: String(gameId) }).catch(() => []),
       invoke("cheat_runtime_list_features", { appId: String(gameId) }).catch(() => []),
       invoke("cheat_runtime_orphans_list").catch(() => []),
+      invoke("tatu_launcher_status").catch(() => ({ kind: "not_installed" })),
+      invoke("cheat_runtime_backend_get", { appId: String(gameId) }).catch(() => ({ kind: "linux" })),
     ]);
 
     if (state.panelGameId !== gameId) return;
 
+    const tatuBanner = renderTatuBanner(tatuStatus, currentBackend);
     const banner = renderCeBanner(ceStatus);
     const runtimeSection = renderRuntimeSection(runtimeFeatures);
     const tablesSection = renderTablesSection(gameId, tables);
     const searchBar = renderSearchBar(gameId);
 
     const orphansBanner = renderOrphansBanner(orphans, gameId);
-    panel.innerHTML = banner + orphansBanner + runtimeSection + tablesSection + searchBar;
+    panel.innerHTML = tatuBanner + banner + orphansBanner + runtimeSection + tablesSection + searchBar;
 
+    wireTatuBanner(panel, gameId);
     wireBanner(panel, gameId);
     wireOrphansBanner(panel, gameId);
     wireRuntimeSwitches(panel, gameId);
