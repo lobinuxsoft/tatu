@@ -40,6 +40,10 @@ install -m 0755 "$SRC/tatu-launcher.sh"            "$DEST/tatu-launcher.sh"
 install -m 0644 "$SRC/toolmanifest.vdf"            "$DEST/toolmanifest.vdf"
 install -m 0644 "$SRC/compatibilitytool.vdf"       "$DEST/compatibilitytool.vdf"
 
+if [[ -f "$SRC/version.txt" ]]; then
+    install -m 0644 "$SRC/version.txt" "$DEST/version.txt"
+fi
+
 if [[ -f "$SRC/tatu-bridge.exe" ]]; then
     install -m 0755 "$SRC/tatu-bridge.exe" "$DEST/tatu-bridge.exe"
 else

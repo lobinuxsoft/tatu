@@ -17,7 +17,7 @@ use std::sync::OnceLock;
 
 use regex::Regex;
 
-use crate::steam::install::steam_install_dir;
+use crate::steam::install::library_paths;
 
 const OVERRIDE_FILENAME: &str = ".detected-exe";
 const TABLES_SUBDIR: &str = "backlog-tracker/cheat-tables";
@@ -41,8 +41,7 @@ pub fn detect_game_exe(app_id: &str) -> Result<String, String> {
     if let Some(exe) = read_override(app_id) {
         return Ok(exe);
     }
-    let steam = steam_install_dir().ok_or_else(|| "Steam install dir not found".to_string())?;
-    let install_path = find_install_path(&steam, app_id)?;
+    let install_path = find_install_path(app_id)?;
     // UE games bury the shipping exe at <Game>/Binaries/Win64/<Game>-Win64-Shipping.exe
     // (depth 3 from install root). Depth 5 leaves margin for engines that nest deeper.
     let exes = enumerate_exes(&install_path, 5);
@@ -92,10 +91,8 @@ fn cache_detection(app_id: &str, exe_name: &str) -> std::io::Result<()> {
     fs::write(&path, exe_name)
 }
 
-fn find_install_path(steam_dir: &Path, app_id: &str) -> Result<PathBuf, String> {
-    let libraries =
-        library_paths(steam_dir).map_err(|e| format!("could not read library list: {e}"))?;
-    for lib in libraries {
+fn find_install_path(app_id: &str) -> Result<PathBuf, String> {
+    for lib in library_paths() {
         let manifest = lib
             .join("steamapps")
             .join(format!("appmanifest_{app_id}.acf"));
@@ -113,24 +110,6 @@ fn find_install_path(steam_dir: &Path, app_id: &str) -> Result<PathBuf, String> 
     Err(format!(
         "appmanifest_{app_id}.acf not found in any Steam library"
     ))
-}
-
-fn library_paths(steam_dir: &Path) -> Result<Vec<PathBuf>, String> {
-    let vdf = steam_dir.join("steamapps").join("libraryfolders.vdf");
-    let content =
-        fs::read_to_string(&vdf).map_err(|e| format!("cannot read {}: {e}", vdf.display()))?;
-    Ok(parse_library_paths(&content)
-        .into_iter()
-        .map(PathBuf::from)
-        .collect())
-}
-
-fn parse_library_paths(content: &str) -> Vec<String> {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    let re = RE.get_or_init(|| Regex::new(r#""path"\s*"([^"]+)""#).expect("static regex"));
-    re.captures_iter(content)
-        .map(|c| c[1].replace("\\\\", "/"))
-        .collect()
 }
 
 fn parse_installdir(acf: &str) -> Option<String> {
@@ -193,38 +172,6 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::TempDir;
-
-    #[test]
-    fn parse_library_paths_extracts_unix_paths() {
-        let vdf = r#"
-            "libraryfolders"
-            {
-                "0"
-                {
-                    "path"		"/home/user/.local/share/Steam"
-                }
-                "1"
-                {
-                    "path"		"/run/media/user/SSD/SteamLibrary"
-                }
-            }
-        "#;
-        let paths = parse_library_paths(vdf);
-        assert_eq!(
-            paths,
-            vec![
-                "/home/user/.local/share/Steam".to_string(),
-                "/run/media/user/SSD/SteamLibrary".to_string()
-            ]
-        );
-    }
-
-    #[test]
-    fn parse_library_paths_normalises_windows_escapes() {
-        let vdf = r#""path"		"C:\\Program Files (x86)\\Steam""#;
-        let paths = parse_library_paths(vdf);
-        assert_eq!(paths, vec!["C:/Program Files (x86)/Steam".to_string()]);
-    }
 
     #[test]
     fn parse_installdir_extracts_value() {
