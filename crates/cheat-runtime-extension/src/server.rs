@@ -169,5 +169,17 @@ fn dispatch(req: Request, running: &Arc<AtomicBool>) -> Response {
             running.store(false, Ordering::Relaxed);
             Response::ShutdownAck
         }
+        // Phase 4 (#106) primitives are Win32-bridge-only — the Linux
+        // in-process extension can't fulfil them. Tracker routes them to
+        // the bridge backend when the per-game flag selects it.
+        other @ (Request::AobScan { .. }
+        | Request::PatchBytes { .. }
+        | Request::RemoteAlloc { .. }
+        | Request::RemoteFree { .. }
+        | Request::WalkChain { .. }
+        | Request::ReadChainValue { .. }
+        | Request::WriteChainValue { .. }) => Response::Err {
+            message: format!("{other:?} is not supported by the Linux in-process extension"),
+        },
     }
 }

@@ -6,6 +6,25 @@
 //! See `win.rs` for the two modes (`--launch`, `--connect`) and the
 //! Aurora-style co-launch architecture they implement.
 
+// Aob is the only module that compiles on Linux too — its tests run as
+// part of `cargo test --workspace`. Without the Win32-only `scan` /
+// `win` modules calling into it the symbols are dead on Linux, hence
+// the conditional allow.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+mod aob;
+
+#[cfg(target_os = "windows")]
+mod alloc;
+#[cfg(target_os = "windows")]
+mod chain;
+#[cfg(target_os = "windows")]
+mod modules;
+#[cfg(target_os = "windows")]
+mod patch;
+#[cfg(target_os = "windows")]
+mod remote_mem;
+#[cfg(target_os = "windows")]
+mod scan;
 #[cfg(target_os = "windows")]
 mod win;
 

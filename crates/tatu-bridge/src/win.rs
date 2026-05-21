@@ -57,9 +57,10 @@ use windows_sys::Win32::System::Threading::{
 
 // ReadProcessMemory / WriteProcessMemory aren't exposed by the
 // Win32_System_Diagnostics_Debug slice we enable; declaring them
-// directly keeps the windows-sys feature set tight.
+// directly keeps the windows-sys feature set tight. Re-exported to
+// the other Win32-only modules in this crate via pub(crate).
 unsafe extern "system" {
-    fn ReadProcessMemory(
+    pub(crate) fn ReadProcessMemory(
         hProcess: HANDLE,
         lpBaseAddress: *const c_void,
         lpBuffer: *mut c_void,
@@ -67,7 +68,7 @@ unsafe extern "system" {
         lpNumberOfBytesRead: *mut usize,
     ) -> i32;
 
-    fn WriteProcessMemory(
+    pub(crate) fn WriteProcessMemory(
         hProcess: HANDLE,
         lpBaseAddress: *mut c_void,
         lpBuffer: *const c_void,
@@ -279,7 +280,7 @@ fn connect_mode(argv: &[String]) -> ExitCode {
     // pass --target-exe and go through the full attach below.
     if args.serve_only {
         log_to(CONNECT_LOG, "connect: --serve-only, skipping game attach");
-        return serve_mode();
+        return serve_mode(None);
     }
 
     let target = args
@@ -334,7 +335,10 @@ fn connect_mode(argv: &[String]) -> ExitCode {
     let exit = if args.iters > 0 {
         smoke_mode(process, region, &args)
     } else {
-        serve_mode()
+        serve_mode(Some(BridgeCtx {
+            process,
+            target_pid: pid,
+        }))
     };
 
     unsafe {
@@ -368,6 +372,16 @@ fn smoke_mode(process: HANDLE, region: *mut c_void, args: &ConnectArgs) -> ExitC
     }
 }
 
+/// Context the dispatch loop carries — the open `HANDLE` and PID of
+/// the target game. `None` only on the `--serve-only` integration-test
+/// path that never attaches to a game; in that case Phase 4 primitives
+/// answer `Response::Err`.
+#[derive(Clone, Copy)]
+pub(crate) struct BridgeCtx {
+    pub(crate) process: HANDLE,
+    pub(crate) target_pid: u32,
+}
+
 /// AF_UNIX server loop. Single-threaded, one client at a time. The
 /// tracker is the only legitimate peer; concurrency would only mask
 /// races. Wine forwards AF_UNIX bind/connect to the Linux kernel, so
@@ -377,7 +391,7 @@ fn smoke_mode(process: HANDLE, region: *mut c_void, args: &ConnectArgs) -> ExitC
 ///
 /// Lives until the peer sends `Request::Shutdown` or the `--launch`
 /// parent terminates us when the game exits.
-fn serve_mode() -> ExitCode {
+fn serve_mode(ctx: Option<BridgeCtx>) -> ExitCode {
     use tatu_proto::BRIDGE_SOCKET_WIN_PATH;
     use uds_windows::UnixListener;
 
@@ -404,7 +418,7 @@ fn serve_mode() -> ExitCode {
         match stream {
             Ok(mut s) => {
                 log_to(CONNECT_LOG, "connect: client connected");
-                match serve_client(&mut s) {
+                match serve_client(&mut s, ctx) {
                     Ok(ShouldStop::Yes) => {
                         log_to(CONNECT_LOG, "connect: shutdown received, exiting");
                         let _ = std::fs::remove_file(BRIDGE_SOCKET_WIN_PATH);
@@ -433,7 +447,10 @@ enum ShouldStop {
     No,
 }
 
-fn serve_client(stream: &mut uds_windows::UnixStream) -> Result<ShouldStop, String> {
+fn serve_client(
+    stream: &mut uds_windows::UnixStream,
+    ctx: Option<BridgeCtx>,
+) -> Result<ShouldStop, String> {
     use tatu_proto::{Request, Response, read_frame, read_handshake, write_frame, write_handshake};
 
     write_handshake(stream).map_err(|e| format!("write_handshake: {e}"))?;
@@ -449,7 +466,7 @@ fn serve_client(stream: &mut uds_windows::UnixStream) -> Result<ShouldStop, Stri
             }
             Err(e) => return Err(format!("read_frame: {e}")),
         };
-        let resp = dispatch(req);
+        let resp = dispatch(req, ctx);
         let stop = matches!(resp, Response::ShutdownAck);
         write_frame(stream, &resp).map_err(|e| format!("write_frame: {e}"))?;
         if stop {
@@ -458,13 +475,189 @@ fn serve_client(stream: &mut uds_windows::UnixStream) -> Result<ShouldStop, Stri
     }
 }
 
-fn dispatch(req: tatu_proto::Request) -> tatu_proto::Response {
+fn dispatch(req: tatu_proto::Request, ctx: Option<BridgeCtx>) -> tatu_proto::Response {
     use tatu_proto::{Request, Response};
     match req {
         Request::Ping => Response::Pong,
         Request::Shutdown => Response::ShutdownAck,
+
+        Request::AobScan { module, pattern } => match require_ctx(ctx) {
+            Err(e) => e,
+            Ok(c) => handle_aob_scan(c, module.as_deref(), &pattern),
+        },
+
+        Request::PatchBytes {
+            addr,
+            bytes,
+            suspend_threads,
+        } => match require_ctx(ctx) {
+            Err(e) => e,
+            Ok(c) => handle_patch_bytes(c, addr, &bytes, suspend_threads),
+        },
+
+        Request::RemoteAlloc {
+            hint,
+            size,
+            executable,
+        } => match require_ctx(ctx) {
+            Err(e) => e,
+            Ok(c) => handle_remote_alloc(c, hint, size, executable),
+        },
+
+        Request::RemoteFree { addr } => match require_ctx(ctx) {
+            Err(e) => e,
+            Ok(c) => handle_remote_free(c, addr),
+        },
+
+        Request::WalkChain { base, offsets } => match require_ctx(ctx) {
+            Err(e) => e,
+            Ok(c) => handle_walk_chain(c, base, &offsets),
+        },
+
+        Request::ReadChainValue {
+            base,
+            offsets,
+            vtype,
+        } => match require_ctx(ctx) {
+            Err(e) => e,
+            Ok(c) => handle_read_chain_value(c, base, &offsets, vtype),
+        },
+
+        Request::WriteChainValue {
+            base,
+            offsets,
+            value,
+        } => match require_ctx(ctx) {
+            Err(e) => e,
+            Ok(c) => handle_write_chain_value(c, base, &offsets, value),
+        },
+
         other => Response::Err {
             message: format!("{other:?} not implemented in Phase 3 of #106"),
+        },
+    }
+}
+
+fn require_ctx(ctx: Option<BridgeCtx>) -> Result<BridgeCtx, tatu_proto::Response> {
+    ctx.ok_or_else(|| tatu_proto::Response::Err {
+        message:
+            "Phase 4 primitives require an attached target (bridge was started with --serve-only)"
+                .to_string(),
+    })
+}
+
+fn handle_aob_scan(ctx: BridgeCtx, module: Option<&str>, pattern: &str) -> tatu_proto::Response {
+    use super::aob::Pattern;
+    use super::scan::{scan_all_readable, scan_module};
+
+    let parsed = match Pattern::parse(pattern) {
+        Ok(p) => p,
+        Err(e) => {
+            return tatu_proto::Response::Err {
+                message: format!("AobScan: pattern: {e}"),
+            };
+        }
+    };
+    let matches = match module {
+        Some(name) => match scan_module(ctx.process, name, &parsed) {
+            Ok(m) => m,
+            Err(e) => {
+                return tatu_proto::Response::Err {
+                    message: format!("AobScan: {e}"),
+                };
+            }
+        },
+        None => scan_all_readable(ctx.process, &parsed),
+    };
+    tatu_proto::Response::AobScan { matches }
+}
+
+fn handle_patch_bytes(
+    ctx: BridgeCtx,
+    addr: u64,
+    bytes: &[u8],
+    suspend_threads: bool,
+) -> tatu_proto::Response {
+    match super::patch::patch_bytes(ctx.process, ctx.target_pid, addr, bytes, suspend_threads) {
+        Ok(()) => tatu_proto::Response::PatchBytes,
+        Err(e) => tatu_proto::Response::Err {
+            message: format!("PatchBytes: {e}"),
+        },
+    }
+}
+
+fn handle_remote_alloc(
+    ctx: BridgeCtx,
+    hint: Option<u64>,
+    size: u64,
+    executable: bool,
+) -> tatu_proto::Response {
+    match super::alloc::alloc_remote(ctx.process, hint, size, executable) {
+        Ok(addr) => tatu_proto::Response::RemoteAlloc { addr },
+        Err(e) => tatu_proto::Response::Err {
+            message: format!("RemoteAlloc: {e}"),
+        },
+    }
+}
+
+fn handle_remote_free(ctx: BridgeCtx, addr: u64) -> tatu_proto::Response {
+    match super::alloc::free_remote(ctx.process, addr) {
+        Ok(()) => tatu_proto::Response::RemoteFreed,
+        Err(e) => tatu_proto::Response::Err {
+            message: format!("RemoteFree: {e}"),
+        },
+    }
+}
+
+fn handle_walk_chain(ctx: BridgeCtx, base: u64, offsets: &[u64]) -> tatu_proto::Response {
+    match super::chain::walk_chain(ctx.process, base, offsets) {
+        Ok(addr) => tatu_proto::Response::WalkChain { addr },
+        Err(e) => tatu_proto::Response::Err {
+            message: format!("WalkChain: {e}"),
+        },
+    }
+}
+
+fn handle_read_chain_value(
+    ctx: BridgeCtx,
+    base: u64,
+    offsets: &[u64],
+    vtype: tatu_proto::WireVType,
+) -> tatu_proto::Response {
+    let target = match super::chain::walk_chain(ctx.process, base, offsets) {
+        Ok(a) => a,
+        Err(e) => {
+            return tatu_proto::Response::Err {
+                message: format!("ReadChainValue: walk: {e}"),
+            };
+        }
+    };
+    match super::chain::read_value(ctx.process, target, vtype) {
+        Ok(value) => tatu_proto::Response::ChainValue { value },
+        Err(e) => tatu_proto::Response::Err {
+            message: format!("ReadChainValue: {e}"),
+        },
+    }
+}
+
+fn handle_write_chain_value(
+    ctx: BridgeCtx,
+    base: u64,
+    offsets: &[u64],
+    value: tatu_proto::WireValue,
+) -> tatu_proto::Response {
+    let target = match super::chain::walk_chain(ctx.process, base, offsets) {
+        Ok(a) => a,
+        Err(e) => {
+            return tatu_proto::Response::Err {
+                message: format!("WriteChainValue: walk: {e}"),
+            };
+        }
+    };
+    match super::chain::write_value(ctx.process, target, value) {
+        Ok(()) => tatu_proto::Response::ChainWritten,
+        Err(e) => tatu_proto::Response::Err {
+            message: format!("WriteChainValue: {e}"),
         },
     }
 }

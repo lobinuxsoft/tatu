@@ -9,6 +9,12 @@ description = "Tatu Win32 backend. Single binary with two modes: --launch (boots
 name = "tatu-bridge"
 path = "src/main.rs"
 
+# Cross-platform deps: pure-Rust helpers (AOB parser/scanner) compile
+# on Linux too so their unit tests run as part of the workspace test.
+[dependencies]
+memchr = "2"
+thiserror = "1"
+
 # Windows-only deps under a target cfg so workspace `cargo build` from
 # a Linux host skips them silently.
 [target.'cfg(target_os = "windows")'.dependencies]
@@ -21,5 +27,6 @@ windows-sys = { version = "0.59", features = [
     "Win32_Security",
     "Win32_System_Diagnostics_ToolHelp",
     "Win32_System_Memory",
+    "Win32_System_ProcessStatus",
     "Win32_System_Threading",
 ] }
