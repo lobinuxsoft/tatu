@@ -2,18 +2,32 @@
 //! `_write` / `_freeze`. Each command resolves a Value feature's
 //! `AddrExpr`, walks its offset chain, then drives [`cheat_runtime`]'s
 //! typed read/write/freeze primitives against the resolved address.
+//!
+//! Phase 6: per-game backend routing. When the user has selected
+//! `GameBackend::Bridge` for an app, read / write traffic dials the
+//! in-prefix `tatu-bridge --connect` over its AF_UNIX socket and
+//! sends `Request::ReadChainValue` / `WriteChainValue` instead of
+//! the local ptrace path. Freezes stay on the Linux backend for now
+//! — the freeze loop runs in-process here and needs deeper refactor
+//! to round-trip through the bridge.
 
 use std::collections::HashMap;
+use std::path::Path;
+use std::sync::Mutex;
 
+use cheat_runtime::bridge_client::BridgeClient;
 use cheat_runtime::{
     AddrExpr, ChainError, FeatureKind, FreezeRegistry, Pid, VType, Value, ValueSpec,
     find_pid_by_exe, load_manifests_for, parse_addr_expr, read_chain, resolve_addr_expr,
     walk_chain, write_chain,
 };
 use serde::Deserialize;
+use tatu_proto::{Request, Response, WireVType, WireValue};
 use tauri::State;
 
+use super::backend::resolve_backend;
 use super::{ActiveCheats, merged_symbols};
+use crate::state::{AppState, GameBackend};
 
 /// Locate a Value feature: returns the owning manifest's `exe`, the
 /// resolved [`ValueSpec`], and the parsed [`AddrExpr`] — saving callers
@@ -79,14 +93,36 @@ fn map_chain_err(e: ChainError) -> String {
 pub fn cheat_runtime_value_read(
     app_id: String,
     feature_uuid: String,
+    state: State<'_, Mutex<AppState>>,
     active: State<'_, ActiveCheats>,
 ) -> Result<Value, String> {
     let (exe, spec, expr) = locate_value_feature(&app_id, &feature_uuid)?;
-    let pid = find_pid_by_exe(&exe)
-        .ok_or_else(|| format!("game process '{exe}' is not running; launch the game first"))?;
     let symbols = merged_symbols(&active)?;
     ensure_symbol_registered(&expr, &symbols)?;
-    read_chain(pid, &expr, &spec.offsets, spec.vtype, &symbols).map_err(map_chain_err)
+    match resolve_backend(&state, &app_id) {
+        GameBackend::Linux => {
+            let pid = find_pid_by_exe(&exe).ok_or_else(|| {
+                format!("game process '{exe}' is not running; launch the game first")
+            })?;
+            read_chain(pid, &expr, &spec.offsets, spec.vtype, &symbols).map_err(map_chain_err)
+        }
+        GameBackend::Bridge { wineprefix } => {
+            let base = bridge_base_addr(&expr, &symbols)?;
+            let mut client = bridge_connect(&wineprefix)?;
+            let resp = client
+                .request(Request::ReadChainValue {
+                    base,
+                    offsets: spec.offsets.clone(),
+                    vtype: vtype_to_wire(spec.vtype),
+                })
+                .map_err(|e| format!("bridge ReadChainValue: {e}"))?;
+            match resp {
+                Response::ChainValue { value } => Ok(wire_to_value(value)),
+                Response::Err { message } => Err(format!("bridge: {message}")),
+                other => Err(format!("bridge: unexpected response {other:?}")),
+            }
+        }
+    }
 }
 
 #[tauri::command]
@@ -94,6 +130,7 @@ pub fn cheat_runtime_value_write(
     app_id: String,
     feature_uuid: String,
     value: Value,
+    state: State<'_, Mutex<AppState>>,
     active: State<'_, ActiveCheats>,
 ) -> Result<(), String> {
     let (exe, spec, expr) = locate_value_feature(&app_id, &feature_uuid)?;
@@ -104,11 +141,66 @@ pub fn cheat_runtime_value_write(
             spec.vtype
         ));
     }
-    let pid = find_pid_by_exe(&exe)
-        .ok_or_else(|| format!("game process '{exe}' is not running; launch the game first"))?;
     let symbols = merged_symbols(&active)?;
     ensure_symbol_registered(&expr, &symbols)?;
-    write_chain(pid, &expr, &spec.offsets, value, &symbols).map_err(map_chain_err)
+    match resolve_backend(&state, &app_id) {
+        GameBackend::Linux => {
+            let pid = find_pid_by_exe(&exe).ok_or_else(|| {
+                format!("game process '{exe}' is not running; launch the game first")
+            })?;
+            write_chain(pid, &expr, &spec.offsets, value, &symbols).map_err(map_chain_err)
+        }
+        GameBackend::Bridge { wineprefix } => {
+            let base = bridge_base_addr(&expr, &symbols)?;
+            let mut client = bridge_connect(&wineprefix)?;
+            let resp = client
+                .request(Request::WriteChainValue {
+                    base,
+                    offsets: spec.offsets.clone(),
+                    value: value_to_wire(value),
+                })
+                .map_err(|e| format!("bridge WriteChainValue: {e}"))?;
+            match resp {
+                Response::ChainWritten => Ok(()),
+                Response::Err { message } => Err(format!("bridge: {message}")),
+                other => Err(format!("bridge: unexpected response {other:?}")),
+            }
+        }
+    }
+}
+
+/// Resolve the chain base for a Bridge-backed read/write. Today only
+/// `Literal` is supported — `SymbolDeref` requires the AA scaffold
+/// scan to have run inside the game, which means routing
+/// `Engine::enable` through the bridge (Phase 7 territory). When a
+/// feature needs a symbol, return a clear error pointing the user at
+/// the Linux backend as a fallback.
+fn bridge_base_addr(expr: &AddrExpr, _symbols: &HashMap<String, u64>) -> Result<u64, String> {
+    match expr {
+        AddrExpr::Literal(addr) => Ok(*addr),
+        AddrExpr::SymbolDeref { symbol, .. } => Err(format!(
+            "Bridge backend cannot resolve [{symbol}] yet — AA scaffold scans are still \
+             routed through the Linux backend (Phase 7). Switch this game's backend to \
+             Linux or use a literal-base Value feature."
+        )),
+    }
+}
+
+fn bridge_connect(wineprefix: &str) -> Result<BridgeClient, String> {
+    BridgeClient::connect(Path::new(wineprefix))
+        .map_err(|e| format!("dial bridge at {wineprefix}: {e}"))
+}
+
+fn vtype_to_wire(v: VType) -> WireVType {
+    v.into()
+}
+
+fn wire_to_value(w: WireValue) -> Value {
+    w.into()
+}
+
+fn value_to_wire(v: Value) -> WireValue {
+    v.into()
 }
 
 #[derive(Debug, Deserialize)]

@@ -86,7 +86,11 @@ impl BridgeClient {
         }
     }
 
-    fn request(&mut self, req: Request) -> Result<Response, BridgeClientError> {
+    /// Send an arbitrary CHRT v1 [`Request`] and wait for the matching
+    /// [`Response`]. Exposed publicly so Phase 6+ callers (value-cheats,
+    /// recovery) can issue requests beyond Ping / Shutdown without each
+    /// of them needing a sugar method on this client.
+    pub fn request(&mut self, req: Request) -> Result<Response, BridgeClientError> {
         write_frame(&mut self.stream, &req)?;
         self.stream.flush()?;
         let resp = read_frame(&mut self.stream)?;
