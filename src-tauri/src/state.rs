@@ -54,10 +54,11 @@ pub struct AppState {
 
 /// Per-game cheat backend selection. Persisted in [`AppState`] so the
 /// user's per-title preference survives across tracker restarts.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum GameBackend {
     /// Native Linux ptrace runtime via `cheat-runtime`. Default.
+    #[default]
     Linux,
     /// Bridge backend — `tatu-bridge --connect` under Wine. Requires
     /// the wineprefix root so the tracker can compute the
@@ -71,12 +72,6 @@ impl GameBackend {
             GameBackend::Linux => "linux",
             GameBackend::Bridge { .. } => "bridge",
         }
-    }
-}
-
-impl Default for GameBackend {
-    fn default() -> Self {
-        GameBackend::Linux
     }
 }
 
