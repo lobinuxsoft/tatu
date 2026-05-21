@@ -6,6 +6,7 @@ members = [
     "crates/cheat-runtime-extension",
     "crates/ce-launcher",
     "crates/tatu-bridge",
+    "crates/tatu-engine",
     "crates/tatu-launcher",
     "crates/tatu-mem",
     "crates/tatu-proto",
