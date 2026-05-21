@@ -3,10 +3,8 @@
 
 use std::collections::HashMap;
 
-use nix::unistd::Pid;
-
 use crate::asm;
-use crate::memory;
+use crate::backend::{Backend, BackendError};
 
 use super::ExecError;
 
@@ -14,11 +12,12 @@ use super::ExecError;
 /// current cursor. Supports `db`, `dq`, `nop N`, `readmem(symbol, len)`, plus
 /// the asm subset covered by [`crate::asm::compile_line`] (`jmp`, `call`,
 /// `ret`). `base` is the absolute target address — required for rip-relative
-/// encodings.
-pub(super) fn compile_raw(
+/// encodings. `readmem` needs the backend so it can fetch live bytes from
+/// the target.
+pub(super) fn compile_raw<B: Backend>(
     line: &str,
     symbols: &HashMap<String, u64>,
-    pid: Pid,
+    backend: &mut B,
     base: u64,
 ) -> Result<Vec<u8>, ExecError> {
     let trimmed = line.trim();
@@ -54,7 +53,7 @@ pub(super) fn compile_raw(
         .strip_prefix("readmem(")
         .and_then(|s| s.strip_suffix(')'))
     {
-        return readmem_bytes(args, symbols, pid);
+        return readmem_bytes(args, symbols, backend);
     }
     // Flatten `AsmError::Unsupported` (a known-mnemonic-but-unsupported-form
     // signal, e.g. `mov dword ptr [r13+13C], (float)100` until Phase B v2.2)
@@ -95,10 +94,10 @@ pub(super) fn parse_dq(operand: &str, symbols: &HashMap<String, u64>) -> Option<
     Some(t.parse::<u64>().ok()?.to_le_bytes().to_vec())
 }
 
-pub(super) fn readmem_bytes(
+pub(super) fn readmem_bytes<B: Backend>(
     args: &str,
     symbols: &HashMap<String, u64>,
-    pid: Pid,
+    backend: &mut B,
 ) -> Result<Vec<u8>, ExecError> {
     let parts: Vec<&str> = args.split(',').map(str::trim).collect();
     if parts.len() != 2 {
@@ -113,12 +112,18 @@ pub(super) fn readmem_bytes(
     let len: usize = parts[1]
         .parse()
         .map_err(|_| ExecError::Unsupported(format!("readmem with bad len: {:?}", parts[1])))?;
-    let bytes = memory::read_bytes(pid, addr, len)?;
+    let bytes = backend
+        .read(addr, len)
+        .map_err(|e: BackendError| ExecError::Backend(e))?;
     Ok(bytes)
 }
 
 #[cfg(test)]
 mod tests {
+    //! Backend-free parsing tests. End-to-end tests that need a real
+    //! `compile_raw<B>` invocation live in `cheat-runtime`'s executor
+    //! tests with `LinuxBackend` plugged in (and will land alongside
+    //! the bridge in PR 7B with `Win32Backend`).
     use super::*;
 
     #[test]
@@ -128,7 +133,7 @@ mod tests {
             Some(vec![0xde, 0xad, 0xbe, 0xef])
         );
         assert_eq!(parse_byte_list("CA fe"), Some(vec![0xca, 0xfe]));
-        assert_eq!(parse_byte_list("DE A"), None); // odd-length token
+        assert_eq!(parse_byte_list("DE A"), None);
         assert_eq!(parse_byte_list("ZZ"), None);
         assert_eq!(parse_byte_list(""), None);
     }
@@ -150,41 +155,5 @@ mod tests {
             parse_dq("$ABC", &syms),
             Some(0xABCu64.to_le_bytes().to_vec())
         );
-    }
-
-    #[test]
-    fn compile_raw_db_dq_nop_succeeds() {
-        let syms = HashMap::new();
-        let pid = Pid::this();
-        assert_eq!(
-            compile_raw("db 90 90 90", &syms, pid, 0).unwrap(),
-            vec![0x90; 3]
-        );
-        assert_eq!(compile_raw("dq 0", &syms, pid, 0).unwrap(), vec![0u8; 8]);
-        assert_eq!(compile_raw("nop 5", &syms, pid, 0).unwrap(), vec![0x90; 5]);
-        assert_eq!(compile_raw("nop", &syms, pid, 0).unwrap(), vec![0x90]);
-    }
-
-    #[test]
-    fn compile_raw_jmp_via_asm_module() {
-        let syms = HashMap::new();
-        let bytes = compile_raw("jmp 0x1000", &syms, Pid::this(), 0x500).unwrap();
-        assert_eq!(bytes, vec![0xE9, 0xFB, 0x0A, 0x00, 0x00]);
-    }
-
-    #[test]
-    fn compile_raw_rejects_unsupported_asm() {
-        let syms = HashMap::new();
-        let pid = Pid::this();
-        // Anything outside the Phase B subset (`imul`, AVX, MMX, etc.) must
-        // surface Unsupported so the user sees what's missing.
-        assert!(matches!(
-            compile_raw("imul rax, rbx, 4", &syms, pid, 0),
-            Err(ExecError::Unsupported(_))
-        ));
-        assert!(matches!(
-            compile_raw("vmovups ymm0, ymm1", &syms, pid, 0),
-            Err(ExecError::Unsupported(_))
-        ));
     }
 }

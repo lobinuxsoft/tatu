@@ -1,40 +1,70 @@
-//! Executor that walks a parsed [`Script`] and applies it to a live process.
+//! Linux runtime wrapper around the generic [`tatu_engine::Engine`].
 //!
-//! Scope (matches issue #64's out-of-scope list):
-//! - **Supported**: `aobscanmodule`, `registersymbol`, `unregistersymbol`,
-//!   `label`, label sites (`name:`), and write directives following a label
-//!   site (`db`, `dq`, `nop N`, `readmem(symbol, len)`).
-//! - **Unsupported (returns [`ExecError::Unsupported`])**: `alloc`, `dealloc`,
-//!   inline assembly mnemonics (`push`, `mov`, `jmp`, …), and any other
-//!   `Statement::Raw` line we don't recognise.
+//! The two-pass executor itself lives in `tatu-engine` and is generic
+//! over any [`tatu_engine::Backend`]. This module wires that generic
+//! engine to the [`LinuxBackend`](crate::linux_backend::LinuxBackend)
+//! adapter so existing call sites (`Engine::new(pid)`,
+//! `engine.enable(&script)` returning [`ActiveCheat`]) keep their
+//! shape after PR 7A2 of #106.
 //!
-//! Atomicity: [`Engine::enable`] keeps an undo log of every byte sequence
-//! it overwrites. If any later statement fails, every previously applied
-//! write is reverted before returning the error — there is no partial state.
-//!
-//! [`ActiveCheat::disable`] reverts the same writes in reverse order. After
-//! disable the target process's memory is byte-for-byte identical to what
-//! it was before [`Engine::enable`] was called.
+//! New code that needs cross-backend reuse should call
+//! `tatu_engine::Engine::<B>::new(backend)` directly and consume
+//! [`tatu_engine::EnableOutcome`] instead of [`ActiveCheat`] — the
+//! bridge backend in PR 7B does exactly that.
 //!
 //! ## Submodule layout
 //!
-//! - [`engine`] — [`Engine`], the two-pass enable orchestrator and `scan_unique`.
-//! - [`active`] — [`ActiveCheat`], the undo-log owner with `Drop` rollback.
-//! - [`rollback`] — ptrace attach/detach + the shared rollback walker.
-//! - [`error`] — [`ExecError`].
-//! - [`length`] — pass-1 instruction length estimator.
-//! - [`raw_compiler`] — pass-2 byte emission for `Statement::Raw`.
+//! - [`active`] — [`ActiveCheat`], the Linux-side wrapper that owns
+//!   the undo log + ptrace-backed rollback.
+//! - [`tests`] — integration tests against `Pid::this()` + forked
+//!   children.
 
 mod active;
-mod engine;
-mod error;
-mod length;
-mod raw_compiler;
-mod rollback;
 
 pub use active::ActiveCheat;
-pub use engine::Engine;
-pub use error::ExecError;
+pub use tatu_engine::ExecError;
+
+use nix::unistd::Pid;
+use std::collections::HashMap;
+
+use crate::linux_backend::LinuxBackend;
+use crate::parser::Script;
+
+/// Linux-facing executor: a thin wrapper around
+/// [`tatu_engine::Engine`] specialised to [`LinuxBackend`].
+/// Preserves the historical surface (`Engine::new(pid)`,
+/// `engine.enable(script) -> ActiveCheat`).
+pub struct Engine {
+    inner: tatu_engine::Engine<LinuxBackend>,
+}
+
+impl Engine {
+    pub fn new(pid: Pid) -> Self {
+        Self {
+            inner: tatu_engine::Engine::new(LinuxBackend::new(pid)),
+        }
+    }
+
+    pub fn pid(&self) -> Pid {
+        self.inner.backend().pid()
+    }
+
+    pub fn symbols(&self) -> &HashMap<String, u64> {
+        self.inner.symbols()
+    }
+
+    pub fn bind_symbol(&mut self, name: impl Into<String>, addr: u64) {
+        self.inner.bind_symbol(name, addr);
+    }
+
+    /// Drive an enable cycle and wrap the resulting
+    /// [`tatu_engine::EnableOutcome`] in an [`ActiveCheat`] keyed on
+    /// the original PID for backwards compatibility.
+    pub fn enable(&mut self, script: &Script) -> Result<ActiveCheat, ExecError> {
+        let outcome = self.inner.enable(script)?;
+        Ok(ActiveCheat::from_outcome(self.pid(), outcome))
+    }
+}
 
 #[cfg(test)]
 mod tests;

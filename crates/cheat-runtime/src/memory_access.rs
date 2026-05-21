@@ -43,6 +43,10 @@ impl ProcessVmMem {
     pub fn set_attached(&mut self, attached: bool) {
         self.attached = attached;
     }
+
+    pub fn is_attached(&self) -> bool {
+        self.attached
+    }
 }
 
 impl MemoryAccess for ProcessVmMem {

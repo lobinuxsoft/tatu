@@ -1,52 +1,39 @@
 //! A successfully enabled cheat plus its rollback path on `Drop`.
+//!
+//! `ActiveCheat` owns the [`tatu_engine::EnableOutcome`] returned by
+//! an enable cycle (or by `from_persisted` during crash recovery)
+//! plus the originating `Pid`. Calling [`Self::disable`] builds a
+//! fresh [`LinuxBackend`] for the same PID and replays the undo log
+//! through [`tatu_engine::rollback`].
 
 use std::collections::HashMap;
 
 use nix::unistd::Pid;
+use tatu_engine::EnableOutcome;
 
-use crate::persisted_hook::{PersistedAlloc, PersistedHook, PersistedWrite};
+use crate::executor::ExecError;
+use crate::linux_backend::LinuxBackend;
+use crate::persisted_hook::{BackendKind, PersistedAlloc, PersistedHook, PersistedWrite};
 
-use super::error::ExecError;
-use super::rollback::rollback;
-
-/// A successfully enabled cheat. Owns the undo log; calling [`Self::disable`]
-/// (or dropping after a deliberate `forget`) reverts every byte the executor
-/// wrote during ENABLE.
 #[derive(Debug)]
 #[must_use = "ActiveCheat owns the undo log; call .disable() or it will roll back on drop"]
 pub struct ActiveCheat {
     pub(super) pid: Pid,
-    pub(super) undo: Vec<(u64, Vec<u8>)>,
-    /// Pairs of `(remote_address, size)` that were allocated via `Statement::Alloc`
-    /// and need to be released with `munmap` when the cheat is disabled. Keyed
-    /// by the AA symbol name so `Statement::Dealloc(symbol)` can find them.
-    pub(super) allocs: HashMap<String, (u64, usize)>,
-    /// Snapshot of every symbol the Engine bound during ENABLE — both AOB-scan
-    /// results and allocs. Kept on the live cheat so downstream features
-    /// (pointer-chain `Value` reads in particular) can look up
-    /// `base_address` / `shop` / etc. while the master toggle is active. Goes
-    /// stale on `.disable()`; the registry should drop the entry then.
-    pub(super) symbols: HashMap<String, u64>,
+    pub(super) outcome: EnableOutcome,
     pub(super) disabled: bool,
 }
 
 impl ActiveCheat {
-    pub(super) fn new(pid: Pid) -> Self {
+    pub fn from_outcome(pid: Pid, outcome: EnableOutcome) -> Self {
         Self {
             pid,
-            undo: Vec::new(),
-            allocs: HashMap::new(),
-            symbols: HashMap::new(),
+            outcome,
             disabled: false,
         }
     }
 
-    /// Read-only view of the symbol table this cheat established. The map
-    /// is a snapshot taken at ENABLE time — it doesn't update if the game
-    /// re-locates code afterwards (rare for AOB-scan-bound symbols, which
-    /// pin to fixed module offsets) but a re-enable will refresh it.
     pub fn symbols(&self) -> &HashMap<String, u64> {
-        &self.symbols
+        &self.outcome.symbols
     }
 
     pub fn pid(&self) -> Pid {
@@ -54,13 +41,12 @@ impl ActiveCheat {
     }
 
     pub fn writes(&self) -> usize {
-        self.undo.len()
+        self.outcome.undo.len()
     }
 
-    /// Capture the undo state into a serialisable record so a future
-    /// process can replay the rollback even if this `ActiveCheat`'s
-    /// owning runtime has been torn down. Caller fills in `app_id`,
-    /// `feature_uuid`, `exe`, and `started_at` from its own context.
+    /// Snapshot to JSON for crash-recovery storage. Caller supplies
+    /// `app_id` / `feature_uuid` / `exe` / timestamp from its own
+    /// context.
     pub fn to_persisted(
         &self,
         app_id: String,
@@ -73,13 +59,11 @@ impl ActiveCheat {
             feature_uuid,
             pid: self.pid.as_raw(),
             exe,
-            // ActiveCheat is the Linux ptrace executor's product; the
-            // bridge backend persists records through its own helper
-            // with backend: Bridge + wineprefix populated.
-            backend: crate::persisted_hook::BackendKind::Linux,
+            backend: BackendKind::Linux,
             wineprefix: None,
             started_at,
             writes: self
+                .outcome
                 .undo
                 .iter()
                 .map(|(addr, bytes)| PersistedWrite {
@@ -88,6 +72,7 @@ impl ActiveCheat {
                 })
                 .collect(),
             allocs: self
+                .outcome
                 .allocs
                 .iter()
                 .map(|(symbol, (addr, size))| PersistedAlloc {
@@ -99,9 +84,9 @@ impl ActiveCheat {
         }
     }
 
-    /// Build an `ActiveCheat` from a persisted record. The returned
-    /// cheat carries no live symbol table (recovery doesn't need it) and
-    /// is immediately ready for [`Self::disable`] to walk the undo log.
+    /// Reconstruct an `ActiveCheat` from a crash-recovery record.
+    /// The symbol table is intentionally empty — recovery doesn't
+    /// need it, and replays only need the undo + alloc pairs.
     pub fn from_persisted(record: &PersistedHook) -> Self {
         let undo = record
             .writes
@@ -115,34 +100,37 @@ impl ActiveCheat {
             .collect();
         Self {
             pid: record.pid_typed(),
-            undo,
-            allocs,
-            symbols: HashMap::new(),
+            outcome: EnableOutcome {
+                undo,
+                allocs,
+                symbols: HashMap::new(),
+            },
             disabled: false,
         }
     }
 
+    /// Walk the undo log in reverse and release every codecave the
+    /// cheat allocated. Builds a fresh [`LinuxBackend`] internally
+    /// so the engine that produced the outcome doesn't have to stay
+    /// alive between enable and disable.
     pub fn disable(mut self) -> Result<(), ExecError> {
         if self.disabled {
             return Ok(());
         }
-        let result = rollback(&mut self);
+        let mut backend = LinuxBackend::new(self.pid);
+        tatu_engine::rollback(&mut backend, &mut self.outcome);
         self.disabled = true;
-        result
+        Ok(())
     }
 }
 
 impl Drop for ActiveCheat {
     fn drop(&mut self) {
-        if !self.disabled && !self.undo.is_empty() {
+        if !self.disabled && !self.outcome.undo.is_empty() {
             // Best-effort revert; we cannot return an error from Drop, but
-            // we surface anything that fails so the user sees half-applied
-            // hooks instead of a silent leak.
-            if let Err(e) = rollback(self) {
-                eprintln!(
-                    "[cheat-runtime] WARNING: best-effort rollback on drop failed: {e} — the game may still carry trampoline bytes from this cheat. Re-launching the game restores the original .text."
-                );
-            }
+            // a partial replay still beats leaving the trampoline live.
+            let mut backend = LinuxBackend::new(self.pid);
+            tatu_engine::rollback(&mut backend, &mut self.outcome);
         }
     }
 }

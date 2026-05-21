@@ -17,4 +17,9 @@
 //! backends — and the upcoming generic `Engine<B>` — will share.
 
 pub mod asm;
+pub mod backend;
+pub mod executor;
 pub mod parser;
+
+pub use backend::{Backend, BackendError, ReadableRegion, RegionPerms};
+pub use executor::{EnableOutcome, Engine, ExecError, rollback};

@@ -23,6 +23,7 @@ pub mod executor;
 pub mod extension;
 pub mod freeze;
 pub mod inject;
+pub mod linux_backend;
 pub mod manifest;
 pub mod maps;
 pub mod memory;
