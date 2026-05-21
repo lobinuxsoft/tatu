@@ -9,10 +9,11 @@ description = "Tatu Win32 backend. Single binary with two modes: --launch (boots
 name = "tatu-bridge"
 path = "src/main.rs"
 
-# Cross-platform deps: pure-Rust helpers (AOB parser/scanner) compile
-# on Linux too so their unit tests run as part of the workspace test.
+# Cross-platform deps. tatu-mem provides the shared MemoryAccess
+# trait + pure-logic algorithms (Pattern parser/scanner, pointer-chain
+# walker, typed value read/write) that compile against both backends.
 [dependencies]
-memchr = "2"
+tatu-mem = { path = "../tatu-mem" }
 thiserror = "1"
 
 # Windows-only deps under a target cfg so workspace `cargo build` from

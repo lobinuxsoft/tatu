@@ -547,8 +547,8 @@ fn require_ctx(ctx: Option<BridgeCtx>) -> Result<BridgeCtx, tatu_proto::Response
 }
 
 fn handle_aob_scan(ctx: BridgeCtx, module: Option<&str>, pattern: &str) -> tatu_proto::Response {
-    use super::aob::Pattern;
     use super::scan::{scan_all_readable, scan_module};
+    use tatu_mem::pattern::Pattern;
 
     let parsed = match Pattern::parse(pattern) {
         Ok(p) => p,
@@ -610,7 +610,8 @@ fn handle_remote_free(ctx: BridgeCtx, addr: u64) -> tatu_proto::Response {
 }
 
 fn handle_walk_chain(ctx: BridgeCtx, base: u64, offsets: &[u64]) -> tatu_proto::Response {
-    match super::chain::walk_chain(ctx.process, base, offsets) {
+    let mut mem = super::remote_mem::Win32Mem::new(ctx.process);
+    match tatu_mem::chain::walk_chain(&mut mem, base, offsets) {
         Ok(addr) => tatu_proto::Response::WalkChain { addr },
         Err(e) => tatu_proto::Response::Err {
             message: format!("WalkChain: {e}"),
@@ -624,7 +625,8 @@ fn handle_read_chain_value(
     offsets: &[u64],
     vtype: tatu_proto::WireVType,
 ) -> tatu_proto::Response {
-    let target = match super::chain::walk_chain(ctx.process, base, offsets) {
+    let mut mem = super::remote_mem::Win32Mem::new(ctx.process);
+    let target = match tatu_mem::chain::walk_chain(&mut mem, base, offsets) {
         Ok(a) => a,
         Err(e) => {
             return tatu_proto::Response::Err {
@@ -632,7 +634,7 @@ fn handle_read_chain_value(
             };
         }
     };
-    match super::chain::read_value(ctx.process, target, vtype) {
+    match tatu_mem::chain::read_value(&mut mem, target, vtype) {
         Ok(value) => tatu_proto::Response::ChainValue { value },
         Err(e) => tatu_proto::Response::Err {
             message: format!("ReadChainValue: {e}"),
@@ -646,7 +648,8 @@ fn handle_write_chain_value(
     offsets: &[u64],
     value: tatu_proto::WireValue,
 ) -> tatu_proto::Response {
-    let target = match super::chain::walk_chain(ctx.process, base, offsets) {
+    let mut mem = super::remote_mem::Win32Mem::new(ctx.process);
+    let target = match tatu_mem::chain::walk_chain(&mut mem, base, offsets) {
         Ok(a) => a,
         Err(e) => {
             return tatu_proto::Response::Err {
@@ -654,7 +657,7 @@ fn handle_write_chain_value(
             };
         }
     };
-    match super::chain::write_value(ctx.process, target, value) {
+    match tatu_mem::chain::write_value(&mut mem, target, value) {
         Ok(()) => tatu_proto::Response::ChainWritten,
         Err(e) => tatu_proto::Response::Err {
             message: format!("WriteChainValue: {e}"),
