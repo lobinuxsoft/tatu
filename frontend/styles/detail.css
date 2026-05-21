@@ -97,6 +97,13 @@
 .tatu-version { margin-left: auto; color: var(--fg-muted); font-size: 0.65rem; font-family: var(--font-display); letter-spacing: var(--display-tracking); }
 .tatu-toggle-btn, .tatu-install-btn { margin-left: 0; }
 
+.tatu-proton-label { display: inline-flex; align-items: center; gap: 0.3rem; color: var(--fg-muted); font-family: var(--font-display); font-size: 0.7rem; text-transform: var(--display-transform); letter-spacing: var(--display-tracking); }
+.tatu-proton-select { background: var(--bg-2); color: var(--fg); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 0.15rem 0.4rem; font-size: 0.7rem; font-family: var(--font-display); cursor: pointer; transition: border-color var(--t-fast), background var(--t-fast); }
+.tatu-proton-select:hover:not(:disabled) { border-color: var(--accent); }
+.tatu-proton-select:disabled { opacity: 0.5; cursor: not-allowed; }
+.tatu-proton-saved { border-color: var(--success-strong) !important; background: var(--bg-3) !important; }
+.tatu-proton-error { border-color: var(--danger-strong, #d77) !important; }
+
 .ce-tables-section { margin-bottom: 1rem; }
 .ce-tables-header { display: flex; align-items: center; gap: 0.5rem; font-family: var(--font-display); font-size: 0.72rem; font-weight: 700; text-transform: var(--display-transform); letter-spacing: var(--display-tracking); color: var(--fg-muted); margin-bottom: 0.4rem; }
 .ce-refresh-btn { margin-left: auto; background: transparent; color: var(--fg-muted); border: 1px solid var(--border); padding: 0.2rem 0.5rem; border-radius: var(--r-sm); font-family: var(--font-display); font-size: 0.65rem; cursor: pointer; transition: color var(--t-fast), border-color var(--t-fast); }

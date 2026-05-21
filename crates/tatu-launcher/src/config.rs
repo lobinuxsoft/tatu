@@ -182,7 +182,7 @@ mod tests {
     fn upsert_drops_empty_entry() {
         let mut cfg = sample();
         cfg.upsert_game("9999999", GameConfig::default());
-        assert!(cfg.games.get("9999999").is_none());
+        assert!(!cfg.games.contains_key("9999999"));
     }
 
     #[test]

@@ -52,10 +52,7 @@ pub fn launcher_config_get_for_app(app_id: String) -> Result<LauncherGameView, S
 }
 
 #[tauri::command]
-pub fn launcher_config_set_for_app(
-    app_id: String,
-    view: LauncherGameView,
-) -> Result<(), String> {
+pub fn launcher_config_set_for_app(app_id: String, view: LauncherGameView) -> Result<(), String> {
     let mut cfg = Config::load_or_default().map_err(stringify_err)?;
     let proton = if view.proton == cfg.default_proton {
         None
