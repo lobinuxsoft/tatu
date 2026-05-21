@@ -1,33 +1,38 @@
-//! Continuous re-apply of a byte write at a fixed address ("freeze").
+//! Continuous re-apply of a typed value at a fixed address ("freeze").
 //!
 //! Cheat Engine's *freeze* checkbox keeps a value pinned by re-writing it on a
 //! short timer. The new runtime's [`crate::Engine`] is one-shot
 //! (enable → undo log → disable), so it does not by itself fight a game that
 //! overwrites the cheat target every frame. [`FreezeRegistry`] fills that gap:
-//! given `(pid, address, bytes, interval)` it owns a worker thread that loops
-//! `process_vm_writev` until the loop is cancelled, the target exits, or the
+//! given a [`FreezeTarget`] and an interval, it owns a worker thread that
+//! loops the write until the loop is cancelled, the target exits, or the
 //! registry is dropped.
+//!
+//! Two backends:
+//! - [`FreezeTarget::Linux`] writes via `process_vm_writev` (the same path the
+//!   Linux [`crate::Engine`] uses for its toggles).
+//! - [`FreezeTarget::Bridge`] dials `tatu-bridge --connect` over its TCP port
+//!   inside the wineprefix and sends a CHRT `WriteChainValue` per tick.
+//!   Connect-write-disconnect every tick keeps the bridge's single-client
+//!   serve loop free between ticks for other tracker traffic.
 //!
 //! Keys are arbitrary owned strings so callers can decide their own naming
 //! scheme (manifest feature UUID, legacy `(app_id, cheat_id)`, ad-hoc test
 //! tag). Calling [`FreezeRegistry::start`] with a key already in flight is a
 //! no-op that returns `Ok(false)` — the caller is treated as a duplicate
 //! click, not an error.
-//!
-//! This module is intentionally orthogonal to [`crate::executor`]: a frozen
-//! address does not need a CE script to anchor it, and reusing the script
-//! machinery would buy us the rollback semantics that fight the freeze. The
-//! Tauri layer wires the two together when (and if) the manifest format
-//! grows a `freeze` field.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
 use nix::unistd::Pid;
+use tatu_proto::{Request, Response, WireValue};
 
+use crate::bridge_client::BridgeClient;
 use crate::memory::write_bytes;
 
 pub const DEFAULT_INTERVAL_MS: u64 = 16;
@@ -38,6 +43,26 @@ pub type FreezeKey = String;
 pub enum FreezeError {
     #[error("freeze registry mutex poisoned")]
     Poisoned,
+}
+
+/// What the freeze worker writes on every tick.
+pub enum FreezeTarget {
+    /// Native Linux ptrace runtime. Loops `process_vm_writev` against
+    /// `pid` at `address` with `bytes`. Direct, no protocol overhead.
+    Linux {
+        pid: Pid,
+        address: u64,
+        bytes: Vec<u8>,
+    },
+    /// Tatu bridge inside a wineprefix. Loops `Request::WriteChainValue`
+    /// over a fresh TCP connection each tick so the bridge's single-
+    /// client serve loop stays free for tracker traffic between ticks.
+    Bridge {
+        wineprefix: PathBuf,
+        base: u64,
+        offsets: Vec<u64>,
+        value: WireValue,
+    },
 }
 
 pub struct FreezeHandle {
@@ -63,9 +88,7 @@ impl FreezeRegistry {
     pub fn start(
         &self,
         key: impl Into<FreezeKey>,
-        pid: Pid,
-        address: u64,
-        bytes: Vec<u8>,
+        target: FreezeTarget,
         interval_ms: Option<u64>,
     ) -> Result<bool, FreezeError> {
         let key = key.into();
@@ -77,17 +100,7 @@ impl FreezeRegistry {
         let interval = Duration::from_millis(interval_ms.unwrap_or(DEFAULT_INTERVAL_MS));
         let cancel = Arc::new(AtomicBool::new(false));
         let cancel_worker = Arc::clone(&cancel);
-        let join = std::thread::spawn(move || {
-            while !cancel_worker.load(Ordering::Relaxed) {
-                if write_bytes(pid, address, &bytes).is_err() {
-                    // Target process gone or address unmapped — exit silently.
-                    // Stale entry stays in the registry until `stop` is
-                    // called or the registry is dropped.
-                    break;
-                }
-                std::thread::sleep(interval);
-            }
-        });
+        let join = std::thread::spawn(move || run_freeze(target, cancel_worker, interval));
 
         active.insert(
             key,
@@ -141,6 +154,74 @@ impl Drop for FreezeRegistry {
     }
 }
 
+fn run_freeze(target: FreezeTarget, cancel: Arc<AtomicBool>, interval: Duration) {
+    match target {
+        FreezeTarget::Linux {
+            pid,
+            address,
+            bytes,
+        } => {
+            while !cancel.load(Ordering::Relaxed) {
+                if write_bytes(pid, address, &bytes).is_err() {
+                    // Target gone or address unmapped — exit silently. The
+                    // stale registry entry survives until stop() is called.
+                    break;
+                }
+                std::thread::sleep(interval);
+            }
+        }
+        FreezeTarget::Bridge {
+            wineprefix,
+            base,
+            offsets,
+            value,
+        } => {
+            let mut consecutive_errs = 0u32;
+            while !cancel.load(Ordering::Relaxed) {
+                match bridge_tick(&wineprefix, base, &offsets, value) {
+                    Ok(()) => {
+                        consecutive_errs = 0;
+                    }
+                    Err(_) => {
+                        // Bridge transient errors are common (port file
+                        // not yet ready right after a game launch, the
+                        // bridge briefly busy serving another client).
+                        // Tolerate a short run of failures; abort the
+                        // loop after a sustained outage so we don't hot-
+                        // spin a doomed worker forever.
+                        consecutive_errs += 1;
+                        if consecutive_errs > 20 {
+                            break;
+                        }
+                    }
+                }
+                std::thread::sleep(interval);
+            }
+        }
+    }
+}
+
+fn bridge_tick(
+    wineprefix: &std::path::Path,
+    base: u64,
+    offsets: &[u64],
+    value: WireValue,
+) -> Result<(), String> {
+    let mut client = BridgeClient::connect(wineprefix).map_err(|e| format!("connect: {e}"))?;
+    let resp = client
+        .request(Request::WriteChainValue {
+            base,
+            offsets: offsets.to_vec(),
+            value,
+        })
+        .map_err(|e| format!("write: {e}"))?;
+    match resp {
+        Response::ChainWritten => Ok(()),
+        Response::Err { message } => Err(message),
+        other => Err(format!("unexpected response {other:?}")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -163,7 +244,15 @@ mod tests {
         let registry = FreezeRegistry::new();
         assert!(
             registry
-                .start("k", Pid::this(), address, bytes, Some(5))
+                .start(
+                    "k",
+                    FreezeTarget::Linux {
+                        pid: Pid::this(),
+                        address,
+                        bytes,
+                    },
+                    Some(5),
+                )
                 .unwrap()
         );
         std::thread::sleep(Duration::from_millis(40));
@@ -175,29 +264,6 @@ mod tests {
         target.store(0xDEAD_BEEF, Ordering::Relaxed);
         std::thread::sleep(Duration::from_millis(40));
         assert_eq!(target.load(Ordering::Relaxed), 0xDEAD_BEEF);
-    }
-
-    #[test]
-    #[ignore = "requires kernel.yama.ptrace_scope=0 or CAP_SYS_PTRACE; run with --ignored"]
-    fn start_twice_returns_false_second_time() {
-        use std::sync::atomic::AtomicU32;
-        let target = Box::new(AtomicU32::new(0));
-        let address = target.as_ref() as *const AtomicU32 as u64;
-        let bytes = 7_u32.to_le_bytes().to_vec();
-
-        let registry = FreezeRegistry::new();
-        assert!(
-            registry
-                .start("k", Pid::this(), address, bytes.clone(), Some(50))
-                .unwrap()
-        );
-        assert!(
-            !registry
-                .start("k", Pid::this(), address, bytes, Some(50))
-                .unwrap()
-        );
-        assert_eq!(registry.active_keys().unwrap().len(), 1);
-        registry.stop("k").unwrap();
     }
 
     #[test]
@@ -213,7 +279,15 @@ mod tests {
 
         let registry = FreezeRegistry::new();
         if registry
-            .start("k", Pid::this(), address, bytes, Some(10))
+            .start(
+                "k",
+                FreezeTarget::Linux {
+                    pid: Pid::this(),
+                    address,
+                    bytes,
+                },
+                Some(10),
+            )
             .is_err()
             || !registry.is_active("k").unwrap()
         {

@@ -1,12 +1,27 @@
-//! Remote allocator — thin wrapper around `VirtualAllocEx` /
-//! `VirtualFreeEx` with a near-hint fast path. Used by the autoassembler
-//! to allocate codecaves close enough to a hooked instruction that a
-//! 5-byte `jmp rel32` reaches them.
+//! Remote allocator — `VirtualAllocEx` / `VirtualFreeEx` with a
+//! near-hint scanning path. Used by the autoassembler to allocate
+//! codecaves close enough to a hooked instruction that a 5-byte
+//! `jmp rel32` reaches them.
 //!
-//! Win32 honours `lpAddress` hints far more reliably than Linux's
-//! `mmap` (which only takes them as advisory). When the hinted address
-//! is unavailable we fall back to `null` so the kernel picks any free
-//! region — better than failing the whole request.
+//! ## Why we can't just pass the hint to VirtualAllocEx
+//!
+//! Win32's `lpAddress` is documented as a preferred starting address.
+//! Under Wine it's even softer — the kernel may completely ignore it
+//! and place the allocation wherever convenient, which on x86_64
+//! often lands several GiB away from the game's `.text`. A `jmp` from
+//! the hooked instruction to that far codecave compiles as the
+//! 14-byte `jmp [rip+disp32]` indirect form instead of `jmp rel32`,
+//! overflowing the typical 10-byte slot the AA script reserved at
+//! the hook site and corrupting the next instruction.
+//!
+//! The Linux backend gets around this with `mmap(MAP_32BIT)`, which
+//! pins the mapping to the low 2 GiB and works when the game has a
+//! standard low ImageBase. The equivalent for Win32 cross-process is
+//! a manual descending/ascending scan in 64 KiB chunks (Win32's
+//! allocation granularity) around the hint until VirtualAllocEx
+//! succeeds — which is what `alloc_near` below does. Pure null hint
+//! is kept as a final fallback so callers without a hint still get
+//! some allocation rather than failing outright.
 
 use std::os::raw::c_void;
 
@@ -28,6 +43,15 @@ pub enum AllocError {
     Free { addr: u64, os_error: i32 },
 }
 
+/// Win32 allocation granularity. `VirtualAllocEx` aligns reservations
+/// to this — pass a non-multiple `lpAddress` and the kernel rounds
+/// down anyway.
+const ALLOC_GRANULARITY: u64 = 0x10000; // 64 KiB
+
+/// Maximum scan distance from a hint when looking for a near
+/// allocation. Slightly under 2 GiB so rel32 hops still fit.
+const NEAR_SCAN_RANGE: u64 = 0x7FFF_0000; // ~2 GiB - 64 KiB
+
 pub fn alloc_remote(
     process: HANDLE,
     hint: Option<u64>,
@@ -39,21 +63,27 @@ pub fn alloc_remote(
     } else {
         PAGE_READWRITE
     };
-    let size = size as usize;
+    let size_usize = size as usize;
 
-    let try_alloc = |addr: *const c_void| unsafe {
-        VirtualAllocEx(process, addr, size, MEM_COMMIT | MEM_RESERVE, protect)
+    let try_alloc = |addr: *const c_void| -> *mut c_void {
+        unsafe { VirtualAllocEx(process, addr, size_usize, MEM_COMMIT | MEM_RESERVE, protect) }
     };
 
     let raw = match hint {
         Some(h) => {
-            let hinted = try_alloc(h as *const c_void);
-            if hinted.is_null() {
-                // Fall back to any-address allocation; the caller asked
-                // for "near" h but a definite allocation beats nothing.
-                try_alloc(std::ptr::null())
+            // Round the hint down to allocation granularity so the
+            // first probe lands on a valid VirtualAllocEx address.
+            let hint_aligned = h & !(ALLOC_GRANULARITY - 1);
+            let direct = try_alloc(hint_aligned as *const c_void);
+            if !direct.is_null() {
+                direct
             } else {
-                hinted
+                // Hint was busy. Scan outward in 64 KiB steps,
+                // alternating below and above the hint, until
+                // VirtualAllocEx returns a slot. Stop short of the
+                // ±2 GiB rel32 reach so a `jmp` from the hook site
+                // to the resulting codecave still fits in 5 bytes.
+                scan_near(try_alloc, hint_aligned).unwrap_or_else(|| try_alloc(std::ptr::null()))
             }
         }
         None => try_alloc(std::ptr::null()),
@@ -61,12 +91,37 @@ pub fn alloc_remote(
 
     if raw.is_null() {
         return Err(AllocError::Alloc {
-            size: size as u64,
+            size,
             executable,
             os_error: std::io::Error::last_os_error().raw_os_error().unwrap_or(0),
         });
     }
     Ok(raw as u64)
+}
+
+fn scan_near(try_alloc: impl Fn(*const c_void) -> *mut c_void, hint: u64) -> Option<*mut c_void> {
+    let mut delta = ALLOC_GRANULARITY;
+    while delta < NEAR_SCAN_RANGE {
+        // Try below the hint first — game modules typically load
+        // around 0x140000000 with most allocations climbing upward,
+        // so the immediate "below" range is usually free first.
+        if let Some(below) = hint.checked_sub(delta)
+            && below >= ALLOC_GRANULARITY
+        {
+            let p = try_alloc(below as *const c_void);
+            if !p.is_null() {
+                return Some(p);
+            }
+        }
+        if let Some(above) = hint.checked_add(delta) {
+            let p = try_alloc(above as *const c_void);
+            if !p.is_null() {
+                return Some(p);
+            }
+        }
+        delta += ALLOC_GRANULARITY;
+    }
+    None
 }
 
 pub fn free_remote(process: HANDLE, addr: u64) -> Result<(), AllocError> {

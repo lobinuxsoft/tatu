@@ -20,6 +20,7 @@ use windows_sys::Win32::System::Memory::{
 };
 
 use super::alloc as remote_alloc;
+use super::patch;
 use super::remote_mem::Win32Mem;
 
 unsafe extern "system" {
@@ -66,7 +67,22 @@ impl MemoryAccess for Win32Backend {
     }
 
     fn write(&mut self, addr: u64, bytes: &[u8]) -> Result<(), BackendError> {
-        self.mem.write(addr, bytes).map_err(BackendError::new)
+        // Always go through patch_bytes: VirtualProtectEx lift →
+        // WriteProcessMemory → FlushInstructionCache → restore,
+        // bracketed by SuspendThread/ResumeThread on every thread
+        // of the target. The AA engine writes to a mix of .text
+        // (read-only by default) and codecaves (RWX from
+        // VirtualAllocEx) — patch_bytes is the only path that
+        // handles .text writes correctly cross-process on x86_64.
+        //
+        // Raw WriteProcessMemory can appear to succeed (Wine /
+        // Windows lift PAGE_EXECUTE_READ for handles with
+        // PROCESS_VM_WRITE) but leaves the target's i-cache stale
+        // and racy against live threads in the patched range,
+        // producing the "everything wrote OK but the game crashed"
+        // failure mode we just hit on EM.
+        patch::patch_bytes(self.process, self.target_pid, addr, bytes, true)
+            .map_err(BackendError::new)
     }
 }
 

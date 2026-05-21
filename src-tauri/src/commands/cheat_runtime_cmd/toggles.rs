@@ -8,8 +8,8 @@ use std::sync::Mutex;
 
 use cheat_runtime::bridge_client::BridgeClient;
 use cheat_runtime::{
-    BackendKind, Engine, FeatureKind, PersistedAlloc, PersistedHook, PersistedWrite,
-    find_pid_by_exe, load_manifests_for, parse_script,
+    BackendKind, Engine, FeatureKind, FreezeRegistry, PersistedAlloc, PersistedHook,
+    PersistedWrite, find_pid_by_exe, load_manifests_for, parse_script,
 };
 use tatu_proto::{Request, Response, WireOutcome};
 use tauri::State;
@@ -24,8 +24,9 @@ pub fn cheat_runtime_enable(
     feature_uuid: String,
     state: State<'_, Mutex<AppState>>,
     active: State<'_, ActiveCheats>,
+    freezes: State<'_, FreezeRegistry>,
 ) -> Result<(), String> {
-    purge_stale_cheats(&active)?;
+    purge_stale_cheats(&active, Some(&freezes))?;
     {
         let guard = active
             .lock()
