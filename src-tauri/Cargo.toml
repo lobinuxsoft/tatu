@@ -16,6 +16,7 @@ steam-vdf-parser = "0.1.1"
 cheat-runtime = { path = "../crates/cheat-runtime" }
 ce-launcher = { path = "../crates/ce-launcher" }
 tatu-proto = { path = "../crates/tatu-proto" }
+thiserror = "2"
 urlencoding = "2"
 
 [build-dependencies]

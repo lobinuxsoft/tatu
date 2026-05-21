@@ -7,6 +7,7 @@ mod inventory;
 mod shortcuts;
 mod state;
 mod steam;
+mod tatu_launcher;
 
 use std::collections::HashMap;
 use std::sync::Mutex;
