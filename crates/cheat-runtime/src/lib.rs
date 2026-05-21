@@ -14,7 +14,6 @@
 //! - The runtime is process-agnostic: any Linux PID, Proton or native.
 
 pub mod alloc;
-pub mod asm;
 pub mod aurora;
 pub mod bridge_client;
 pub mod chain;
@@ -29,11 +28,15 @@ pub mod maps;
 pub mod memory;
 pub mod memory_access;
 pub mod migrate;
-pub mod parser;
 pub mod persisted_hook;
 pub mod process;
 pub mod scanner;
 pub mod threads;
+
+// parser + asm live in tatu-engine since Phase 7A1 — re-exported
+// here as `cheat_runtime::parser` / `cheat_runtime::asm` for the
+// existing call sites (executor, ce-launcher, tests, the tracker).
+pub use tatu_engine::{asm, parser};
 
 pub use alloc::{AllocError, alloc_remote, dealloc_remote};
 pub use asm::{AsmError, compile_line as compile_asm_line};
