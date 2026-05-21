@@ -14,6 +14,8 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::state::{AppState, GameBackend};
+use crate::steam::resolve_wineprefix;
+use crate::tatu_launcher::{TatuLauncherStatus, status as tatu_launcher_status};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "lowercase")]
@@ -100,4 +102,30 @@ pub(super) fn resolve_backend(state: &State<'_, Mutex<AppState>>, app_id: &str) 
         .ok()
         .and_then(|s| s.cheat_backend.get(app_id).cloned())
         .unwrap_or(GameBackend::Linux)
+}
+
+/// Recommend a backend for `app_id` based on environment signals:
+///
+/// 1. If the Tatu Launcher drop-in is installed AND a Wine prefix
+///    exists under `<library>/steamapps/compatdata/<appid>/pfx`,
+///    recommend the Bridge backend pre-filled with that prefix.
+/// 2. Otherwise fall back to Linux — either the game runs native or
+///    the bridge cannot service it yet (no prefix means the user
+///    hasn't launched under Proton; nothing to attach to).
+///
+/// The frontend uses this to populate the "Enable Tatu backend"
+/// toggle's intended-target prefix without forcing the user to
+/// paste a path manually.
+#[tauri::command]
+pub fn cheat_runtime_backend_recommend(app_id: String) -> BackendChoice {
+    let prefix = match resolve_wineprefix(&app_id) {
+        Some(p) => p,
+        None => return BackendChoice::Linux,
+    };
+    if !matches!(tatu_launcher_status(), TatuLauncherStatus::Installed { .. }) {
+        return BackendChoice::Linux;
+    }
+    BackendChoice::Bridge {
+        wineprefix: prefix.to_string_lossy().into_owned(),
+    }
 }

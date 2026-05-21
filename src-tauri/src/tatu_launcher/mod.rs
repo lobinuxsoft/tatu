@@ -23,7 +23,6 @@ use serde::{Deserialize, Serialize};
 
 pub use compat_map::{get_compat_tool_for_app, set_compat_tool_for_app};
 pub use install::install_compat_tool;
-pub use paths::{COMPAT_TOOL_NAME, install_dir, source_candidates};
 pub use status::status;
 
 /// Snapshot of the Tatu Launcher install on disk. The frontend uses
