@@ -227,6 +227,7 @@ fn migrate_one(
         } else {
             table.game_name
         },
+        prereqs: Vec::new(),
         features,
     };
 

@@ -115,9 +115,11 @@ pub fn convert_ct_file(path: &Path) -> Result<Manifest, CtImportError> {
         path: path.to_path_buf(),
     })?;
 
+    let prereqs = self::heuristics::infer_prereqs(&exe);
     Ok(Manifest {
         exe,
         title: stem,
+        prereqs,
         features,
     })
 }

@@ -32,6 +32,7 @@ fn downstream_can_drive_full_enable_disable_via_public_root() {
     let manifest = Manifest {
         exe: "doesntmatter.exe".into(),
         title: "Downstream Smoke".into(),
+        prereqs: vec![],
         features: vec![ManifestFeature {
             uuid: "11111111-2222-3333-4444-555555555555".into(),
             name: "Zero out".into(),

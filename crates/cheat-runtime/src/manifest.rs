@@ -39,7 +39,37 @@ pub struct Manifest {
     pub exe: String,
     #[serde(default)]
     pub title: String,
+    /// Out-of-process prerequisites the user must install before any
+    /// feature in this manifest can be enabled. Each entry surfaces
+    /// in the cheats panel as a blocking banner + dimmed toggles
+    /// until satisfied. Default empty list keeps older manifests
+    /// (and every non-Capcom title) round-tripping unchanged.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub prereqs: Vec<Prereq>,
     pub features: Vec<ManifestFeature>,
+}
+
+/// External dependency a game needs before our runtime can attach
+/// safely. Tagged enum so future kinds (BepInEx for Unity, MelonLoader,
+/// SpecialK, etc.) extend without churn.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Prereq {
+    /// praydog's REFramework — `dinput8.dll` proxy that neutralises
+    /// Capcom Anti-Tamper's periodic page-integrity scans and
+    /// anti-debug syscalls. Without it, AOB scans and trampoline
+    /// patches into a Capcom RE Engine game crash the game within
+    /// seconds. `required_for_anticheat` is informational; the
+    /// importer always sets it to true for the games it auto-detects
+    /// (no RE Engine title ships without anti-tamper).
+    Reframework {
+        #[serde(default = "default_true")]
+        required_for_anticheat: bool,
+    },
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// Visual / behavioural category of a [`ManifestFeature`].
@@ -237,10 +267,64 @@ mod tests {
     }
 
     #[test]
+    fn parses_manifest_with_reframework_prereq() {
+        let m: Manifest = serde_json::from_str(
+            r#"{
+                "exe": "PRAGMATA.exe",
+                "title": "PRAGMATA",
+                "prereqs": [{"kind":"reframework","required_for_anticheat":true}],
+                "features": []
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(m.prereqs.len(), 1);
+        assert!(matches!(
+            m.prereqs[0],
+            Prereq::Reframework {
+                required_for_anticheat: true
+            }
+        ));
+    }
+
+    #[test]
+    fn reframework_prereq_defaults_required_anticheat_true() {
+        let m: Manifest = serde_json::from_str(
+            r#"{
+                "exe": "PRAGMATA.exe",
+                "prereqs": [{"kind":"reframework"}],
+                "features": []
+            }"#,
+        )
+        .unwrap();
+        assert!(matches!(
+            m.prereqs[0],
+            Prereq::Reframework {
+                required_for_anticheat: true
+            }
+        ));
+    }
+
+    #[test]
+    fn empty_prereqs_skipped_in_serialised_form() {
+        let m = Manifest {
+            exe: "Game.exe".into(),
+            title: "".into(),
+            prereqs: vec![],
+            features: vec![],
+        };
+        let text = serde_json::to_string(&m).unwrap();
+        assert!(
+            !text.contains("prereqs"),
+            "default-empty prereqs should not bloat the on-disk JSON"
+        );
+    }
+
+    #[test]
     fn round_trip_serialisation_stable() {
         let m = Manifest {
             exe: "Game.exe".into(),
             title: "My Game".into(),
+            prereqs: vec![],
             features: vec![
                 ManifestFeature {
                     uuid: "u".into(),

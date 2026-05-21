@@ -1,6 +1,7 @@
-//! Cheat-table heuristics: header-vs-ornament, Lua-vs-AA, exe recovery.
+//! Cheat-table heuristics: header-vs-ornament, Lua-vs-AA, exe recovery,
+//! prereq inference (RE Engine titles need REFramework).
 
-use crate::manifest::ManifestFeature;
+use crate::manifest::{ManifestFeature, Prereq};
 
 /// Drop CE `<GroupHeader>` entries that are pure visual ornament: ASCII
 /// separators (`---------`), runic dividers (`◣⫘⫘⫘…◢`), info notes prefixed
@@ -51,6 +52,54 @@ pub(super) fn strip_quotes(s: String) -> String {
 pub(super) fn is_real_aa_script(body: &str) -> bool {
     let needles = ["aobscanmodule", "alloc(", "registersymbol", "\ndb ", " db "];
     needles.iter().any(|n| body.contains(n))
+}
+
+/// Known Capcom RE Engine exe names. Every CT for these titles carries
+/// the fixstuff caveat *"praydog REFramework is required to bypass
+/// anti-cheat included in this game and avoid crashes"* — without
+/// REFramework, our AOB scans + trampolines crash the game inside a
+/// few seconds. List is exact-match (case-insensitive) on the
+/// `aobscanmodule` exe binding emitted by the CT importer.
+///
+/// Future titles get added as the community publishes CTs for them; an
+/// unknown exe falls back to "no prereqs", which is the conservative
+/// default (extra prereq always blockable from the UI, missed prereq
+/// crashes the game on enable — so we err on the under-detect side).
+const RE_ENGINE_EXES: &[&str] = &[
+    "PRAGMATA.exe",
+    "MonsterHunterWilds.exe",
+    "MonsterHunterRise.exe",
+    "MHRise.exe",
+    "re2.exe",
+    "re3.exe",
+    "re4.exe",
+    "re7.exe",
+    "re8.exe",
+    "RE2.exe",
+    "RE3.exe",
+    "RE4.exe",
+    "RE7.exe",
+    "RE8.exe",
+    "DragonsDogma2.exe",
+    "DMC5.exe",
+    "DevilMayCry5.exe",
+    "StreetFighter6.exe",
+    "SF6.exe",
+];
+
+/// Auto-derive the prereqs vector from the resolved exe name. Returns
+/// `[Prereq::Reframework]` for any RE Engine title, empty otherwise.
+pub(super) fn infer_prereqs(exe: &str) -> Vec<Prereq> {
+    if RE_ENGINE_EXES
+        .iter()
+        .any(|known| known.eq_ignore_ascii_case(exe))
+    {
+        vec![Prereq::Reframework {
+            required_for_anticheat: true,
+        }]
+    } else {
+        Vec::new()
+    }
 }
 
 /// Scan every toggle's script for the first `aobscanmodule(name, exe, …)`
