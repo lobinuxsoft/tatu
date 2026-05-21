@@ -53,7 +53,7 @@ pub use ct_import::{
 pub use elfsym::{ElfSymError, find_libc_symbol, find_module_base, find_module_symbol};
 pub use executor::{ActiveCheat, Engine, ExecError};
 pub use extension::{Extension, ExtensionError};
-pub use freeze::{FreezeError, FreezeHandle, FreezeKey, FreezeRegistry};
+pub use freeze::{FreezeError, FreezeHandle, FreezeKey, FreezeRegistry, FreezeTarget};
 pub use inject::{InjectError, inject_so};
 pub use manifest::{
     FeatureKind, Manifest, ManifestError, ManifestFeature, VType, ValueSpec, load_manifests_for,

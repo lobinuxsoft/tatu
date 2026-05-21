@@ -3,13 +3,13 @@
 //! `AddrExpr`, walks its offset chain, then drives [`cheat_runtime`]'s
 //! typed read/write/freeze primitives against the resolved address.
 //!
-//! Phase 6: per-game backend routing. When the user has selected
-//! `GameBackend::Bridge` for an app, read / write traffic dials the
-//! in-prefix `tatu-bridge --connect` over its AF_UNIX socket and
-//! sends `Request::ReadChainValue` / `WriteChainValue` instead of
-//! the local ptrace path. Freezes stay on the Linux backend for now
-//! — the freeze loop runs in-process here and needs deeper refactor
-//! to round-trip through the bridge.
+//! Phase 6 + 8: per-game backend routing. When the user has selected
+//! `GameBackend::Bridge` for an app, read / write / freeze traffic
+//! dials the in-prefix `tatu-bridge --connect` over its TCP loopback
+//! port (Aurora-style — see [`tatu_proto::BRIDGE_HOST`]) and sends
+//! `Request::ReadChainValue` / `WriteChainValue` instead of the local
+//! ptrace path. Freezes also reach the bridge via a per-tick connect-
+//! write-disconnect loop ([`FreezeTarget::Bridge`]).
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -17,7 +17,7 @@ use std::sync::Mutex;
 
 use cheat_runtime::bridge_client::BridgeClient;
 use cheat_runtime::{
-    AddrExpr, ChainError, FeatureKind, FreezeRegistry, Pid, VType, Value, ValueSpec,
+    AddrExpr, ChainError, FeatureKind, FreezeRegistry, FreezeTarget, Pid, VType, Value, ValueSpec,
     find_pid_by_exe, load_manifests_for, parse_addr_expr, read_chain, resolve_addr_expr,
     walk_chain, write_chain,
 };
@@ -107,12 +107,12 @@ pub fn cheat_runtime_value_read(
             read_chain(pid, &expr, &spec.offsets, spec.vtype, &symbols).map_err(map_chain_err)
         }
         GameBackend::Bridge { wineprefix } => {
-            let base = bridge_base_addr(&expr, &symbols)?;
+            let (base, full_offsets) = bridge_chain(&expr, &spec.offsets, &symbols)?;
             let mut client = bridge_connect(&wineprefix)?;
             let resp = client
                 .request(Request::ReadChainValue {
                     base,
-                    offsets: spec.offsets.clone(),
+                    offsets: full_offsets,
                     vtype: vtype_to_wire(spec.vtype),
                 })
                 .map_err(|e| format!("bridge ReadChainValue: {e}"))?;
@@ -151,12 +151,12 @@ pub fn cheat_runtime_value_write(
             write_chain(pid, &expr, &spec.offsets, value, &symbols).map_err(map_chain_err)
         }
         GameBackend::Bridge { wineprefix } => {
-            let base = bridge_base_addr(&expr, &symbols)?;
+            let (base, full_offsets) = bridge_chain(&expr, &spec.offsets, &symbols)?;
             let mut client = bridge_connect(&wineprefix)?;
             let resp = client
                 .request(Request::WriteChainValue {
                     base,
-                    offsets: spec.offsets.clone(),
+                    offsets: full_offsets,
                     value: value_to_wire(value),
                 })
                 .map_err(|e| format!("bridge WriteChainValue: {e}"))?;
@@ -169,20 +169,51 @@ pub fn cheat_runtime_value_write(
     }
 }
 
-/// Resolve the chain base for a Bridge-backed read/write. Today only
-/// `Literal` is supported — `SymbolDeref` requires the AA scaffold
-/// scan to have run inside the game, which means routing
-/// `Engine::enable` through the bridge (Phase 7 territory). When a
-/// feature needs a symbol, return a clear error pointing the user at
-/// the Linux backend as a fallback.
-fn bridge_base_addr(expr: &AddrExpr, _symbols: &HashMap<String, u64>) -> Result<u64, String> {
+/// Build the `(base, offsets)` pair the bridge needs to resolve a
+/// Value feature's address. The bridge's WalkChain implementation
+/// iterates offsets in REVERSE (matching CE's
+/// `cheat_runtime::chain::walk_chain`), so we can fold the
+/// `SymbolDeref` step into the offsets list:
+///
+/// Linux flow (`read_chain`):
+/// ```
+/// base = read_u64(sym_addr) + sym_offset   // resolve_addr_expr
+/// target = walk_chain(base, spec.offsets)  // iterates reverse
+/// value = read_at(target, vtype)
+/// ```
+///
+/// Bridge equivalent in one round trip:
+/// ```
+/// full_offsets = [...spec.offsets, sym_offset]
+/// walk_chain(sym_addr, full_offsets) iterates reverse
+///   = [sym_offset, then spec.offsets[N-1], ..., spec.offsets[0]]
+///   hop 1: deref sym_addr → ptr; cur = ptr + sym_offset    (= Linux base)
+///   hop 2..: walk spec.offsets in reverse                  (= Linux walk_chain)
+/// ```
+///
+/// For `Literal` base, no symbol is involved: `base = addr`,
+/// `offsets = spec.offsets`.
+fn bridge_chain(
+    expr: &AddrExpr,
+    spec_offsets: &[u64],
+    symbols: &HashMap<String, u64>,
+) -> Result<(u64, Vec<u64>), String> {
     match expr {
-        AddrExpr::Literal(addr) => Ok(*addr),
-        AddrExpr::SymbolDeref { symbol, .. } => Err(format!(
-            "Bridge backend cannot resolve [{symbol}] yet — AA scaffold scans are still \
-             routed through the Linux backend (Phase 7). Switch this game's backend to \
-             Linux or use a literal-base Value feature."
-        )),
+        AddrExpr::Literal(addr) => Ok((*addr, spec_offsets.to_vec())),
+        AddrExpr::SymbolDeref { symbol, offset } => {
+            let sym_addr = symbols.get(symbol).copied().ok_or_else(|| {
+                format!("symbol {symbol:?} not registered — enable the scaffold first")
+            })?;
+            let mut full = Vec::with_capacity(spec_offsets.len() + 1);
+            full.extend_from_slice(spec_offsets);
+            // sym_offset is i64 (apply_offset semantics) but the
+            // wire's offsets are u64. Linux's resolve_addr_expr uses
+            // wrapping_add/sub; we match by casting through u64
+            // (negative offsets wrap, the executor adds them with
+            // wrapping_add and gets the same result).
+            full.push(*offset as u64);
+            Ok((sym_addr, full))
+        }
     }
 }
 
@@ -216,6 +247,7 @@ pub struct ValueFreezeReq {
 #[tauri::command]
 pub fn cheat_runtime_value_freeze(
     req: ValueFreezeReq,
+    state: State<'_, Mutex<AppState>>,
     active: State<'_, ActiveCheats>,
     freezes: State<'_, FreezeRegistry>,
 ) -> Result<(), String> {
@@ -237,16 +269,33 @@ pub fn cheat_runtime_value_freeze(
             spec.vtype
         ));
     }
-    let (pid, addr, _) = find_value_target(&exe, &spec, &expr, &active)?;
-    let bytes = value_to_le_bytes(value);
+    let symbols = merged_symbols(&active)?;
+    ensure_symbol_registered(&expr, &symbols)?;
+
+    let target = match resolve_backend(&state, &req.app_id) {
+        GameBackend::Linux => {
+            // Resolve once up front; the freeze loop writes to the
+            // resolved leaf address, no need to walk the chain on
+            // every tick.
+            let (pid, addr, _) = find_value_target(&exe, &spec, &expr, &active)?;
+            FreezeTarget::Linux {
+                pid,
+                address: addr,
+                bytes: value_to_le_bytes(value),
+            }
+        }
+        GameBackend::Bridge { wineprefix } => {
+            let (base, full_offsets) = bridge_chain(&expr, &spec.offsets, &symbols)?;
+            FreezeTarget::Bridge {
+                wineprefix: std::path::PathBuf::from(wineprefix),
+                base,
+                offsets: full_offsets,
+                value: value_to_wire(value),
+            }
+        }
+    };
     freezes
-        .start(
-            freeze_key(&req.app_id, &req.feature_uuid),
-            pid,
-            addr,
-            bytes,
-            None,
-        )
+        .start(freeze_key(&req.app_id, &req.feature_uuid), target, None)
         .map_err(|e| e.to_string())?;
     Ok(())
 }
