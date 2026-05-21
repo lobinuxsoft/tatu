@@ -20,7 +20,7 @@ use windows_sys::Win32::System::Memory::{
 };
 
 use super::alloc as remote_alloc;
-use super::patch;
+use super::patch::{self, ThreadSuspendGuard};
 use super::remote_mem::Win32Mem;
 
 unsafe extern "system" {
@@ -29,12 +29,17 @@ unsafe extern "system" {
 
 /// Backend impl for the in-prefix Win32 bridge. Owns the open
 /// process handle (already obtained by `connect_mode` before serving
-/// kicks in) plus the target PID — passed through to the patch path
-/// for thread enumeration.
+/// kicks in) plus the target PID, used for thread enumeration during
+/// the batch suspend [`Self::attach`] performs.
 pub struct Win32Backend {
     process: HANDLE,
     target_pid: u32,
     mem: Win32Mem,
+    /// Per-batch thread suspension. `Some` while the executor is
+    /// inside an `enable` cycle; `None` outside. The guard's `Drop`
+    /// resumes every thread and closes the handles — so a panic
+    /// inside the executor cannot leave the game frozen.
+    suspend_guard: Option<ThreadSuspendGuard>,
 }
 
 impl Win32Backend {
@@ -43,6 +48,7 @@ impl Win32Backend {
             process,
             target_pid,
             mem: Win32Mem::new(process),
+            suspend_guard: None,
         }
     }
 
@@ -67,21 +73,16 @@ impl MemoryAccess for Win32Backend {
     }
 
     fn write(&mut self, addr: u64, bytes: &[u8]) -> Result<(), BackendError> {
-        // Always go through patch_bytes: VirtualProtectEx lift →
-        // WriteProcessMemory → FlushInstructionCache → restore,
-        // bracketed by SuspendThread/ResumeThread on every thread
-        // of the target. The AA engine writes to a mix of .text
-        // (read-only by default) and codecaves (RWX from
-        // VirtualAllocEx) — patch_bytes is the only path that
-        // handles .text writes correctly cross-process on x86_64.
-        //
-        // Raw WriteProcessMemory can appear to succeed (Wine /
-        // Windows lift PAGE_EXECUTE_READ for handles with
-        // PROCESS_VM_WRITE) but leaves the target's i-cache stale
-        // and racy against live threads in the patched range,
-        // producing the "everything wrote OK but the game crashed"
-        // failure mode we just hit on EM.
-        patch::patch_bytes(self.process, self.target_pid, addr, bytes, true)
+        // VirtualProtectEx lift → WriteProcessMemory →
+        // FlushInstructionCache → restore. The whole batch is already
+        // bracketed by Self::attach / Self::detach (executor calls
+        // them once per enable cycle), so `suspend_threads = false`
+        // — every per-write SuspendThread/Resume pair would translate
+        // into a perceptible mid-game micro-freeze (especially for
+        // an Unreal target with 20+ threads); doing it once for the
+        // whole batch keeps the freeze to a single ~100 ms pause the
+        // game can absorb without rubber-banding animations.
+        patch::patch_bytes(self.process, self.target_pid, addr, bytes, false)
             .map_err(BackendError::new)
     }
 }
@@ -147,17 +148,31 @@ impl Backend for Win32Backend {
     }
 
     fn attach(&mut self) -> bool {
-        // OpenProcess already granted PROCESS_VM_OPERATION /
-        // PROCESS_VM_READ / PROCESS_VM_WRITE in connect_mode — no
-        // separate attach handshake needed on Win32. Threads stay
-        // running; the patcher's per-call SuspendThread (Phase 4
-        // patch.rs) is what gives us atomicity around individual
-        // writes.
-        false
+        // Batch suspend every thread of the target ONCE for the whole
+        // enable cycle. With this in place Self::write skips per-call
+        // suspension — without it, an AA enable that writes N times
+        // would produce N suspend/resume pairs and a perceptible
+        // mid-game micro-freeze on each one (Unreal targets typically
+        // have 20+ live threads). Doing it here keeps the freeze to
+        // a single pause for the duration of the batch.
+        match ThreadSuspendGuard::suspend_all(self.target_pid) {
+            Ok(guard) => {
+                self.suspend_guard = Some(guard);
+                true
+            }
+            Err(_) => {
+                // Best-effort — proceed unattached. patch_bytes will
+                // still lift page protection per write, just without
+                // the atomicity guarantee from suspended threads.
+                false
+            }
+        }
     }
 
     fn detach(&mut self) {
-        // Symmetrical no-op.
+        // Drop the guard — the RAII impl in `patch.rs` resumes every
+        // thread and closes its handle.
+        self.suspend_guard = None;
     }
 
     fn flush_instruction_cache(&mut self, addr: u64, len: usize) -> Result<(), BackendError> {
