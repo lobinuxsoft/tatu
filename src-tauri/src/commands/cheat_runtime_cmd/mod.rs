@@ -24,6 +24,7 @@
 //!   left behind by a tracker crash or a forced game exit.
 //! - [`values`] — typed read/write/freeze over pointer-chains.
 
+pub mod backend;
 pub mod features;
 pub mod orphans;
 pub mod toggles;
