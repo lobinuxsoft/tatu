@@ -50,9 +50,11 @@ pub fn parse(input: &str) -> Result<AddrExpr, ParseError> {
         });
     }
     if let Some(rest) = s.strip_prefix('[') {
-        let (symbol, tail) = rest.split_once(']').ok_or_else(|| ParseError::Unsupported {
-            expr: input.to_string(),
-        })?;
+        let (symbol, tail) = rest
+            .split_once(']')
+            .ok_or_else(|| ParseError::Unsupported {
+                expr: input.to_string(),
+            })?;
         let symbol = symbol.trim().to_string();
         if symbol.is_empty() {
             return Err(ParseError::Unsupported {

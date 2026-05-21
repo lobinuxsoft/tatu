@@ -162,11 +162,7 @@ pub enum ChainError {
     #[error("memory access: {0}")]
     Memory(#[from] RuntimeError),
     #[error("decoded {len} bytes at {addr:#x} are not a valid {vtype:?}")]
-    DecodeValue {
-        addr: u64,
-        len: usize,
-        vtype: VType,
-    },
+    DecodeValue { addr: u64, len: usize, vtype: VType },
 }
 
 /// Parse a CE `<Address>` string into an [`AddrExpr`]. Wraps

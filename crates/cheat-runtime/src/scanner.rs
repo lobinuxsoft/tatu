@@ -7,7 +7,7 @@
 //! using [`crate::memory_access::ProcessVmMem`].
 
 use nix::unistd::Pid;
-pub use tatu_mem::pattern::{Pattern, ParseError, SCAN_CHUNK_SIZE};
+pub use tatu_mem::pattern::{ParseError, Pattern, SCAN_CHUNK_SIZE};
 
 use crate::maps::MemoryRegion;
 use crate::memory::RuntimeError;
