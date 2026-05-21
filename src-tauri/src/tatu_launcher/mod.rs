@@ -50,7 +50,9 @@ pub enum TatuLauncherStatus {
 pub enum TatuLauncherError {
     #[error("Steam install not found under ~/.steam/{{root,steam}} or ~/.local/share/Steam")]
     NoSteam,
-    #[error("source drop-in not staged; build via scripts/build-tatu-launcher.sh + scripts/build-tatu-bridge.sh first")]
+    #[error(
+        "source drop-in not staged; build via scripts/build-tatu-launcher.sh + scripts/build-tatu-bridge.sh first"
+    )]
     NoSource,
     #[error("Steam is running — close it before editing config.vdf (it gets rewritten on exit)")]
     SteamRunning,

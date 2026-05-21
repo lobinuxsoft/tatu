@@ -380,7 +380,8 @@ mod tests {
 
     #[test]
     fn detect_indent_recovers_tabs_from_sibling() {
-        let body = "\n\t\t\t\t\t\"2725260\"\n\t\t\t\t\t{\n\t\t\t\t\t\t\"name\" \"x\"\n\t\t\t\t\t}\n";
+        let body =
+            "\n\t\t\t\t\t\"2725260\"\n\t\t\t\t\t{\n\t\t\t\t\t\t\"name\" \"x\"\n\t\t\t\t\t}\n";
         let (key, field) = detect_indent(body);
         assert!(key.starts_with('\t'));
         assert!(field.starts_with(&key[..]));

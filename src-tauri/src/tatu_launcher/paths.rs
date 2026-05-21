@@ -108,10 +108,7 @@ mod tests {
         // may exist (cwd + cwd.parent fallback). Both data + exe are
         // best-effort. Empty is impossible because cwd always
         // resolves in a normal test runner.
-        assert!(
-            !cands.is_empty(),
-            "expected at least one source candidate"
-        );
+        assert!(!cands.is_empty(), "expected at least one source candidate");
         for cand in &cands {
             assert!(
                 cand.ends_with("tatu-launcher"),

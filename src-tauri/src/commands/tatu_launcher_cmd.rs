@@ -5,8 +5,7 @@
 //! the frontend's `.catch()` cleanly.
 
 use crate::tatu_launcher::{
-    self, TatuLauncherStatus, get_compat_tool_for_app, install_compat_tool,
-    set_compat_tool_for_app,
+    self, TatuLauncherStatus, get_compat_tool_for_app, install_compat_tool, set_compat_tool_for_app,
 };
 
 #[tauri::command]
