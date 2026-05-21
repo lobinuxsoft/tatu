@@ -6,8 +6,8 @@
 //! every Windows game running under Proton/Wine is `tatu-bridge`
 //! (the [`bridge_client`] module wires the tracker to it).
 //! `tatu-bridge` runs as a Win32 worker inside the same Proton
-//! invocation as the game so `WriteProcessMemory` + `SuspendThread`
-//! + `FlushInstructionCache` happen atomically against the game's
+//! invocation as the game; the atomic `WriteProcessMemory` +
+//! `SuspendThread` + `FlushInstructionCache` cycle hits the game's
 //! actual address space — the only safe way to patch `.text` on
 //! Win64 (the i-cache stays stale otherwise).
 //!
