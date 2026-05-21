@@ -7,4 +7,5 @@ description = "Backend-agnostic CE Auto-Assembler engine — parser, x86_64 asse
 
 [dependencies]
 iced-x86 = { version = "1", default-features = false, features = ["std", "decoder", "encoder", "code_asm"] }
+tatu-mem = { path = "../tatu-mem" }
 thiserror = "1"

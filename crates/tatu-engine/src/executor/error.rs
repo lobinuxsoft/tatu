@@ -1,23 +1,24 @@
-//! Error type for the executor. Lifted out of `mod.rs` so the rest of the
-//! split modules can refer to it without cycling through the root.
+//! Error type for the executor. Backend-agnostic: backend-specific
+//! failures (Linux ptrace `EFAULT`, Win32 `WriteProcessMemory`
+//! returning 0, etc.) are boxed under [`ExecError::Backend`] via the
+//! `Backend::Error` alias from `crate::backend`.
 
-use crate::alloc::AllocError;
 use crate::asm::AsmError;
-use crate::memory::RuntimeError;
-use crate::scanner;
-use crate::threads::ThreadPauseError;
+use crate::backend::BackendError;
+use crate::parser::ParseError as ScriptParseError;
+use tatu_mem::pattern::ParseError as PatternParseError;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ExecError {
+    #[error("script parse: {0}")]
+    ScriptParse(#[from] ScriptParseError),
     #[error("pattern parse error in aobscanmodule: {0}")]
-    Pattern(#[from] scanner::ParseError),
-    #[error("memory io: {0}")]
-    Memory(#[from] RuntimeError),
-    #[error("remote alloc: {0}")]
-    Alloc(#[from] AllocError),
+    Pattern(#[from] PatternParseError),
+    #[error("backend: {0}")]
+    Backend(#[from] BackendError),
     #[error("asm compile: {0}")]
     Asm(#[from] AsmError),
-    #[error("aobscanmodule({symbol}): no match in any executable region")]
+    #[error("aobscanmodule({symbol}): no match in any readable region")]
     PatternNotFound { symbol: String },
     #[error("aobscanmodule({symbol}): {count} matches found, pattern must be unique")]
     PatternAmbiguous { symbol: String, count: usize },
@@ -29,6 +30,4 @@ pub enum ExecError {
     OrphanWrite(String),
     #[error("unsupported statement: {0}")]
     Unsupported(String),
-    #[error("thread pause: {0}")]
-    ThreadPause(#[from] ThreadPauseError),
 }
