@@ -176,14 +176,14 @@ pub fn cheat_runtime_value_write(
 /// `SymbolDeref` step into the offsets list:
 ///
 /// Linux flow (`read_chain`):
-/// ```
+/// ```text
 /// base = read_u64(sym_addr) + sym_offset   // resolve_addr_expr
 /// target = walk_chain(base, spec.offsets)  // iterates reverse
 /// value = read_at(target, vtype)
 /// ```
 ///
 /// Bridge equivalent in one round trip:
-/// ```
+/// ```text
 /// full_offsets = [...spec.offsets, sym_offset]
 /// walk_chain(sym_addr, full_offsets) iterates reverse
 ///   = [sym_offset, then spec.offsets[N-1], ..., spec.offsets[0]]
