@@ -31,10 +31,13 @@ pub mod toggles;
 pub mod values;
 
 use std::collections::HashMap;
+use std::net::TcpStream;
+use std::path::Path;
 use std::sync::Mutex;
+use std::time::Duration;
 
-use cheat_runtime::{ActiveCheat, Pid};
-use tatu_proto::WireOutcome;
+use cheat_runtime::{ActiveCheat, FreezeRegistry, Pid};
+use tatu_proto::{BRIDGE_HOST, WireOutcome, bridge_port_file_path_linux};
 
 /// One enabled cheat as seen by the registry. The variant decides
 /// which backend will service the eventual disable: a Linux record
@@ -71,13 +74,21 @@ pub(super) fn pid_is_alive(pid: Pid) -> bool {
     std::path::Path::new(&format!("/proc/{}", pid.as_raw())).exists()
 }
 
-/// Drop every active cheat whose PID is gone. Their `Drop` impl will try
-/// to roll back writes against the dead process; those calls fail silently
-/// (ESRCH) so the only effect is freeing the in-memory registry slot.
-/// Bridge entries are skipped — the bridge holds the live state, not
-/// the tracker, and recovery on the bridge side uses the wineprefix
-/// lifetime, not a Linux PID liveness check.
-pub(super) fn purge_stale_cheats(active: &ActiveCheats) -> Result<(), String> {
+/// Drop every active cheat whose backing process is gone. Linux entries
+/// are checked via `/proc/<pid>/`; Bridge entries are checked by trying
+/// a short-timeout TCP connect to the wineprefix's port file — the
+/// bridge `--connect` process is killed by its `--launch` parent when
+/// the game exits, so a refused connection means the cheat is orphaned.
+///
+/// When a Bridge entry is purged, any freeze loops keyed on its
+/// `feature_uuid` are also cancelled so the UI / disk state lines up
+/// with the dead process. Freeze workers self-abort after ~1 s of
+/// consecutive errors anyway, but the explicit stop avoids the brief
+/// window where stale frozen-value indicators flicker on the frontend.
+pub(super) fn purge_stale_cheats(
+    active: &ActiveCheats,
+    freezes: Option<&FreezeRegistry>,
+) -> Result<(), String> {
     let mut guard = active
         .lock()
         .map_err(|e| format!("active registry poisoned: {e}"))?;
@@ -85,13 +96,54 @@ pub(super) fn purge_stale_cheats(active: &ActiveCheats) -> Result<(), String> {
         .iter()
         .filter_map(|(uuid, entry)| match entry {
             ActiveCheatEntry::Linux(c) if !pid_is_alive(c.pid()) => Some(uuid.clone()),
+            ActiveCheatEntry::Bridge { wineprefix, .. } if !bridge_is_alive(wineprefix) => {
+                Some(uuid.clone())
+            }
             _ => None,
         })
         .collect();
-    for uuid in stale {
-        guard.remove(&uuid);
+    for uuid in &stale {
+        guard.remove(uuid);
+        if let Some(reg) = freezes {
+            // Freeze keys carry shape `value:<app_id>:<feature_uuid>` —
+            // we don't track app_id here, so suffix-match any key
+            // ending with this uuid and cancel it.
+            if let Ok(keys) = reg.active_keys() {
+                for key in keys {
+                    if key.ends_with(uuid) {
+                        let _ = reg.stop(&key);
+                    }
+                }
+            }
+        }
     }
     Ok(())
+}
+
+/// Bridge liveness probe — reads the port file the bridge wrote on
+/// bind and attempts a short-timeout TCP connect. Returns `true` if
+/// the connect succeeds, `false` on any failure (file missing,
+/// `ECONNREFUSED`, unparseable port).
+///
+/// 100 ms timeout: ample for an in-prefix bridge that's actually
+/// listening (loopback on the same host is ~µs) and short enough that
+/// `cheat_runtime_list_features` doesn't add perceptible latency to
+/// the UI refresh even when every Bridge entry is checked.
+fn bridge_is_alive(wineprefix: &str) -> bool {
+    let port_file = bridge_port_file_path_linux(Path::new(wineprefix));
+    let body = match std::fs::read_to_string(&port_file) {
+        Ok(b) => b,
+        Err(_) => return false,
+    };
+    let port: u16 = match body.trim().parse() {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+    let addr = match format!("{BRIDGE_HOST}:{port}").parse::<std::net::SocketAddr>() {
+        Ok(a) => a,
+        Err(_) => return false,
+    };
+    TcpStream::connect_timeout(&addr, Duration::from_millis(100)).is_ok()
 }
 
 /// Merge the symbol tables of every currently-active cheat into one map.

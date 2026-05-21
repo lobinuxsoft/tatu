@@ -2,8 +2,8 @@
 //! frontend renders, tagged with liveness + symbol-readiness flags.
 
 use cheat_runtime::{
-    AddrExpr, FeatureKind, ManifestFeature, ValueSpec, find_pid_by_exe, load_manifests_for,
-    parse_addr_expr,
+    AddrExpr, FeatureKind, FreezeRegistry, ManifestFeature, ValueSpec, find_pid_by_exe,
+    load_manifests_for, parse_addr_expr,
 };
 use serde::Serialize;
 use tauri::State;
@@ -40,10 +40,14 @@ pub struct FeatureView {
 pub fn cheat_runtime_list_features(
     app_id: String,
     active: State<'_, ActiveCheats>,
+    freezes: State<'_, FreezeRegistry>,
 ) -> Result<Vec<FeatureView>, String> {
-    // Drop registry entries whose PID is gone — the UI must not paint
-    // toggles as active when the game has been relaunched out-of-band.
-    purge_stale_cheats(&active)?;
+    // Drop registry entries whose backing process / bridge is gone —
+    // the UI must not paint toggles as active when the game has been
+    // closed out-of-band. This also cancels any freeze loops keyed
+    // on the same feature_uuid so the frontend's frozen-value
+    // indicators clear at the same time.
+    purge_stale_cheats(&active, Some(&freezes))?;
     let manifests = load_manifests_for(&app_id).map_err(|e| e.to_string())?;
     let (active_keys, registered_symbols) = {
         let guard = active
