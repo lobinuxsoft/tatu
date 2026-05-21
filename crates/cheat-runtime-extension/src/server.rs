@@ -178,7 +178,9 @@ fn dispatch(req: Request, running: &Arc<AtomicBool>) -> Response {
         | Request::RemoteFree { .. }
         | Request::WalkChain { .. }
         | Request::ReadChainValue { .. }
-        | Request::WriteChainValue { .. }) => Response::Err {
+        | Request::WriteChainValue { .. }
+        | Request::EnableScript { .. }
+        | Request::DisableScript { .. }) => Response::Err {
             message: format!("{other:?} is not supported by the Linux in-process extension"),
         },
     }

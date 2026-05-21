@@ -34,9 +34,34 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use cheat_runtime::{ActiveCheat, Pid};
+use tatu_proto::WireOutcome;
+
+/// One enabled cheat as seen by the registry. The variant decides
+/// which backend will service the eventual disable: a Linux record
+/// keeps the live [`ActiveCheat`] so its in-memory undo log is the
+/// source of truth; a Bridge record keeps the [`WireOutcome`] the
+/// bridge returned (the bridge holds no per-cheat state) plus the
+/// wineprefix it lives in.
+pub enum ActiveCheatEntry {
+    Linux(ActiveCheat),
+    Bridge {
+        wineprefix: String,
+        outcome: WireOutcome,
+        symbols: HashMap<String, u64>,
+    },
+}
+
+impl ActiveCheatEntry {
+    pub fn symbols(&self) -> HashMap<String, u64> {
+        match self {
+            ActiveCheatEntry::Linux(c) => c.symbols().clone(),
+            ActiveCheatEntry::Bridge { symbols, .. } => symbols.clone(),
+        }
+    }
+}
 
 /// Tauri-managed registry of currently enabled cheats, keyed by feature UUID.
-pub type ActiveCheats = Mutex<HashMap<String, ActiveCheat>>;
+pub type ActiveCheats = Mutex<HashMap<String, ActiveCheatEntry>>;
 
 /// True if `/proc/<pid>/` still exists — the lightest possible liveness
 /// check. Used to detect when the user closed and re-launched the game
@@ -49,14 +74,19 @@ pub(super) fn pid_is_alive(pid: Pid) -> bool {
 /// Drop every active cheat whose PID is gone. Their `Drop` impl will try
 /// to roll back writes against the dead process; those calls fail silently
 /// (ESRCH) so the only effect is freeing the in-memory registry slot.
+/// Bridge entries are skipped — the bridge holds the live state, not
+/// the tracker, and recovery on the bridge side uses the wineprefix
+/// lifetime, not a Linux PID liveness check.
 pub(super) fn purge_stale_cheats(active: &ActiveCheats) -> Result<(), String> {
     let mut guard = active
         .lock()
         .map_err(|e| format!("active registry poisoned: {e}"))?;
     let stale: Vec<String> = guard
         .iter()
-        .filter(|(_, c)| !pid_is_alive(c.pid()))
-        .map(|(k, _)| k.clone())
+        .filter_map(|(uuid, entry)| match entry {
+            ActiveCheatEntry::Linux(c) if !pid_is_alive(c.pid()) => Some(uuid.clone()),
+            _ => None,
+        })
         .collect();
     for uuid in stale {
         guard.remove(&uuid);
@@ -72,9 +102,9 @@ pub(super) fn merged_symbols(active: &ActiveCheats) -> Result<HashMap<String, u6
         .lock()
         .map_err(|e| format!("active registry poisoned: {e}"))?;
     let mut merged = HashMap::new();
-    for cheat in guard.values() {
-        for (k, v) in cheat.symbols() {
-            merged.insert(k.clone(), *v);
+    for entry in guard.values() {
+        for (k, v) in entry.symbols() {
+            merged.insert(k, v);
         }
     }
     Ok(merged)

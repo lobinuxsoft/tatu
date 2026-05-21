@@ -12,7 +12,10 @@ path = "src/main.rs"
 # Cross-platform deps. tatu-mem provides the shared MemoryAccess
 # trait + pure-logic algorithms (Pattern parser/scanner, pointer-chain
 # walker, typed value read/write) that compile against both backends.
+# tatu-engine provides the Backend trait + Engine<B> generic executor
+# the bridge plugs Win32Backend into for AA scripts.
 [dependencies]
+tatu-engine = { path = "../tatu-engine" }
 tatu-mem = { path = "../tatu-mem" }
 thiserror = "1"
 
