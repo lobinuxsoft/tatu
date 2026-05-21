@@ -238,6 +238,24 @@ mod tests {
     }
 
     #[test]
+    fn scan_returns_empty_on_no_match() {
+        let pat = Pattern::parse("AA BB").unwrap();
+        assert!(pat.scan(b"\x01\x02\x03\x04").is_empty());
+    }
+
+    #[test]
+    fn scan_returns_empty_when_pattern_longer_than_haystack() {
+        let pat = Pattern::parse("AA BB CC DD").unwrap();
+        assert!(pat.scan(b"\xAA\xBB").is_empty());
+    }
+
+    #[test]
+    fn scan_all_wildcards_matches_every_position() {
+        let pat = Pattern::parse("?? ?? ??").unwrap();
+        assert_eq!(pat.scan(b"hello"), vec![0, 1, 2]);
+    }
+
+    #[test]
     fn scan_range_against_in_memory_buffer() {
         // Backend that mirrors a flat Vec<u8> at base = 0x1000.
         struct InMemBackend {
