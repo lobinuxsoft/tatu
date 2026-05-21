@@ -5,6 +5,7 @@ mod drm;
 mod hltb;
 mod inventory;
 mod shortcuts;
+mod reframework;
 mod state;
 mod steam;
 mod tatu_launcher;

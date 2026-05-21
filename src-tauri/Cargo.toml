@@ -19,6 +19,7 @@ tatu-launcher = { path = "../crates/tatu-launcher" }
 tatu-proto = { path = "../crates/tatu-proto" }
 thiserror = "2"
 urlencoding = "2"
+zip = "8"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

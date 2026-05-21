@@ -91,7 +91,12 @@ fn cache_detection(app_id: &str, exe_name: &str) -> std::io::Result<()> {
     fs::write(&path, exe_name)
 }
 
-fn find_install_path(app_id: &str) -> Result<PathBuf, String> {
+/// Resolve `<library>/steamapps/common/<installdir>/` for `app_id`
+/// by walking every Steam library + parsing its `appmanifest_*.acf`.
+/// Returns the first existing directory; errors with a human-readable
+/// message when no library owns the appid (game uninstalled, wrong
+/// id, …).
+pub(crate) fn find_install_path(app_id: &str) -> Result<PathBuf, String> {
     for lib in library_paths() {
         let manifest = lib
             .join("steamapps")
