@@ -138,16 +138,19 @@ pub fn patch_bytes(
     Ok(())
 }
 
-/// RAII guard: suspends every other thread of `pid` on construction,
-/// resumes + closes their handles on drop. "Every other" because the
-/// bridge itself runs in a different process — we never accidentally
-/// freeze our own dispatch loop.
-struct ThreadSuspendGuard {
+/// RAII guard: suspends every thread of `target_pid` on construction,
+/// resumes + closes their handles on drop. Exposed `pub(crate)` so
+/// [`crate::win_backend::Win32Backend`] can hold a single guard for
+/// a whole `Engine::enable` batch (one suspend + resume per cycle
+/// instead of one per write — the difference between a single ~100 ms
+/// pause and dozens of <10 ms pauses that the user perceives as
+/// micro-freezing).
+pub(crate) struct ThreadSuspendGuard {
     handles: Vec<HANDLE>,
 }
 
 impl ThreadSuspendGuard {
-    fn suspend_all(target_pid: u32) -> Result<Self, PatchError> {
+    pub(crate) fn suspend_all(target_pid: u32) -> Result<Self, PatchError> {
         let snap = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
         if snap == INVALID_HANDLE_VALUE {
             return Err(PatchError::Memory(RemoteMemError::Read {
