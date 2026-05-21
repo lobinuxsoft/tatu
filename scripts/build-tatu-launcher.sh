@@ -28,6 +28,14 @@ install -m 0644 tools/tatu-launcher/compatibilitytool.vdf "$DIST/compatibilityto
 install -m 0644 tools/tatu-launcher/tatu-launcher.toml.example "$DIST/tatu-launcher.toml.example"
 install -m 0644 tools/tatu-launcher/README.md "$DIST/README.md"
 
+# Stamp the version so the tracker's tatu_launcher::status() can
+# surface "installed Tatu Launcher X.Y.Z" in the cheats panel banner.
+if [[ -f VERSION ]]; then
+    install -m 0644 VERSION "$DIST/version.txt"
+else
+    printf 'unknown\n' > "$DIST/version.txt"
+fi
+
 BRIDGE="target/dist/tatu-bridge.exe"
 if [[ -f "$BRIDGE" ]]; then
     install -m 0755 "$BRIDGE" "$DIST/tatu-bridge.exe"
