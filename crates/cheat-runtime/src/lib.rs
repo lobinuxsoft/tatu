@@ -27,6 +27,7 @@ pub mod inject;
 pub mod manifest;
 pub mod maps;
 pub mod memory;
+pub mod memory_access;
 pub mod migrate;
 pub mod parser;
 pub mod persisted_hook;

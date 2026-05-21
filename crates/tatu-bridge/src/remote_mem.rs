@@ -1,12 +1,16 @@
 //! Thin safe-ish wrapper around `ReadProcessMemory` /
-//! `WriteProcessMemory`. The bridge owns a `HANDLE` to the target
-//! process opened with `PROCESS_VM_OPERATION | PROCESS_VM_READ |
-//! PROCESS_VM_WRITE`; every Phase 4 primitive (AOB scanner, code
-//! patcher, codecave allocator, pointer-chain walker) goes through
-//! these helpers so the unsafe surface stays in one file.
+//! `WriteProcessMemory` plus the [`tatu_mem::MemoryAccess`] adapter
+//! the bridge feeds to the shared pure-logic algorithms in
+//! [`tatu_mem::pattern`] and [`tatu_mem::chain`].
 //!
-//! Linux mirror: `cheat_runtime::memory::{read_bytes, write_bytes,
-//! read_bytes_partial}` over `process_vm_readv` / `process_vm_writev`.
+//! The bridge owns a `HANDLE` to the target process opened with
+//! `PROCESS_VM_OPERATION | PROCESS_VM_READ | PROCESS_VM_WRITE`;
+//! every Phase 4 primitive (AOB scanner, code patcher, codecave
+//! allocator, pointer-chain walker) goes through this module so the
+//! unsafe surface stays in one file.
+//!
+//! Linux mirror: `cheat_runtime::memory_access::ProcessVmMem` over
+//! `process_vm_readv` / `process_vm_writev`.
 
 use std::os::raw::c_void;
 
@@ -134,9 +138,32 @@ pub fn write_remote(process: HANDLE, addr: u64, bytes: &[u8]) -> Result<(), Remo
     Ok(())
 }
 
-/// Read 8 bytes at `addr` and decode as little-endian `u64`.
-/// Helper for pointer-chain walking.
-pub fn read_u64(process: HANDLE, addr: u64) -> Result<u64, RemoteMemError> {
-    let bytes = read_remote(process, addr, 8)?;
-    Ok(u64::from_le_bytes(bytes.as_slice().try_into().unwrap()))
+/// [`tatu_mem::MemoryAccess`] adapter. The bridge dispatch loop
+/// wraps its open `HANDLE` in one of these and hands it to the shared
+/// pure-logic algorithms — the same `tatu_mem::pattern::scan_range`
+/// + `tatu_mem::chain::walk_chain` the Linux ptrace runtime uses.
+pub struct Win32Mem {
+    process: HANDLE,
+}
+
+impl Win32Mem {
+    pub fn new(process: HANDLE) -> Self {
+        Self { process }
+    }
+}
+
+impl tatu_mem::MemoryAccess for Win32Mem {
+    type Error = RemoteMemError;
+
+    fn read(&mut self, addr: u64, len: usize) -> Result<Vec<u8>, Self::Error> {
+        read_remote(self.process, addr, len)
+    }
+
+    fn read_partial(&mut self, addr: u64, len: usize) -> Vec<u8> {
+        read_remote_partial(self.process, addr, len)
+    }
+
+    fn write(&mut self, addr: u64, bytes: &[u8]) -> Result<(), Self::Error> {
+        write_remote(self.process, addr, bytes)
+    }
 }

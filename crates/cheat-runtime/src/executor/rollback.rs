@@ -6,9 +6,10 @@ use nix::sys::ptrace;
 use nix::sys::signal::Signal;
 use nix::sys::wait::{WaitStatus, waitpid};
 use nix::unistd::Pid;
+use tatu_mem::MemoryAccess;
 
 use crate::alloc;
-use crate::memory;
+use crate::memory_access::ProcessVmMem;
 
 use super::active::ActiveCheat;
 use super::error::ExecError;
@@ -78,13 +79,9 @@ pub(super) fn rollback(active: &mut ActiveCheat) -> Result<(), ExecError> {
 }
 
 fn restore_all_writes(active: &mut ActiveCheat, attached: bool) -> Result<(), ExecError> {
+    let mut mem = ProcessVmMem::with_attached(active.pid, attached);
     while let Some((addr, bytes)) = active.undo.pop() {
-        let result = if attached {
-            memory::write_bytes_attached(active.pid, addr, &bytes)
-        } else {
-            memory::write_bytes(active.pid, addr, &bytes)
-        };
-        if let Err(e) = result {
+        if let Err(e) = mem.write(addr, &bytes) {
             // Push the entry back so a retry can resume from here.
             active.undo.push((addr, bytes));
             return Err(ExecError::Memory(e));

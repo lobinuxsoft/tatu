@@ -6,10 +6,12 @@ use std::collections::HashMap;
 
 use nix::sys::ptrace;
 use nix::unistd::Pid;
+use tatu_mem::MemoryAccess;
 
 use crate::alloc;
 use crate::maps::{MemoryRegion, read_maps};
-use crate::memory::{self, RuntimeError};
+use crate::memory::RuntimeError;
+use crate::memory_access::ProcessVmMem;
 use crate::parser::{Script, Statement};
 use crate::scanner::{self, Pattern};
 
@@ -21,9 +23,18 @@ use super::rollback::{attach_main_thread, rollback};
 
 /// A live execution context bound to a target PID. Holds the symbol table
 /// built up by `aobscanmodule` resolutions and any other label registrations.
+///
+/// Memory I/O goes through the [`MemoryAccess`] trait via [`ProcessVmMem`].
+/// The bridge (`tatu-bridge`) implements the same trait against
+/// `ReadProcessMemory` / `WriteProcessMemory`, so the inner I/O calls in
+/// [`Engine::enable`] would compile identically against a generic backend.
+/// The non-I/O Linux-specific surface (ptrace attach, mmap-based remote
+/// alloc, `/proc/<pid>/maps` enumeration) is what keeps `Engine` itself
+/// PID-bound for now.
 pub struct Engine {
     pid: Pid,
     symbols: HashMap<String, u64>,
+    mem: ProcessVmMem,
 }
 
 impl Engine {
@@ -31,6 +42,7 @@ impl Engine {
         Self {
             pid,
             symbols: HashMap::new(),
+            mem: ProcessVmMem::new(pid),
         }
     }
 
@@ -84,7 +96,13 @@ impl Engine {
         // with EPERM and we fall back to process_vm_writev for in-process
         // smoke tests.
         let attached = attach_main_thread(self.pid);
+        // Flip the adapter so the trait-level write() inside the loop
+        // picks PTRACE_POKEDATA over the un-attached process_vm_writev
+        // path. attach_main_thread returns false for self-pid (tests),
+        // where attached==false keeps the legacy fallback.
+        self.mem.set_attached(attached);
         let write_result = self.write_pass(script, &mut active, attached);
+        self.mem.set_attached(false);
         if attached {
             let _ = ptrace::detach(self.pid, None);
         }
@@ -167,7 +185,7 @@ impl Engine {
         &mut self,
         script: &Script,
         active: &mut ActiveCheat,
-        attached: bool,
+        _attached: bool,
     ) -> Result<(), ExecError> {
         let mut cursor: Option<u64> = None;
         for stmt in &script.enable {
@@ -187,7 +205,7 @@ impl Engine {
                         return Err(ExecError::OrphanWrite(line.clone()));
                     };
                     let bytes = compile_raw(line, &self.symbols, self.pid, base)?;
-                    let original = memory::read_bytes(self.pid, base, bytes.len())?;
+                    let original = self.mem.read(base, bytes.len())?;
                     if std::env::var_os("CHEAT_RUNTIME_TRACE").is_some() {
                         eprintln!(
                             "[trace] @0x{:x} write {:>2}B {:02X?}  was {:02X?}  ← {}",
@@ -198,11 +216,7 @@ impl Engine {
                             line
                         );
                     }
-                    if attached {
-                        memory::write_bytes_attached(self.pid, base, &bytes)?;
-                    } else {
-                        memory::write_bytes(self.pid, base, &bytes)?;
-                    }
+                    self.mem.write(base, &bytes)?;
                     active.undo.push((base, original));
                     cursor = Some(base + bytes.len() as u64);
                 }
