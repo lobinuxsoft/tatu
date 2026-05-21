@@ -16,6 +16,52 @@ function fmtKB(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+// Render a row per outstanding manifest prerequisite. Sits at the very
+// top of the cheats panel because nothing else applies until these are
+// satisfied — the toggle gating in the backend will refuse enable
+// even if the user clicks a dimmed switch.
+function renderPrereqsBanner(prereqs) {
+  if (!prereqs || !prereqs.length) return "";
+  const rows = prereqs.filter(p => !p.satisfied).map(p => {
+    if (p.kind === "reframework") {
+      const note = p.required_for_anticheat
+        ? "required to bypass Capcom Anti-Tamper"
+        : "required for cheats";
+      return (
+        `<div class="ce-banner ce-banner-warn prereqs-banner" data-kind="reframework">` +
+          `<span>REFramework not installed — ${esc(note)}.</span>` +
+          `<button class="ce-install-btn prereqs-install-btn" data-kind="reframework">Install REFramework</button>` +
+        `</div>`
+      );
+    }
+    return `<div class="ce-banner ce-banner-warn">Unknown prereq: ${esc(p.kind)}</div>`;
+  });
+  return rows.join("");
+}
+
+function wirePrereqsBanner(panel, gameId) {
+  panel.querySelectorAll(".prereqs-install-btn").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const kind = btn.dataset.kind;
+      btn.disabled = true;
+      const original = btn.textContent;
+      btn.textContent = "Downloading…";
+      try {
+        await invoke("prereqs_install", { appId: String(gameId), kind });
+        await loadCheats(gameId);
+      } catch (e) {
+        btn.textContent = "✗ " + (String(e).split("\n")[0] || "Error");
+        btn.title = String(e);
+        setTimeout(() => {
+          btn.textContent = original;
+          btn.disabled = false;
+          btn.removeAttribute("title");
+        }, 4000);
+      }
+    });
+  });
+}
+
 function renderCeBanner(status) {
   const kind = status?.kind;
   if (kind === "installed") {
@@ -254,7 +300,7 @@ function wireTables(panel, gameId) {
   });
 }
 
-function renderRuntimeSection(features) {
+function renderRuntimeSection(features, prereqBlock) {
   if (!features.length) {
     return (
       `<div class="cheat-runtime-section">` +
@@ -271,6 +317,10 @@ function renderRuntimeSection(features) {
   const anyRunning = features.some(f => f.game_running);
   const pillCls = anyRunning ? "cheat-pill-on" : "cheat-pill-off";
   const pillTxt = anyRunning ? "\u{1F7E2} Game running" : "\u{1F534} Game not running";
+  // When a prerequisite is missing, EVERY toggle in this app is blocked
+  // (the gating runs per-manifest, not per-feature; we don't model
+  // mixed-manifest apps where some toggles would still work).
+  const prereqBlockedReason = prereqBlock || "";
 
   let html =
     `<div class="cheat-runtime-section">` +
@@ -293,7 +343,8 @@ function renderRuntimeSection(features) {
       html += renderValueRow(f);
       continue;
     }
-    const dis = f.game_running ? "" : "disabled";
+    const blocked = prereqBlockedReason || (!f.game_running ? "Launch the game first" : "");
+    const dis = blocked ? "disabled" : "";
     const ch = f.active ? "checked" : "";
     const cat = f.category ? `${esc(f.category)} • ` : "";
     html +=
@@ -302,7 +353,7 @@ function renderRuntimeSection(features) {
           `<div class="cheat-runtime-name">${esc(f.name)}</div>` +
           `<div class="cheat-runtime-meta">${cat}${esc(f.manifest_exe)}</div>` +
         `</div>` +
-        `<label class="cheat-switch" title="${dis ? 'Launch the game first' : 'Toggle'}">` +
+        `<label class="cheat-switch" title="${esc(blocked || 'Toggle')}">` +
           `<input type="checkbox" data-feature-uuid="${esc(f.uuid)}" ${ch} ${dis}>` +
           `<span class="cheat-switch-slider"></span>` +
         `</label>` +
@@ -582,7 +633,7 @@ export async function loadCheats(gameId) {
   if (!panel) return;
 
   try {
-    const [ceStatus, tables, runtimeFeatures, orphans, tatuStatus, currentBackend, launcherGame, protons] = await Promise.all([
+    const [ceStatus, tables, runtimeFeatures, orphans, tatuStatus, currentBackend, launcherGame, protons, prereqs] = await Promise.all([
       invoke("ce_install_status").catch(() => ({ kind: "not_installed" })),
       invoke("ce_list_tables_for_game", { appId: String(gameId) }).catch(() => []),
       invoke("cheat_runtime_list_features", { appId: String(gameId) }).catch(() => []),
@@ -591,19 +642,25 @@ export async function loadCheats(gameId) {
       invoke("cheat_runtime_backend_get", { appId: String(gameId) }).catch(() => ({ kind: "linux" })),
       invoke("launcher_config_get_for_app", { appId: String(gameId) }).catch(() => null),
       invoke("launcher_list_protons").catch(() => []),
+      invoke("prereqs_status_for_app", { appId: String(gameId) }).catch(() => []),
     ]);
 
     if (state.panelGameId !== gameId) return;
 
+    const prereqsBanner = renderPrereqsBanner(prereqs);
+    const prereqBlock = (prereqs || []).some(p => !p.satisfied)
+      ? "Install the required prerequisite first (see banner above)"
+      : "";
     const tatuBanner = renderTatuBanner(tatuStatus, currentBackend, launcherGame, protons);
     const banner = renderCeBanner(ceStatus);
-    const runtimeSection = renderRuntimeSection(runtimeFeatures);
+    const runtimeSection = renderRuntimeSection(runtimeFeatures, prereqBlock);
     const tablesSection = renderTablesSection(gameId, tables);
     const searchBar = renderSearchBar(gameId);
 
     const orphansBanner = renderOrphansBanner(orphans, gameId);
-    panel.innerHTML = tatuBanner + banner + orphansBanner + runtimeSection + tablesSection + searchBar;
+    panel.innerHTML = prereqsBanner + tatuBanner + banner + orphansBanner + runtimeSection + tablesSection + searchBar;
 
+    wirePrereqsBanner(panel, gameId);
     wireTatuBanner(panel, gameId, launcherGame);
     wireBanner(panel, gameId);
     wireOrphansBanner(panel, gameId);

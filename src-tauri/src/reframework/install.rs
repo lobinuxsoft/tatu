@@ -3,8 +3,8 @@
 use std::io::Cursor;
 use std::path::Path;
 
-use crate::reframework::{InstallReport, ReframeworkError};
 use crate::reframework::download::{download_asset, fetch_latest_release};
+use crate::reframework::{InstallReport, ReframeworkError};
 
 /// Fetch the latest REFramework nightly and extract its full payload
 /// into `game_dir`. Idempotent: re-running overwrites the existing
@@ -14,9 +14,7 @@ use crate::reframework::download::{download_asset, fetch_latest_release};
 /// Returns the version tag landed + byte count for the UI banner.
 pub fn install(game_dir: &Path) -> Result<InstallReport, ReframeworkError> {
     if !game_dir.is_dir() {
-        return Err(ReframeworkError::NoGameDir(
-            game_dir.display().to_string(),
-        ));
+        return Err(ReframeworkError::NoGameDir(game_dir.display().to_string()));
     }
     let release = fetch_latest_release()?;
     let bytes = download_asset(&release.asset_url)?;
