@@ -34,23 +34,33 @@ pub fn socket_path_for(pid: i32) -> std::path::PathBuf {
     std::path::PathBuf::from(format!("/tmp/cheat-runtime-{pid}.sock"))
 }
 
-/// Win32-side path the bridge binds its AF_UNIX listener on. Wine
-/// translates `C:\users\Public\tatu-bridge.sock` to
-/// `<wineprefix>/drive_c/users/Public/tatu-bridge.sock` on the Linux
-/// filesystem; the tracker uses [`bridge_socket_path_linux`] to dial
-/// the same socket as a regular Unix domain socket.
+/// Win32-side path the bridge writes its TCP port to after binding
+/// `127.0.0.1:0` (kernel-assigned). The tracker reads this file from
+/// the wineprefix-mirrored path [`bridge_port_file_path_linux`] to
+/// discover which port to dial.
 ///
-/// One socket per wineprefix (= per game running). The path is
-/// stable, no PID suffix, so the tracker can compute it from
-/// `STEAM_COMPAT_DATA_PATH` without first scraping a PID.
-pub const BRIDGE_SOCKET_WIN_PATH: &str = r"C:\users\Public\tatu-bridge.sock";
+/// Why TCP localhost instead of AF_UNIX: AF_UNIX in Wine's Winsock
+/// fails with `WSAEAFNOSUPPORT` on some Proton builds (notably
+/// Proton Experimental). TCP localhost is first-class in Wine since
+/// 1.x and works against any Proton — Wine binds against the host
+/// Linux kernel's network stack, so a Linux-side `TcpStream::connect`
+/// reaches the in-prefix bridge directly.
+///
+/// One file per wineprefix (= per game running). Bridge replaces it
+/// on every fresh bind; tracker re-reads on every connect.
+pub const BRIDGE_PORT_FILE_WIN_PATH: &str = r"C:\users\Public\tatu-bridge.port";
 
-/// Linux-side view of the bridge AF_UNIX socket. `prefix` is the
-/// game's `STEAM_COMPAT_DATA_PATH` (i.e. `<steamapps>/compatdata/<appid>/pfx`
-/// up through the `pfx` directory).
-pub fn bridge_socket_path_linux(prefix: &std::path::Path) -> std::path::PathBuf {
-    prefix.join("drive_c/users/Public/tatu-bridge.sock")
+/// Linux-side view of the bridge's port-discovery file. `prefix` is
+/// the game's `STEAM_COMPAT_DATA_PATH/pfx`.
+pub fn bridge_port_file_path_linux(prefix: &std::path::Path) -> std::path::PathBuf {
+    prefix.join("drive_c/users/Public/tatu-bridge.port")
 }
+
+/// Host the bridge always binds to. Wine forwards localhost binds
+/// straight to the Linux kernel's loopback, so the Linux-side
+/// `TcpStream::connect("127.0.0.1", port)` reaches the in-prefix
+/// PE listener.
+pub const BRIDGE_HOST: &str = "127.0.0.1";
 
 /// Magic + protocol version sent as a preamble on a new connection.
 /// Lets either side reject a mismatched build cleanly before parsing

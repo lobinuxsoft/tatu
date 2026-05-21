@@ -385,33 +385,54 @@ pub(crate) struct BridgeCtx {
 /// AF_UNIX server loop. Single-threaded, one client at a time. The
 /// tracker is the only legitimate peer; concurrency would only mask
 /// races. Wine forwards AF_UNIX bind/connect to the Linux kernel, so
-/// the socket file lives at
-/// `<wineprefix>/drive_c/users/Public/tatu-bridge.sock` as seen from
-/// Linux.
+/// the port-discovery file at
+/// `<wineprefix>/drive_c/users/Public/tatu-bridge.port` as seen from
+/// Linux. Bind goes to `127.0.0.1:0` (kernel-assigned port); we
+/// write the chosen port to the file so the tracker can `dial it.
+///
+/// Why TCP localhost over AF_UNIX: AF_UNIX in Wine's Winsock fails
+/// `WSAEAFNOSUPPORT` on some Proton builds (notably Proton
+/// Experimental). TCP loopback is first-class in Wine since 1.x —
+/// the bind goes to the host Linux network stack, and a Linux
+/// `TcpStream::connect("127.0.0.1", port)` reaches the in-prefix PE.
 ///
 /// Lives until the peer sends `Request::Shutdown` or the `--launch`
 /// parent terminates us when the game exits.
 fn serve_mode(ctx: Option<BridgeCtx>) -> ExitCode {
-    use tatu_proto::BRIDGE_SOCKET_WIN_PATH;
-    use uds_windows::UnixListener;
+    use std::net::TcpListener;
+    use tatu_proto::{BRIDGE_HOST, BRIDGE_PORT_FILE_WIN_PATH};
 
-    // Clean stale socket from a prior crashed run. UnixListener::bind
-    // refuses to bind on top of an existing path.
-    let _ = std::fs::remove_file(BRIDGE_SOCKET_WIN_PATH);
-
-    let listener = match UnixListener::bind(BRIDGE_SOCKET_WIN_PATH) {
+    let listener = match TcpListener::bind((BRIDGE_HOST, 0u16)) {
         Ok(l) => l,
         Err(e) => {
             log_to(
                 CONNECT_LOG,
-                format_args!("connect: bind {BRIDGE_SOCKET_WIN_PATH}: {e}"),
+                format_args!("connect: TcpListener::bind({BRIDGE_HOST}:0) failed: {e}"),
             );
             return ExitCode::from(7);
         }
     };
+    let port = match listener.local_addr() {
+        Ok(addr) => addr.port(),
+        Err(e) => {
+            log_to(CONNECT_LOG, format_args!("connect: local_addr: {e}"));
+            return ExitCode::from(7);
+        }
+    };
+    // Best-effort: write port for the tracker. A failed write here
+    // doesn't kill the bridge — the tracker can still dial if it
+    // sniffs the port through other means (env var, log scrape).
+    if let Err(e) = std::fs::write(BRIDGE_PORT_FILE_WIN_PATH, port.to_string()) {
+        log_to(
+            CONNECT_LOG,
+            format_args!("connect: write port file {BRIDGE_PORT_FILE_WIN_PATH}: {e}"),
+        );
+    }
     log_to(
         CONNECT_LOG,
-        format_args!("connect: listening on {BRIDGE_SOCKET_WIN_PATH}"),
+        format_args!(
+            "connect: listening on {BRIDGE_HOST}:{port} (wrote {BRIDGE_PORT_FILE_WIN_PATH})"
+        ),
     );
 
     for stream in listener.incoming() {
@@ -421,7 +442,7 @@ fn serve_mode(ctx: Option<BridgeCtx>) -> ExitCode {
                 match serve_client(&mut s, ctx) {
                     Ok(ShouldStop::Yes) => {
                         log_to(CONNECT_LOG, "connect: shutdown received, exiting");
-                        let _ = std::fs::remove_file(BRIDGE_SOCKET_WIN_PATH);
+                        let _ = std::fs::remove_file(BRIDGE_PORT_FILE_WIN_PATH);
                         return ExitCode::SUCCESS;
                     }
                     Ok(ShouldStop::No) => {
@@ -448,7 +469,7 @@ enum ShouldStop {
 }
 
 fn serve_client(
-    stream: &mut uds_windows::UnixStream,
+    stream: &mut std::net::TcpStream,
     ctx: Option<BridgeCtx>,
 ) -> Result<ShouldStop, String> {
     use tatu_proto::{Request, Response, read_frame, read_handshake, write_frame, write_handshake};

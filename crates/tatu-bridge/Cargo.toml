@@ -23,9 +23,6 @@ thiserror = "1"
 # a Linux host skips them silently.
 [target.'cfg(target_os = "windows")'.dependencies]
 tatu-proto = { path = "../tatu-proto" }
-# AF_UNIX in std::os::windows::net is still nightly-only as of Rust
-# 1.93; uds_windows wraps Winsock2 AF_UNIX (Windows 10+ / Wine 7+).
-uds_windows = "1"
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
     "Win32_Security",
