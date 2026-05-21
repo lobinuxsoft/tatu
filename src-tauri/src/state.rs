@@ -40,6 +40,44 @@ pub struct AppState {
     /// Disk size cache (installed + previously measured), keyed by Steam app ID.
     #[serde(default)]
     pub size_cache: HashMap<u64, DiskSize>,
+    /// Per-game cheat backend selection. Maps `app_id` (string form,
+    /// matching the `cheat_runtime_*` commands) to the backend that
+    /// should service its hooks. Missing entries default to
+    /// `GameBackend::Linux` — the existing ptrace runtime. The Bridge
+    /// variant routes value reads / writes / recovery through
+    /// `tatu-bridge --connect` over the wineprefix-local AF_UNIX
+    /// socket; it carries the wineprefix path because the bridge
+    /// socket only makes sense in that context.
+    #[serde(default)]
+    pub cheat_backend: HashMap<String, GameBackend>,
+}
+
+/// Per-game cheat backend selection. Persisted in [`AppState`] so the
+/// user's per-title preference survives across tracker restarts.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum GameBackend {
+    /// Native Linux ptrace runtime via `cheat-runtime`. Default.
+    Linux,
+    /// Bridge backend — `tatu-bridge --connect` under Wine. Requires
+    /// the wineprefix root so the tracker can compute the
+    /// `<prefix>/drive_c/users/Public/tatu-bridge.sock` path.
+    Bridge { wineprefix: String },
+}
+
+impl GameBackend {
+    pub fn kind_str(&self) -> &'static str {
+        match self {
+            GameBackend::Linux => "linux",
+            GameBackend::Bridge { .. } => "bridge",
+        }
+    }
+}
+
+impl Default for GameBackend {
+    fn default() -> Self {
+        GameBackend::Linux
+    }
 }
 
 impl AppState {
