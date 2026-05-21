@@ -73,6 +73,11 @@ impl ActiveCheat {
             feature_uuid,
             pid: self.pid.as_raw(),
             exe,
+            // ActiveCheat is the Linux ptrace executor's product; the
+            // bridge backend persists records through its own helper
+            // with backend: Bridge + wineprefix populated.
+            backend: crate::persisted_hook::BackendKind::Linux,
+            wineprefix: None,
             started_at,
             writes: self
                 .undo

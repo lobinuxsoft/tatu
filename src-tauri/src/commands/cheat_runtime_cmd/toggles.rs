@@ -118,6 +118,8 @@ pub fn cheat_runtime_disable(
         feature_uuid: feature_uuid.clone(),
         pid: 0,
         exe: String::new(),
+        backend: cheat_runtime::BackendKind::default(),
+        wineprefix: None,
         started_at: None,
         writes: Vec::new(),
         allocs: Vec::new(),

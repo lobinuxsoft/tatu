@@ -132,6 +132,8 @@ pub fn cheat_runtime_orphans_dismiss(app_id: String, feature_uuid: String) -> Re
         feature_uuid,
         pid: 0,
         exe: String::new(),
+        backend: cheat_runtime::BackendKind::default(),
+        wineprefix: None,
         started_at: None,
         writes: Vec::new(),
         allocs: Vec::new(),
