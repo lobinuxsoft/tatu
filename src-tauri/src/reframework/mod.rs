@@ -60,8 +60,6 @@ pub enum ReframeworkError {
     NoGameDir(String),
     #[error("github api: {0}")]
     Network(Box<ureq::Error>),
-    #[error("github release json malformed: {0}")]
-    BadJson(String),
     #[error("REFramework.zip asset missing from latest release")]
     AssetMissing,
     #[error("zip extract: {0}")]

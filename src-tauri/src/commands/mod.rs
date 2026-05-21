@@ -7,6 +7,7 @@ pub mod disk_cmd;
 pub mod drm_cmd;
 pub mod launcher_config_cmd;
 pub mod misc_cmd;
+pub mod prereqs_cmd;
 pub mod state_cmd;
 pub mod sync_cmd;
 pub mod tatu_launcher_cmd;

@@ -36,6 +36,16 @@ pub fn cheat_runtime_enable(
         }
     }
 
+    // Defence in depth: the frontend already dims toggle rows when a
+    // prereq is missing, but a stale state.json or a script-driven
+    // invocation could route here without the gate. Refusing early
+    // also gives the user a more actionable error than "AOB scan
+    // failed at 0x140000000" minutes later.
+    crate::commands::prereqs_cmd::check_feature_prereqs(&app_id, &feature_uuid).map_err(|e| {
+        eprintln!("[enable {feature_uuid}] prereq gate: {e}");
+        e
+    })?;
+
     let (exe, script_src) = locate_feature_script(&app_id, &feature_uuid).map_err(|e| {
         eprintln!("[enable {feature_uuid}] locate_feature_script: {e}");
         e

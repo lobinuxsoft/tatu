@@ -107,6 +107,8 @@ pub fn run() {
             commands::launcher_config_cmd::launcher_config_set_for_app,
             commands::launcher_config_cmd::launcher_config_unset_app,
             commands::launcher_config_cmd::launcher_list_protons,
+            commands::prereqs_cmd::prereqs_status_for_app,
+            commands::prereqs_cmd::prereqs_install,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
