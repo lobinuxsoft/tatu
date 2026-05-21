@@ -18,6 +18,8 @@ mod remote_mem;
 mod scan;
 #[cfg(target_os = "windows")]
 mod win;
+#[cfg(target_os = "windows")]
+mod win_backend;
 
 #[cfg(target_os = "windows")]
 fn main() -> std::process::ExitCode {

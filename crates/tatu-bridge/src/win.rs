@@ -532,6 +532,16 @@ fn dispatch(req: tatu_proto::Request, ctx: Option<BridgeCtx>) -> tatu_proto::Res
             Ok(c) => handle_write_chain_value(c, base, &offsets, value),
         },
 
+        Request::EnableScript { script_text } => match require_ctx(ctx) {
+            Err(e) => e,
+            Ok(c) => handle_enable_script(c, &script_text),
+        },
+
+        Request::DisableScript { outcome } => match require_ctx(ctx) {
+            Err(e) => e,
+            Ok(c) => handle_disable_script(c, outcome),
+        },
+
         other => Response::Err {
             message: format!("{other:?} not implemented in Phase 3 of #106"),
         },
@@ -639,6 +649,63 @@ fn handle_read_chain_value(
         Err(e) => tatu_proto::Response::Err {
             message: format!("ReadChainValue: {e}"),
         },
+    }
+}
+
+fn handle_enable_script(ctx: BridgeCtx, script_text: &str) -> tatu_proto::Response {
+    use super::win_backend::Win32Backend;
+    use tatu_engine::Engine;
+
+    let script = match tatu_engine::parser::parse(script_text) {
+        Ok(s) => s,
+        Err(e) => {
+            return tatu_proto::Response::Err {
+                message: format!("EnableScript: parse: {e}"),
+            };
+        }
+    };
+    let backend = Win32Backend::new(ctx.process, ctx.target_pid);
+    let mut engine = Engine::new(backend);
+    match engine.enable(&script) {
+        Ok(outcome) => tatu_proto::Response::EnableScript {
+            outcome: engine_outcome_to_wire(outcome),
+        },
+        Err(e) => tatu_proto::Response::Err {
+            message: format!("EnableScript: {e}"),
+        },
+    }
+}
+
+fn handle_disable_script(ctx: BridgeCtx, wire: tatu_proto::WireOutcome) -> tatu_proto::Response {
+    use super::win_backend::Win32Backend;
+
+    let mut outcome = wire_outcome_to_engine(wire);
+    let mut backend = Win32Backend::new(ctx.process, ctx.target_pid);
+    tatu_engine::rollback(&mut backend, &mut outcome);
+    tatu_proto::Response::DisableScript
+}
+
+fn engine_outcome_to_wire(outcome: tatu_engine::EnableOutcome) -> tatu_proto::WireOutcome {
+    tatu_proto::WireOutcome {
+        undo: outcome.undo,
+        allocs: outcome
+            .allocs
+            .into_iter()
+            .map(|(symbol, (addr, size))| (symbol, addr, size as u64))
+            .collect(),
+        symbols: outcome.symbols.into_iter().collect(),
+    }
+}
+
+fn wire_outcome_to_engine(wire: tatu_proto::WireOutcome) -> tatu_engine::EnableOutcome {
+    tatu_engine::EnableOutcome {
+        undo: wire.undo,
+        allocs: wire
+            .allocs
+            .into_iter()
+            .map(|(symbol, addr, size)| (symbol, (addr, size as usize)))
+            .collect(),
+        symbols: wire.symbols.into_iter().collect(),
     }
 }
 

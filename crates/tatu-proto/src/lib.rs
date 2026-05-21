@@ -203,9 +203,36 @@ pub enum Request {
         value: WireValue,
     },
 
+    // ---- Phase 7B (#106) — autoassembler script execution -------------
+    /// Parse the supplied CE Auto-Assembler script text, run its
+    /// `[ENABLE]` block through `tatu_engine::Engine` against the
+    /// bridge's `Win32Backend`, and return the resulting
+    /// [`WireOutcome`] so the tracker can persist it for crash
+    /// recovery. The bridge keeps no per-cheat in-memory state —
+    /// every rollback later goes through [`Request::DisableScript`]
+    /// with the same outcome blob.
+    EnableScript { script_text: String },
+    /// Replay the undo log + dealloc every codecave in `outcome`.
+    /// Mirrors `tatu_engine::rollback` against the bridge's backend.
+    DisableScript { outcome: WireOutcome },
+
     /// Tell the server to stop accepting new connections and unbind the
     /// socket. The extension stays loaded — only the IPC channel closes.
     Shutdown,
+}
+
+/// On-wire mirror of `tatu_engine::EnableOutcome`. `HashMap` is
+/// flattened to `Vec` so the serialised form is deterministic
+/// (bincode orders by insertion); the tracker rebuilds maps on
+/// the receiving end.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct WireOutcome {
+    /// `(remote_addr, original_bytes)` in apply order.
+    pub undo: Vec<(u64, Vec<u8>)>,
+    /// `(symbol, addr, size)` for each surviving codecave.
+    pub allocs: Vec<(String, u64, u64)>,
+    /// `(name, addr)` for every symbol the enable bound.
+    pub symbols: Vec<(String, u64)>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -224,6 +251,10 @@ pub enum Response {
     WalkChain { addr: u64 },
     ChainValue { value: WireValue },
     ChainWritten,
+
+    // ---- Phase 7B (#106) — autoassembler script execution -------------
+    EnableScript { outcome: WireOutcome },
+    DisableScript,
 
     ShutdownAck,
     Err { message: String },
@@ -452,6 +483,34 @@ mod tests {
             let got: Request = read_frame(&mut cur).unwrap();
             assert_eq!(&got, expected);
         }
+    }
+
+    #[test]
+    fn phase7_enable_script_roundtrip() {
+        let outcome = WireOutcome {
+            undo: vec![
+                (0x1400_1000, vec![0x48, 0x8B, 0x05]),
+                (0x1400_2000, vec![0xC3]),
+            ],
+            allocs: vec![("newmem".into(), 0x1400_5000, 4096)],
+            symbols: vec![
+                ("base_address".into(), 0x1400_0000),
+                ("newmem".into(), 0x1400_5000),
+            ],
+        };
+        let req = Request::DisableScript {
+            outcome: outcome.clone(),
+        };
+        let resp = Response::EnableScript { outcome };
+
+        let mut buf = Vec::new();
+        write_frame(&mut buf, &req).unwrap();
+        write_frame(&mut buf, &resp).unwrap();
+        let mut cur = Cursor::new(buf);
+        let got_req: Request = read_frame(&mut cur).unwrap();
+        let got_resp: Response = read_frame(&mut cur).unwrap();
+        assert_eq!(got_req, req);
+        assert_eq!(got_resp, resp);
     }
 
     #[test]
