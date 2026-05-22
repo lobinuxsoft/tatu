@@ -32,7 +32,6 @@ Tatu is a desktop application for tracking what is in your Steam backlog and app
 - **Steam library integration** — reads owned games, install state, and play time.
 - **`.CT` import** — opens existing Cheat Engine tables and surfaces toggles in the tracker UI.
 - **Aurora-style cheat backend** — `tatu-bridge.exe` runs as a Win32 worker inside the same Proton invocation as the game (shared SLR container + wineserver), so `OpenProcess` / `VirtualAllocEx` / `WriteProcessMemory` / `ReadProcessMemory` all see the game's PID natively.
-- **Linux ptrace fallback** — `cheat-runtime` keeps a ptrace-based backend for native Linux games (no bridge needed).
 - **Steam compat tool packaging** — `tatu-launcher` is a drop-in for `~/.steam/root/compatibilitytools.d/` that delegates to the user's real Proton (Experimental / GE / etc.); the per-game Proton picker stays meaningful.
 - **Orphan-hook recovery** — persistent undo log of every code patch so an interrupted session can be rolled back cleanly.
 
@@ -69,19 +68,13 @@ Tatu is **early-stage and not yet production-ready**. The Win32 bridge has been 
 
 No public releases have been cut yet — the version listed in `Cargo.toml` reflects pre-release work.
 
-## Backend selection
+## Scope
 
-Tatu ships two cheat backends; the tracker picks one per game. The bridge under Wine is the **preferred** path for every Windows game and the only path that handles modern engines correctly; the Linux ptrace runtime is a **fallback** kept alive for native Linux titles where the bridge cannot apply.
+Tatu runs cheats exclusively through `tatu-bridge` — a Win32 worker that lives inside the same Proton invocation as the game. Linux-native ELF games are out of scope (no wineprefix, nothing for the bridge to attach to); anti-cheat games (EAC / BattlEye / Vanguard) are explicitly refused.
 
-| Game runs as… | Preferred backend | Why |
-|---|---|---|
-| Windows binary under Proton/Wine | **`tatu-bridge` (Bridge)** | `OpenProcess` / `VirtualAllocEx` / `WriteProcessMemory` are native Win32 calls under Wine; cross-process `WriteProcessMemory` plus `SuspendThread` + `FlushInstructionCache` is the only safe way to patch `.text` on Win64 (kernel auto-lifts protection but the i-cache stays stale, see PR [#121](https://github.com/lobinuxsoft/tatu/pull/121)). |
-| Linux native ELF | `cheat-runtime` (Linux ptrace) | No wineprefix exists; the bridge has nothing to attach to. `process_vm_writev` + `PTRACE_ATTACH` is the only available primitive. |
-| Anti-cheat (EAC / BattlEye / Vanguard) | **Refused** | Out of scope (see "What Tatu is NOT"). Tracker detects and refuses both backends. |
+The Enable / Disable toggle per game lives in the cheats panel banner — *Enable Tatu* installs the compat tool drop-in idempotently, patches Steam's `CompatToolMapping`, writes the per-game block to `launcher.toml`, and records the wineprefix in the tracker state. *Disable Tatu* flips `tatu_enabled` to false in `launcher.toml` and clears the tracker entry, but keeps the per-game `proton` and `target_exe` overrides so a disable / re-enable cycle survives without re-configuring.
 
-The toggle is per-game and lives in the cheats panel banner — *Switch to Tatu* installs the compat tool drop-in idempotently, patches Steam's `CompatToolMapping`, and persists the bridge choice in the tracker state. *Revert to Linux* flips the routing only; `config.vdf` stays at whatever the user last set so a manual Proton-GE override survives toggling cheats off.
-
-**Why the bridge wins for Proton games.** `process_vm_writev` over an emulated Win64 address space lands at file-mapped pages whose protection bits Wine has not synchronised with the kernel's actual mapping; cross-process patches succeed silently and corrupt the i-cache. Doing the patch from a Win32 worker inside the same Proton invocation hits `WriteProcessMemory`'s atomic `SuspendThread` + `VirtualProtect` + `FlushInstructionCache` cycle that the platform actually guarantees. For Unreal Engine titles in particular, anything else risks `FMallocBinned2` canary mismatches after a few seconds of combat.
+**Why the bridge is the only path.** `process_vm_writev` from a Linux process into an emulated Win64 address space lands at file-mapped pages whose protection bits Wine has not synchronised with the kernel's actual mapping; cross-process patches succeed silently and corrupt the i-cache. Doing the patch from a Win32 worker inside the same Proton invocation hits `WriteProcessMemory`'s atomic `SuspendThread` + `VirtualProtect` + `FlushInstructionCache` cycle the platform actually guarantees. For Unreal Engine titles in particular, anything else risks `FMallocBinned2` canary mismatches after seconds of combat.
 
 ## Building from source
 

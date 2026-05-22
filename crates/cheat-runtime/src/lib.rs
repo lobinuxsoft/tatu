@@ -1,38 +1,34 @@
-//! Linux ptrace fallback backend for the Tatu cheat runtime.
+//! Internal cheat-engine library — shared logic + Linux primitives.
 //!
 //! # Status
 //!
-//! This crate is the **fallback** path. The preferred backend for
-//! every Windows game running under Proton/Wine is `tatu-bridge`
-//! (the [`bridge_client`] module wires the tracker to it).
-//! `tatu-bridge` runs as a Win32 worker inside the same Proton
-//! invocation as the game; the atomic `WriteProcessMemory` +
-//! `SuspendThread` + `FlushInstructionCache` cycle hits the game's
-//! actual address space — the only safe way to patch `.text` on
-//! Win64 (the i-cache stays stale otherwise).
+//! Not surfaced as a backend from the tracker. The Win32 bridge
+//! (`tatu-bridge`) is the only path the user can enable for a game;
+//! its [`bridge_client`] module is what the tracker dials at runtime.
 //!
-//! Keep this crate for:
+//! This crate stays alive for three reasons:
 //!
-//! - **Linux-native ELF games**, where no wineprefix exists and the
-//!   bridge has nothing to attach to. `process_vm_writev` +
-//!   `PTRACE_ATTACH` is the only available primitive.
-//! - **Tests + tooling** that operate on a local Linux process
-//!   without the cross-compile / Wine bootstrap dance the bridge
-//!   needs.
+//! - **Shared logic**: manifest schema, CT importer, value-chain
+//!   parser, Aurora JSON loader, freeze registry. The bridge runs
+//!   on Windows but consumes the same on-disk manifests.
+//! - **Tests + research**: the local Linux ptrace primitives are
+//!   handy for verifying parser / executor changes without the
+//!   cross-compile + Wine bootstrap the bridge needs.
+//! - **Persistence + recovery**: [`PersistedHook`](persisted_hook::PersistedHook)
+//!   round-trips both Bridge and (legacy) Linux records; the tracker
+//!   drops legacy Linux records on recovery (no live re-attach), but
+//!   the disk format keeps both shapes for backward compatibility.
 //!
 //! Anti-cheat games (EAC / BattlEye / Vanguard) are explicitly out
-//! of scope on both backends.
+//! of scope.
 //!
 //! # Architecture
 //!
-//! The crate is split into orthogonal layers; the lowest one is
-//! `memory` + `maps`, providing out-of-process read/write to a
-//! target Linux process via `process_vm_readv` / `process_vm_writev`
-//! plus enumeration of mapped regions parsed from `/proc/<pid>/maps`.
-//!
-//! Higher layers — pattern scanner, executor, freeze registry and
-//! Aurora JSON loader — sit on top. The CE Auto-Assembler parser
-//! and single-line assembler now live in `tatu-engine` so the
+//! Layered: `memory` + `maps` at the bottom (out-of-process read/
+//! write via `process_vm_readv` / `process_vm_writev` plus parsing
+//! of `/proc/<pid>/maps`), pattern scanner, executor, freeze
+//! registry, and Aurora JSON loader on top. The CE Auto-Assembler
+//! parser and single-line assembler live in `tatu-engine` so the
 //! bridge can share them.
 //!
 //! Design constraints (see `feedback_rust_dod_mandatory` + project

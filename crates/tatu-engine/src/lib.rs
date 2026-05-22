@@ -11,14 +11,14 @@
 //!   that drives a script's lifecycle against any backend
 //!   implementing it.
 //!
-//! Two backends consume the trait today: `cheat-runtime`'s
-//! `LinuxBackend` (ptrace fallback for Linux-native ELF games) and
-//! `tatu-bridge`'s `Win32Backend` (the preferred path for every
-//! Proton/Wine game — see the README's "Backend selection" section
-//! for the why). Memory I/O sits behind
-//! [`tatu_mem::MemoryAccess`]; the [`Backend`] trait adds
-//! cross-process primitives (allocate, suspend, scan) so the engine
-//! can drive both paths from one state machine.
+//! Today only `tatu-bridge`'s `Win32Backend` is wired through the
+//! tracker — Linux-native ELF games are out of scope; see the
+//! README's "Scope" section. `cheat-runtime`'s `LinuxBackend`
+//! still implements the trait for tests / local research, but
+//! nothing in the user-facing flow routes through it. Memory I/O
+//! sits behind [`tatu_mem::MemoryAccess`]; the [`Backend`] trait
+//! adds cross-process primitives (allocate, suspend, scan) so the
+//! engine can drive any conforming backend from one state machine.
 
 pub mod asm;
 pub mod backend;
