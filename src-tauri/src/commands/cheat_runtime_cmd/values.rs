@@ -1,15 +1,10 @@
 //! Typed pointer-chain value commands: `cheat_runtime_value_read` /
 //! `_write` / `_freeze`. Each command resolves a Value feature's
-//! `AddrExpr`, walks its offset chain, then drives [`cheat_runtime`]'s
-//! typed read/write/freeze primitives against the resolved address.
-//!
-//! Phase 6 + 8: per-game backend routing. When the user has selected
-//! `GameBackend::Bridge` for an app, read / write / freeze traffic
-//! dials the in-prefix `tatu-bridge --connect` over its TCP loopback
-//! port (Aurora-style — see [`tatu_proto::BRIDGE_HOST`]) and sends
-//! `Request::ReadChainValue` / `WriteChainValue` instead of the local
-//! ptrace path. Freezes also reach the bridge via a per-tick connect-
-//! write-disconnect loop ([`FreezeTarget::Bridge`]).
+//! `AddrExpr`, walks its offset chain, then routes the read / write /
+//! freeze through the in-prefix `tatu-bridge --connect` over its TCP
+//! loopback port (Aurora-style — see [`tatu_proto::BRIDGE_HOST`]).
+//! Freezes reach the bridge via a per-tick connect-write-disconnect
+//! loop ([`FreezeTarget::Bridge`]).
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -17,9 +12,8 @@ use std::sync::Mutex;
 
 use cheat_runtime::bridge_client::BridgeClient;
 use cheat_runtime::{
-    AddrExpr, ChainError, FeatureKind, FreezeRegistry, FreezeTarget, Pid, VType, Value, ValueSpec,
-    find_pid_by_exe, load_manifests_for, parse_addr_expr, read_chain, resolve_addr_expr,
-    walk_chain, write_chain,
+    AddrExpr, FeatureKind, FreezeRegistry, FreezeTarget, VType, Value, ValueSpec,
+    load_manifests_for, parse_addr_expr,
 };
 use serde::Deserialize;
 use tatu_proto::{Request, Response, WireVType, WireValue};
@@ -27,7 +21,7 @@ use tauri::State;
 
 use super::backend::resolve_backend;
 use super::{ActiveCheats, merged_symbols};
-use crate::state::{AppState, GameBackend};
+use crate::state::{AppState, BridgeEntry};
 
 /// Locate a Value feature: returns the owning manifest's `exe`, the
 /// resolved [`ValueSpec`], and the parsed [`AddrExpr`] — saving callers
@@ -70,24 +64,6 @@ fn ensure_symbol_registered(expr: &AddrExpr, symbols: &HashMap<String, u64>) -> 
     Ok(())
 }
 
-fn find_value_target(
-    exe: &str,
-    spec: &ValueSpec,
-    expr: &AddrExpr,
-    active: &ActiveCheats,
-) -> Result<(Pid, u64, VType), String> {
-    let pid = find_pid_by_exe(exe)
-        .ok_or_else(|| format!("game process '{exe}' is not running; launch the game first"))?;
-    let symbols = merged_symbols(active)?;
-    ensure_symbol_registered(expr, &symbols)?;
-    let base = resolve_addr_expr(pid, expr, &symbols).map_err(map_chain_err)?;
-    let final_addr = walk_chain(pid, base, &spec.offsets).map_err(map_chain_err)?;
-    Ok((pid, final_addr, spec.vtype))
-}
-
-fn map_chain_err(e: ChainError) -> String {
-    e.to_string()
-}
 
 #[tauri::command]
 pub fn cheat_runtime_value_read(
@@ -96,32 +72,23 @@ pub fn cheat_runtime_value_read(
     state: State<'_, Mutex<AppState>>,
     active: State<'_, ActiveCheats>,
 ) -> Result<Value, String> {
-    let (exe, spec, expr) = locate_value_feature(&app_id, &feature_uuid)?;
+    let (_exe, spec, expr) = locate_value_feature(&app_id, &feature_uuid)?;
     let symbols = merged_symbols(&active)?;
     ensure_symbol_registered(&expr, &symbols)?;
-    match resolve_backend(&state, &app_id) {
-        GameBackend::Linux => {
-            let pid = find_pid_by_exe(&exe).ok_or_else(|| {
-                format!("game process '{exe}' is not running; launch the game first")
-            })?;
-            read_chain(pid, &expr, &spec.offsets, spec.vtype, &symbols).map_err(map_chain_err)
-        }
-        GameBackend::Bridge { wineprefix } => {
-            let (base, full_offsets) = bridge_chain(&expr, &spec.offsets, &symbols)?;
-            let mut client = bridge_connect(&wineprefix)?;
-            let resp = client
-                .request(Request::ReadChainValue {
-                    base,
-                    offsets: full_offsets,
-                    vtype: vtype_to_wire(spec.vtype),
-                })
-                .map_err(|e| format!("bridge ReadChainValue: {e}"))?;
-            match resp {
-                Response::ChainValue { value } => Ok(wire_to_value(value)),
-                Response::Err { message } => Err(format!("bridge: {message}")),
-                other => Err(format!("bridge: unexpected response {other:?}")),
-            }
-        }
+    let BridgeEntry { wineprefix } = require_bridge(&state, &app_id)?;
+    let (base, full_offsets) = bridge_chain(&expr, &spec.offsets, &symbols)?;
+    let mut client = bridge_connect(&wineprefix)?;
+    let resp = client
+        .request(Request::ReadChainValue {
+            base,
+            offsets: full_offsets,
+            vtype: vtype_to_wire(spec.vtype),
+        })
+        .map_err(|e| format!("bridge ReadChainValue: {e}"))?;
+    match resp {
+        Response::ChainValue { value } => Ok(wire_to_value(value)),
+        Response::Err { message } => Err(format!("bridge: {message}")),
+        other => Err(format!("bridge: unexpected response {other:?}")),
     }
 }
 
@@ -133,7 +100,7 @@ pub fn cheat_runtime_value_write(
     state: State<'_, Mutex<AppState>>,
     active: State<'_, ActiveCheats>,
 ) -> Result<(), String> {
-    let (exe, spec, expr) = locate_value_feature(&app_id, &feature_uuid)?;
+    let (_exe, spec, expr) = locate_value_feature(&app_id, &feature_uuid)?;
     if value.vtype() != spec.vtype {
         return Err(format!(
             "value vtype {:?} does not match feature vtype {:?}",
@@ -143,29 +110,20 @@ pub fn cheat_runtime_value_write(
     }
     let symbols = merged_symbols(&active)?;
     ensure_symbol_registered(&expr, &symbols)?;
-    match resolve_backend(&state, &app_id) {
-        GameBackend::Linux => {
-            let pid = find_pid_by_exe(&exe).ok_or_else(|| {
-                format!("game process '{exe}' is not running; launch the game first")
-            })?;
-            write_chain(pid, &expr, &spec.offsets, value, &symbols).map_err(map_chain_err)
-        }
-        GameBackend::Bridge { wineprefix } => {
-            let (base, full_offsets) = bridge_chain(&expr, &spec.offsets, &symbols)?;
-            let mut client = bridge_connect(&wineprefix)?;
-            let resp = client
-                .request(Request::WriteChainValue {
-                    base,
-                    offsets: full_offsets,
-                    value: value_to_wire(value),
-                })
-                .map_err(|e| format!("bridge WriteChainValue: {e}"))?;
-            match resp {
-                Response::ChainWritten => Ok(()),
-                Response::Err { message } => Err(format!("bridge: {message}")),
-                other => Err(format!("bridge: unexpected response {other:?}")),
-            }
-        }
+    let BridgeEntry { wineprefix } = require_bridge(&state, &app_id)?;
+    let (base, full_offsets) = bridge_chain(&expr, &spec.offsets, &symbols)?;
+    let mut client = bridge_connect(&wineprefix)?;
+    let resp = client
+        .request(Request::WriteChainValue {
+            base,
+            offsets: full_offsets,
+            value: value_to_wire(value),
+        })
+        .map_err(|e| format!("bridge WriteChainValue: {e}"))?;
+    match resp {
+        Response::ChainWritten => Ok(()),
+        Response::Err { message } => Err(format!("bridge: {message}")),
+        other => Err(format!("bridge: unexpected response {other:?}")),
     }
 }
 
@@ -261,7 +219,7 @@ pub fn cheat_runtime_value_freeze(
     let value = req
         .value
         .ok_or_else(|| "value freeze requires the target value when enabling".to_string())?;
-    let (exe, spec, expr) = locate_value_feature(&req.app_id, &req.feature_uuid)?;
+    let (_exe, spec, expr) = locate_value_feature(&req.app_id, &req.feature_uuid)?;
     if value.vtype() != spec.vtype {
         return Err(format!(
             "value vtype {:?} does not match feature vtype {:?}",
@@ -272,27 +230,13 @@ pub fn cheat_runtime_value_freeze(
     let symbols = merged_symbols(&active)?;
     ensure_symbol_registered(&expr, &symbols)?;
 
-    let target = match resolve_backend(&state, &req.app_id) {
-        GameBackend::Linux => {
-            // Resolve once up front; the freeze loop writes to the
-            // resolved leaf address, no need to walk the chain on
-            // every tick.
-            let (pid, addr, _) = find_value_target(&exe, &spec, &expr, &active)?;
-            FreezeTarget::Linux {
-                pid,
-                address: addr,
-                bytes: value_to_le_bytes(value),
-            }
-        }
-        GameBackend::Bridge { wineprefix } => {
-            let (base, full_offsets) = bridge_chain(&expr, &spec.offsets, &symbols)?;
-            FreezeTarget::Bridge {
-                wineprefix: std::path::PathBuf::from(wineprefix),
-                base,
-                offsets: full_offsets,
-                value: value_to_wire(value),
-            }
-        }
+    let BridgeEntry { wineprefix } = require_bridge(&state, &req.app_id)?;
+    let (base, full_offsets) = bridge_chain(&expr, &spec.offsets, &symbols)?;
+    let target = FreezeTarget::Bridge {
+        wineprefix: std::path::PathBuf::from(wineprefix),
+        base,
+        offsets: full_offsets,
+        value: value_to_wire(value),
     };
     freezes
         .start(freeze_key(&req.app_id, &req.feature_uuid), target, None)
@@ -300,17 +244,16 @@ pub fn cheat_runtime_value_freeze(
     Ok(())
 }
 
+fn require_bridge(
+    state: &State<'_, Mutex<AppState>>,
+    app_id: &str,
+) -> Result<BridgeEntry, String> {
+    resolve_backend(state, app_id).ok_or_else(|| {
+        format!("Tatu is not enabled for appid {app_id} — click 'Enable Tatu' in the cheats panel banner")
+    })
+}
+
 fn freeze_key(app_id: &str, feature_uuid: &str) -> String {
     format!("value:{app_id}:{feature_uuid}")
 }
 
-fn value_to_le_bytes(value: Value) -> Vec<u8> {
-    match value {
-        Value::U32(v) => v.to_le_bytes().to_vec(),
-        Value::I32(v) => v.to_le_bytes().to_vec(),
-        Value::U64(v) => v.to_le_bytes().to_vec(),
-        Value::I64(v) => v.to_le_bytes().to_vec(),
-        Value::F32(v) => v.to_le_bytes().to_vec(),
-        Value::F64(v) => v.to_le_bytes().to_vec(),
-    }
-}

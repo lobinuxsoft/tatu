@@ -36,17 +36,13 @@ use std::path::Path;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use cheat_runtime::{ActiveCheat, FreezeRegistry, Pid};
+use cheat_runtime::FreezeRegistry;
 use tatu_proto::{BRIDGE_HOST, WireOutcome, bridge_port_file_path_linux};
 
-/// One enabled cheat as seen by the registry. The variant decides
-/// which backend will service the eventual disable: a Linux record
-/// keeps the live [`ActiveCheat`] so its in-memory undo log is the
-/// source of truth; a Bridge record keeps the [`WireOutcome`] the
-/// bridge returned (the bridge holds no per-cheat state) plus the
-/// wineprefix it lives in.
+/// One enabled cheat as seen by the registry. The bridge holds no
+/// per-cheat state, so the registry keeps the [`WireOutcome`] it
+/// returned + the wineprefix to dial for the eventual disable.
 pub enum ActiveCheatEntry {
-    Linux(ActiveCheat),
     Bridge {
         wineprefix: String,
         outcome: WireOutcome,
@@ -57,7 +53,6 @@ pub enum ActiveCheatEntry {
 impl ActiveCheatEntry {
     pub fn symbols(&self) -> HashMap<String, u64> {
         match self {
-            ActiveCheatEntry::Linux(c) => c.symbols().clone(),
             ActiveCheatEntry::Bridge { symbols, .. } => symbols.clone(),
         }
     }
@@ -66,21 +61,12 @@ impl ActiveCheatEntry {
 /// Tauri-managed registry of currently enabled cheats, keyed by feature UUID.
 pub type ActiveCheats = Mutex<HashMap<String, ActiveCheatEntry>>;
 
-/// True if `/proc/<pid>/` still exists — the lightest possible liveness
-/// check. Used to detect when the user closed and re-launched the game
-/// out-of-band; without this the enable shortcut returns the registry
-/// entry from the dead PID and the new game never gets hooked.
-pub(super) fn pid_is_alive(pid: Pid) -> bool {
-    std::path::Path::new(&format!("/proc/{}", pid.as_raw())).exists()
-}
-
-/// Drop every active cheat whose backing process is gone. Linux entries
-/// are checked via `/proc/<pid>/`; Bridge entries are checked by trying
-/// a short-timeout TCP connect to the wineprefix's port file — the
-/// bridge `--connect` process is killed by its `--launch` parent when
-/// the game exits, so a refused connection means the cheat is orphaned.
+/// Drop every active cheat whose bridge is gone. The bridge
+/// `--connect` process is killed by its `--launch` parent when the
+/// game exits, so a refused connection on the port file means the
+/// cheat is orphaned.
 ///
-/// When a Bridge entry is purged, any freeze loops keyed on its
+/// When an entry is purged, any freeze loops keyed on its
 /// `feature_uuid` are also cancelled so the UI / disk state lines up
 /// with the dead process. Freeze workers self-abort after ~1 s of
 /// consecutive errors anyway, but the explicit stop avoids the brief
@@ -95,7 +81,6 @@ pub(super) fn purge_stale_cheats(
     let stale: Vec<String> = guard
         .iter()
         .filter_map(|(uuid, entry)| match entry {
-            ActiveCheatEntry::Linux(c) if !pid_is_alive(c.pid()) => Some(uuid.clone()),
             ActiveCheatEntry::Bridge { wineprefix, .. } if !bridge_is_alive(wineprefix) => {
                 Some(uuid.clone())
             }

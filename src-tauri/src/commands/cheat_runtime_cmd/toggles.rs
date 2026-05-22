@@ -1,6 +1,7 @@
-//! `cheat_runtime_enable` / `cheat_runtime_disable` — drive the executor
+//! `cheat_runtime_enable` / `cheat_runtime_disable` — drive the bridge
 //! against a per-feature AA script, persist the undo log for crash
-//! recovery, route through the per-game backend (Phase 7B of #106).
+//! recovery. Every supported game routes through the Win32 bridge;
+//! the legacy Linux ptrace path was dropped post-#126.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -8,15 +9,15 @@ use std::sync::Mutex;
 
 use cheat_runtime::bridge_client::BridgeClient;
 use cheat_runtime::{
-    BackendKind, Engine, FeatureKind, FreezeRegistry, PersistedAlloc, PersistedHook,
-    PersistedWrite, find_pid_by_exe, load_manifests_for, parse_script,
+    BackendKind, FeatureKind, FreezeRegistry, PersistedAlloc, PersistedHook, PersistedWrite,
+    load_manifests_for,
 };
 use tatu_proto::{Request, Response, WireOutcome};
 use tauri::State;
 
 use super::backend::resolve_backend;
 use super::{ActiveCheatEntry, ActiveCheats, purge_stale_cheats};
-use crate::state::{AppState, GameBackend};
+use crate::state::AppState;
 
 #[tauri::command]
 pub fn cheat_runtime_enable(
@@ -51,60 +52,21 @@ pub fn cheat_runtime_enable(
         e
     })?;
 
-    match resolve_backend(&state, &app_id) {
-        GameBackend::Linux => enable_linux(&app_id, &feature_uuid, &exe, &script_src, &active),
-        GameBackend::Bridge { wineprefix } => enable_bridge(
-            &app_id,
-            &feature_uuid,
-            &exe,
-            &script_src,
-            &wineprefix,
-            &active,
-        ),
-    }
-}
-
-fn enable_linux(
-    app_id: &str,
-    feature_uuid: &str,
-    exe: &str,
-    script_src: &str,
-    active: &ActiveCheats,
-) -> Result<(), String> {
-    let pid = find_pid_by_exe(exe).ok_or_else(|| {
-        let msg = format!("game process '{exe}' is not running; launch the game first");
+    let bridge = resolve_backend(&state, &app_id).ok_or_else(|| {
+        let msg = format!(
+            "Tatu is not enabled for appid {app_id} — click 'Enable Tatu' in the cheats panel banner"
+        );
         eprintln!("[enable {feature_uuid}] {msg}");
         msg
     })?;
-    eprintln!(
-        "[enable {feature_uuid}] linux backend, pid {}",
-        pid.as_raw()
-    );
-    let script = parse_script(script_src).map_err(|e| format!("parse: {e}"))?;
-    let mut engine = Engine::new(pid);
-    let cheat = engine.enable(&script).map_err(|e| format!("enable: {e}"))?;
-    eprintln!(
-        "[enable {feature_uuid}] linux success, symbols={:?}",
-        cheat.symbols().keys().collect::<Vec<_>>()
-    );
-
-    let record = cheat.to_persisted(
-        app_id.to_string(),
-        feature_uuid.to_string(),
-        exe.to_string(),
-        Some(chrono_now_iso8601()),
-    );
-    if let Err(e) = record.write() {
-        eprintln!(
-            "[enable {feature_uuid}] WARNING: failed to persist undo log: {e}. Recovery on next launch will not be available."
-        );
-    }
-
-    let mut guard = active
-        .lock()
-        .map_err(|e| format!("active registry poisoned: {e}"))?;
-    guard.insert(feature_uuid.to_string(), ActiveCheatEntry::Linux(cheat));
-    Ok(())
+    enable_bridge(
+        &app_id,
+        &feature_uuid,
+        &exe,
+        &script_src,
+        &bridge.wineprefix,
+        &active,
+    )
 }
 
 fn enable_bridge(
@@ -211,7 +173,6 @@ pub fn cheat_runtime_disable(
         guard.remove(&feature_uuid)
     };
     let result: Result<(), String> = match entry {
-        Some(ActiveCheatEntry::Linux(c)) => c.disable().map_err(|e| format!("disable: {e}")),
         Some(ActiveCheatEntry::Bridge {
             wineprefix,
             outcome,

@@ -40,49 +40,44 @@ pub struct AppState {
     /// Disk size cache (installed + previously measured), keyed by Steam app ID.
     #[serde(default)]
     pub size_cache: HashMap<u64, DiskSize>,
-    /// Per-game cheat backend selection. Maps `app_id` (string form,
-    /// matching the `cheat_runtime_*` commands) to the backend that
-    /// should service its hooks. Missing entries default to
-    /// `GameBackend::Linux` — the existing ptrace runtime. The Bridge
-    /// variant routes value reads / writes / recovery through
-    /// `tatu-bridge --connect` over the wineprefix-local AF_UNIX
-    /// socket; it carries the wineprefix path because the bridge
-    /// socket only makes sense in that context.
-    #[serde(default)]
-    pub cheat_backend: HashMap<String, GameBackend>,
+    /// Per-game cheat bridge attachment. Presence of a key means the
+    /// user enabled Tatu for that appid; the value carries the
+    /// wineprefix the bridge will dial. Missing keys mean "Tatu
+    /// disabled" — the tracker won't route any cheats for that game.
+    ///
+    /// Old `kind: "linux"` entries (pre-drop) ignore the extra `kind`
+    /// field if present, but lack of a `wineprefix` makes them fail
+    /// to parse; that's intentional, the load path drops malformed
+    /// rows so a stale Linux entry quietly disappears without
+    /// breaking the rest of the state.
+    #[serde(default, deserialize_with = "deserialize_cheat_backend")]
+    pub cheat_backend: HashMap<String, BridgeEntry>,
 }
 
-/// Per-game cheat backend selection. Persisted in [`AppState`] so the
-/// user's per-title preference survives across tracker restarts.
-///
-/// See README's "Backend selection" section for the decision rules.
-/// In short: `Bridge` is the preferred path for every Windows game
-/// under Proton/Wine; `Linux` is the fallback kept for Linux-native
-/// ELF games (no wineprefix, nothing for the bridge to attach to).
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "kind", rename_all = "lowercase")]
-pub enum GameBackend {
-    /// Fallback Linux ptrace runtime via `cheat-runtime`. Default
-    /// when no per-game choice was persisted — also the only
-    /// applicable backend for Linux-native ELF games.
-    #[default]
-    Linux,
-    /// Preferred Bridge backend for Proton/Wine games — `tatu-bridge`
-    /// running as a Win32 worker inside the same Proton invocation.
-    /// Carries the wineprefix root so the tracker can resolve the
-    /// in-prefix port file written by the bridge on bind
-    /// (`<prefix>/drive_c/users/Public/tatu-bridge.port`, TCP
-    /// loopback Aurora-style — PR #121).
-    Bridge { wineprefix: String },
+/// Bridge-attached game record. The previous tagged-enum shape
+/// (`GameBackend::Bridge { wineprefix }`) deserialises into this
+/// because Serde silently ignores the extra `kind` field — no
+/// migration helper needed for state.json files produced before
+/// the Linux backend was dropped.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BridgeEntry {
+    pub wineprefix: String,
 }
 
-impl GameBackend {
-    pub fn kind_str(&self) -> &'static str {
-        match self {
-            GameBackend::Linux => "linux",
-            GameBackend::Bridge { .. } => "bridge",
-        }
-    }
+/// Tolerant deserialiser for the `cheat_backend` map. Entries that
+/// fail to parse (legacy `kind: "linux"` rows with no `wineprefix`
+/// field, or anything else corrupt) are skipped instead of poisoning
+/// the whole state.json load — the user can always re-enable from
+/// the cheats panel.
+fn deserialize_cheat_backend<'de, D>(d: D) -> Result<HashMap<String, BridgeEntry>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw: HashMap<String, serde_json::Value> = HashMap::deserialize(d)?;
+    Ok(raw
+        .into_iter()
+        .filter_map(|(k, v)| serde_json::from_value::<BridgeEntry>(v).ok().map(|b| (k, b)))
+        .collect())
 }
 
 impl AppState {

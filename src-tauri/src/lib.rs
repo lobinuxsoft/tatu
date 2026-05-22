@@ -97,6 +97,7 @@ pub fn run() {
             commands::cheat_runtime_cmd::values::cheat_runtime_value_freeze,
             commands::cheat_runtime_cmd::backend::cheat_runtime_backend_get,
             commands::cheat_runtime_cmd::backend::cheat_runtime_backend_set,
+            commands::cheat_runtime_cmd::backend::cheat_runtime_backend_clear,
             commands::cheat_runtime_cmd::backend::cheat_runtime_backend_recommend,
             commands::cheat_search_cmd::open_fearless_search,
             commands::tatu_launcher_cmd::tatu_launcher_status,

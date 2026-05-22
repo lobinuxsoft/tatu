@@ -15,7 +15,7 @@ use std::path::Path;
 
 use cheat_runtime::bridge_client::BridgeClient;
 use cheat_runtime::{
-    ActiveCheat, BackendKind, PersistedHook, load_all_persisted_hooks, load_manifests_for,
+    BackendKind, PersistedHook, load_all_persisted_hooks, load_manifests_for,
 };
 use serde::Serialize;
 use tatu_proto::{Request, Response};
@@ -131,10 +131,15 @@ pub fn cheat_runtime_orphans_restore(app_id: String, feature_uuid: String) -> Re
     );
     match record.backend {
         BackendKind::Linux => {
-            let cheat = ActiveCheat::from_persisted(&record);
-            cheat
-                .disable()
-                .map_err(|e| format!("rollback failed: {e}"))?;
+            // Legacy persisted hook from the pre-drop Linux ptrace
+            // backend. We don't ship that path any more; the safest
+            // thing is to drop the record so the recovery banner stops
+            // surfacing it. Rolling back a Linux ptrace patch from the
+            // tracker now would require re-enabling the deleted module.
+            eprintln!(
+                "[orphans] dropping legacy Linux record for {} (Linux backend removed post-#127)",
+                record.feature_uuid
+            );
         }
         BackendKind::Bridge => {
             restore_via_bridge(&record)?;
