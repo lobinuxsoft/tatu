@@ -97,11 +97,29 @@
 .tatu-version { margin-left: auto; color: var(--fg-muted); font-size: 0.65rem; font-family: var(--font-display); letter-spacing: var(--display-tracking); }
 .tatu-toggle-btn, .tatu-install-btn { margin-left: 0; }
 
-.tatu-proton-label { display: inline-flex; align-items: center; gap: 0.3rem; color: var(--fg-muted); font-family: var(--font-display); font-size: 0.7rem; text-transform: var(--display-transform); letter-spacing: var(--display-tracking); }
-.tatu-proton-select { background: var(--bg-2); color: var(--fg); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 0.15rem 0.4rem; font-size: 0.7rem; font-family: var(--font-display); cursor: pointer; transition: border-color var(--t-fast), background var(--t-fast); }
-.tatu-proton-select:hover:not(:disabled) { border-color: var(--accent); }
+.tatu-proton-label { display: inline-flex; align-items: center; gap: 0.4rem; color: var(--fg-muted); font-family: var(--font-display); font-size: 0.7rem; text-transform: var(--display-transform); letter-spacing: var(--display-tracking); }
+.tatu-proton-select {
+  appearance: none; -webkit-appearance: none; -moz-appearance: none;
+  background-color: var(--bg-2);
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' fill='none' stroke='%238268a8' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 0.5rem center;
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 0.25rem 1.4rem 0.25rem 0.5rem;
+  font-size: 0.7rem;
+  font-family: var(--font-display);
+  letter-spacing: var(--display-tracking);
+  cursor: pointer;
+  transition: border-color var(--t-fast), background-color var(--t-fast);
+  max-width: 16rem; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;
+}
+.tatu-proton-select:hover:not(:disabled) { border-color: var(--accent); background-color: var(--bg-3); }
+.tatu-proton-select:focus { outline: none; border-color: var(--accent); }
 .tatu-proton-select:disabled { opacity: 0.5; cursor: not-allowed; }
-.tatu-proton-saved { border-color: var(--success-strong) !important; background: var(--bg-3) !important; }
+.tatu-proton-select option { background: var(--bg-panel); color: var(--fg); font-family: var(--font-display); }
+.tatu-proton-saved { border-color: var(--accent-bright, var(--accent)) !important; background-color: var(--bg-3) !important; }
 .tatu-proton-error { border-color: var(--danger-strong, #d77) !important; }
 
 .prereqs-banner { display: flex; align-items: center; gap: 0.5rem; }

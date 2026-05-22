@@ -69,12 +69,22 @@ pub fn get_compat_tool_for_app(app_id: &str) -> Result<Option<String>, TatuLaunc
 /// not, a new block is inserted at the end of the
 /// `CompatToolMapping` section. `priority` is set to 250 to match
 /// every existing entry we've seen Steam emit.
+///
+/// Short-circuits to `Ok(())` when the current value already names
+/// our drop-in — no write means we don't need Steam to be closed
+/// (the Steam-running guard exists because writes get clobbered on
+/// client exit, not because reads are unsafe). This lets the
+/// frontend's Switch-to-Tatu flow re-bind state.json + launcher.toml
+/// without forcing the user to close Steam every time they toggle.
 pub fn set_compat_tool_for_app(app_id: &str) -> Result<(), TatuLauncherError> {
+    let path = config_vdf_path()?;
+    let content = fs::read_to_string(&path)?;
+    if parse_tool_for_app(&content, app_id).as_deref() == Some(COMPAT_TOOL_NAME) {
+        return Ok(());
+    }
     if steam_running() {
         return Err(TatuLauncherError::SteamRunning);
     }
-    let path = config_vdf_path()?;
-    let content = fs::read_to_string(&path)?;
     let patched = upsert_entry(&content, app_id, COMPAT_TOOL_NAME, ENTRY_PRIORITY)?;
     write_atomic(&path, &patched)?;
     Ok(())
