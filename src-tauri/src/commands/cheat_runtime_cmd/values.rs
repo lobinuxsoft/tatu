@@ -64,7 +64,6 @@ fn ensure_symbol_registered(expr: &AddrExpr, symbols: &HashMap<String, u64>) -> 
     Ok(())
 }
 
-
 #[tauri::command]
 pub fn cheat_runtime_value_read(
     app_id: String,
@@ -244,10 +243,7 @@ pub fn cheat_runtime_value_freeze(
     Ok(())
 }
 
-fn require_bridge(
-    state: &State<'_, Mutex<AppState>>,
-    app_id: &str,
-) -> Result<BridgeEntry, String> {
+fn require_bridge(state: &State<'_, Mutex<AppState>>, app_id: &str) -> Result<BridgeEntry, String> {
     resolve_backend(state, app_id).ok_or_else(|| {
         format!("Tatu is not enabled for appid {app_id} — click 'Enable Tatu' in the cheats panel banner")
     })
@@ -256,4 +252,3 @@ fn require_bridge(
 fn freeze_key(app_id: &str, feature_uuid: &str) -> String {
     format!("value:{app_id}:{feature_uuid}")
 }
-

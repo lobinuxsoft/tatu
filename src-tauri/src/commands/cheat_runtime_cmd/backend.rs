@@ -82,10 +82,15 @@ pub(super) fn resolve_backend(
 #[tauri::command]
 pub fn cheat_runtime_backend_recommend(app_id: String) -> Result<BridgeEntry, String> {
     let prefix = resolve_wineprefix(&app_id).ok_or_else(|| {
-        format!("no Wine prefix found for appid {app_id} — launch the game once under any Proton first")
+        format!(
+            "no Wine prefix found for appid {app_id} — launch the game once under any Proton first"
+        )
     })?;
     if !matches!(tatu_launcher_status(), TatuLauncherStatus::Installed { .. }) {
-        return Err("Tatu Launcher drop-in not installed — click Install in the cheats panel banner first".to_string());
+        return Err(
+            "Tatu Launcher drop-in not installed — click Install in the cheats panel banner first"
+                .to_string(),
+        );
     }
     Ok(BridgeEntry {
         wineprefix: prefix.to_string_lossy().into_owned(),

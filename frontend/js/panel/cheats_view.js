@@ -73,19 +73,21 @@ function renderCeBanner(status) {
   return `<div class="ce-banner ce-banner-warn">CE Linux not installed <button class="ce-install-btn" data-action="install">Install CE 7.6.6</button></div>`;
 }
 
-// Render the Tatu Launcher backend banner: install state of the Steam
-// compat tool drop-in + per-game backend toggle + Proton picker. Sits
-// above the CE banner because "is the Bridge backend even available
-// for this game" is a precondition for everything else the cheats
-// panel surfaces.
+// Render the Tatu Launcher banner: install state of the Steam compat
+// tool drop-in + per-game Enable / Disable toggle + Proton picker.
+// Sits above the CE banner because Tatu being enabled for this game
+// is the precondition for everything else the cheats panel can do.
 function renderTatuBanner(launcherStatus, currentBackend, launcherGame, protons) {
   const kind = launcherStatus?.kind;
-  const usingBridge = currentBackend?.kind === "bridge";
+  // `currentBackend` is the BridgeEntry for this app or null. Tatu is
+  // "on" when there's a state.json entry AND launcher.toml has
+  // tatu_enabled=true (both sources must agree).
+  const tatuOn = !!currentBackend && !!launcherGame?.tatu_enabled;
 
   if (kind === "not_installed") {
     return (
       `<div class="ce-banner ce-banner-warn tatu-banner">` +
-        `<span>Tatu Launcher backend not installed — bridge attach unavailable for Proton games.</span>` +
+        `<span>Tatu Launcher not installed — required to run cheats on this game.</span>` +
         `<button class="ce-install-btn tatu-install-btn" data-action="tatu-install">Install Tatu</button>` +
       `</div>`
     );
@@ -102,32 +104,32 @@ function renderTatuBanner(launcherStatus, currentBackend, launcherGame, protons)
 
   // Installed. Surface the per-game toggle + Proton picker.
   const version = esc(launcherStatus.version || "?");
-  const pillTxt = usingBridge ? `Tatu Launcher (bridge)` : `Linux ptrace`;
-  const pillCls = usingBridge ? "tatu-pill-on" : "tatu-pill-off";
-  const btnLabel = usingBridge ? "Revert to Linux" : "Switch to Tatu";
-  const btnAction = usingBridge ? "tatu-disable" : "tatu-enable";
+  const pillTxt = tatuOn ? "Tatu: Enabled" : "Tatu: Disabled";
+  const pillCls = tatuOn ? "tatu-pill-on" : "tatu-pill-off";
+  const btnLabel = tatuOn ? "Disable Tatu" : "Enable Tatu";
+  const btnAction = tatuOn ? "tatu-disable" : "tatu-enable";
+  const bannerCls = tatuOn ? "ce-banner-ok" : "ce-banner-warn";
 
   // Render the Proton picker even when the toggle is off so the user
   // can pre-pick before flipping the switch. Disabled state is purely
-  // visual feedback that the choice won't be honoured until Switch.
+  // visual feedback that the choice won't be honoured until Enable.
   const protonOpts = (protons || []).map(p => {
     const sel = p.name === launcherGame?.proton ? " selected" : "";
     return `<option value="${esc(p.name)}"${sel}>${esc(p.name)} (${esc(p.kind)})</option>`;
   }).join("");
   const protonSelector = launcherGame
     ? `<label class="tatu-proton-label">Proton: ` +
-        `<select class="tatu-proton-select" ${usingBridge ? "" : "disabled"}>` +
+        `<select class="tatu-proton-select" ${tatuOn ? "" : "disabled"}>` +
           protonOpts +
         `</select>` +
       `</label>`
     : "";
 
   return (
-    `<div class="ce-banner ce-banner-ok tatu-banner">` +
-      `<span class="tatu-backend-label">Cheat backend:</span>` +
+    `<div class="ce-banner ${bannerCls} tatu-banner">` +
       `<span class="tatu-backend-pill ${pillCls}">${esc(pillTxt)}</span>` +
       protonSelector +
-      `<span class="tatu-version">Tatu ${version}</span>` +
+      `<span class="tatu-version">v${version}</span>` +
       `<button class="ce-install-btn tatu-toggle-btn" data-action="${btnAction}">${esc(btnLabel)}</button>` +
     `</div>`
   );
@@ -147,8 +149,8 @@ function wireTatuBanner(panel, gameId, launcherGame) {
           // Patch order: config.vdf so Steam picks the drop-in on
           // next launch, launcher.toml so the drop-in actually swaps
           // to the bridge for this appid (without this the launcher
-          // passes through — Phase 7C bug), then state.json so the
-          // tracker routes value cheats through the bridge.
+          // passes through), then state.json so the tracker routes
+          // value cheats through the bridge.
           const select = panel.querySelector(".tatu-proton-select");
           const proton = select?.value || launcherGame?.proton || "";
           await invoke("tatu_launcher_set_for_app", { appId: String(gameId) });
@@ -156,18 +158,24 @@ function wireTatuBanner(panel, gameId, launcherGame) {
             appId: String(gameId),
             view: { proton, target_exe: launcherGame?.target_exe || "", tatu_enabled: true },
           });
-          const choice = await invoke("cheat_runtime_backend_recommend", { appId: String(gameId) });
-          await invoke("cheat_runtime_backend_set", { appId: String(gameId), backend: choice });
+          const bridge = await invoke("cheat_runtime_backend_recommend", { appId: String(gameId) });
+          await invoke("cheat_runtime_backend_set", { appId: String(gameId), backend: bridge });
         } else if (action === "tatu-disable") {
-          // Drop the launcher.toml entry too so the launcher reverts
-          // to passthrough — without this the bridge would keep
-          // hooking the game on the next launch even though the
-          // tracker is no longer routing through it.
-          await invoke("launcher_config_unset_app", { appId: String(gameId) });
-          await invoke("cheat_runtime_backend_set", {
-            appId: String(gameId),
-            backend: { kind: "linux" },
-          });
+          // Disable preserves the per-game block in launcher.toml so
+          // proton + target_exe overrides survive a disable/re-enable
+          // cycle — only tatu_enabled flips to false. State.json
+          // entry is cleared so the tracker stops routing.
+          if (launcherGame) {
+            await invoke("launcher_config_set_for_app", {
+              appId: String(gameId),
+              view: {
+                proton: launcherGame.proton || "",
+                target_exe: launcherGame.target_exe || "",
+                tatu_enabled: false,
+              },
+            });
+          }
+          await invoke("cheat_runtime_backend_clear", { appId: String(gameId) });
         }
         await loadCheats(gameId);
       } catch (e) {

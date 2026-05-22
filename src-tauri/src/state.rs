@@ -76,7 +76,11 @@ where
     let raw: HashMap<String, serde_json::Value> = HashMap::deserialize(d)?;
     Ok(raw
         .into_iter()
-        .filter_map(|(k, v)| serde_json::from_value::<BridgeEntry>(v).ok().map(|b| (k, b)))
+        .filter_map(|(k, v)| {
+            serde_json::from_value::<BridgeEntry>(v)
+                .ok()
+                .map(|b| (k, b))
+        })
         .collect())
 }
 

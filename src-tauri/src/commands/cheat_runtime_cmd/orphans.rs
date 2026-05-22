@@ -14,9 +14,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use cheat_runtime::bridge_client::BridgeClient;
-use cheat_runtime::{
-    BackendKind, PersistedHook, load_all_persisted_hooks, load_manifests_for,
-};
+use cheat_runtime::{BackendKind, PersistedHook, load_all_persisted_hooks, load_manifests_for};
 use serde::Serialize;
 use tatu_proto::{Request, Response};
 use tauri::State;
