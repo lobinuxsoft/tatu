@@ -88,8 +88,8 @@ pub use migrate::{MigrateError, MigrateReport, migrate_default_dirs, migrate_dir
 pub use nix::unistd::Pid;
 pub use parser::{ParseError as ScriptParseError, Script, Statement, parse as parse_script};
 pub use persisted_hook::{
-    LoadAllReport as PersistedLoadAllReport, PersistError, PersistedAlloc,
-    PersistedHook, PersistedWrite, load_all as load_all_persisted_hooks, persist_dir,
+    LoadAllReport as PersistedLoadAllReport, PersistError, PersistedAlloc, PersistedHook,
+    PersistedWrite, load_all as load_all_persisted_hooks, persist_dir,
 };
 pub use process::{find_pid_by_exe, find_pids_by_exe};
 pub use scanner::{ParseError as PatternParseError, Pattern, scan, scan_in_process};
