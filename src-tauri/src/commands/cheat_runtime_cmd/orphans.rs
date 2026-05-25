@@ -1,24 +1,12 @@
 //! Orphan-hook recovery: list / restore / dismiss persisted records left
-//! behind by a tracker crash or a forced game exit.
-//!
-//! Phase 6: recovery dispatches on [`cheat_runtime::BackendKind`]. A
-//! `Linux` record replays the undo log via the local ptrace runtime
-//! (existing behaviour). A `Bridge` record dials
-//! `<wineprefix>/drive_c/users/Public/tatu-bridge.sock` and asks the
-//! bridge to restore every byte through `Request::PatchBytes` —
-//! crucial when the trampoline was written from inside the
-//! wineprefix and is only addressable through the bridge's
-//! `OpenProcess` handle.
+//! behind by a tracker crash or a forced game exit. Linux-only
+//! post-pivot #128 — the wine-side bridge recovery path was dropped
+//! along with the bridge architecture.
 
 use std::collections::HashMap;
-use std::path::Path;
 
-use cheat_runtime::bridge_client::BridgeClient;
-use cheat_runtime::{
-    ActiveCheat, BackendKind, PersistedHook, load_all_persisted_hooks, load_manifests_for,
-};
+use cheat_runtime::{ActiveCheat, PersistedHook, load_all_persisted_hooks, load_manifests_for};
 use serde::Serialize;
-use tatu_proto::{Request, Response};
 use tauri::State;
 
 use super::ActiveCheats;
@@ -123,83 +111,16 @@ pub fn cheat_runtime_orphans_restore(app_id: String, feature_uuid: String) -> Re
         return Ok(());
     }
     eprintln!(
-        "[orphans] restoring {} writes via {:?} for pid {} ({})",
+        "[orphans] restoring {} writes for pid {} ({})",
         record.writes.len(),
-        record.backend,
         record.pid,
         record.exe
     );
-    match record.backend {
-        BackendKind::Linux => {
-            let cheat = ActiveCheat::from_persisted(&record);
-            cheat
-                .disable()
-                .map_err(|e| format!("rollback failed: {e}"))?;
-        }
-        BackendKind::Bridge => {
-            restore_via_bridge(&record)?;
-        }
-    }
+    let cheat = ActiveCheat::from_persisted(&record);
+    cheat
+        .disable()
+        .map_err(|e| format!("rollback failed: {e}"))?;
     record.delete().map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-/// Rollback path for a `BackendKind::Bridge` record. Opens the bridge
-/// inside the wineprefix the original enable wrote down, replays the
-/// undo log in reverse via `Request::PatchBytes` (the same wire the
-/// live enable would have used), and asks the bridge to free any
-/// codecaves the original enable allocated. The bridge stays running
-/// — recovery shouldn't kick the game off the bridge just because the
-/// tracker crashed mid-session.
-fn restore_via_bridge(record: &PersistedHook) -> Result<(), String> {
-    let prefix = record
-        .wineprefix
-        .as_deref()
-        .ok_or_else(|| "bridge record missing wineprefix path".to_string())?;
-    let mut client = BridgeClient::connect(Path::new(prefix))
-        .map_err(|e| format!("dial bridge at {prefix}: {e}"))?;
-
-    // Reverse-order replay matches ActiveCheat::disable, which walks
-    // undo entries from last-applied to first-applied — guarantees a
-    // multi-page trampoline disassembles in the opposite order it was
-    // written.
-    for write in record.writes.iter().rev() {
-        let resp = client
-            .request(Request::PatchBytes {
-                addr: write.addr,
-                bytes: write.original.clone(),
-                // We're rolling back; the game is presumably idle
-                // because the user closed the tracker — don't pay
-                // the SuspendThread enumeration cost.
-                suspend_threads: false,
-            })
-            .map_err(|e| format!("bridge PatchBytes @ {:#x}: {e}", write.addr))?;
-        match resp {
-            Response::PatchBytes => {}
-            Response::Err { message } => {
-                return Err(format!("bridge rejected PatchBytes: {message}"));
-            }
-            other => return Err(format!("bridge unexpected response: {other:?}")),
-        }
-    }
-
-    for alloc in &record.allocs {
-        let resp = client
-            .request(Request::RemoteFree { addr: alloc.addr })
-            .map_err(|e| format!("bridge RemoteFree {}: {e}", alloc.symbol))?;
-        match resp {
-            Response::RemoteFreed => {}
-            Response::Err { message } => {
-                // A leaked codecave is annoying, not catastrophic —
-                // log + keep going. The hook is already rolled back.
-                eprintln!(
-                    "[orphans] bridge couldn't free codecave {}@{:#x}: {message}",
-                    alloc.symbol, alloc.addr
-                );
-            }
-            other => return Err(format!("bridge unexpected response: {other:?}")),
-        }
-    }
     Ok(())
 }
 
@@ -213,8 +134,6 @@ pub fn cheat_runtime_orphans_dismiss(app_id: String, feature_uuid: String) -> Re
         feature_uuid,
         pid: 0,
         exe: String::new(),
-        backend: cheat_runtime::BackendKind::default(),
-        wineprefix: None,
         started_at: None,
         writes: Vec::new(),
         allocs: Vec::new(),

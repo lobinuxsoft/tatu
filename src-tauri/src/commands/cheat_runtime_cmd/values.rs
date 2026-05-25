@@ -1,33 +1,25 @@
 //! Typed pointer-chain value commands: `cheat_runtime_value_read` /
-//! `_write` / `_freeze`. Each command resolves a Value feature's
-//! `AddrExpr`, walks its offset chain, then drives [`cheat_runtime`]'s
-//! typed read/write/freeze primitives against the resolved address.
+//! `_write` / `_freeze`. Resolve a Value feature's `AddrExpr`, walk
+//! its offset chain via `process_vm_readv`, then drive [`cheat_runtime`]'s
+//! typed read / write / freeze primitives against the resolved address.
 //!
-//! Phase 6 + 8: per-game backend routing. When the user has selected
-//! `GameBackend::Bridge` for an app, read / write / freeze traffic
-//! dials the in-prefix `tatu-bridge --connect` over its TCP loopback
-//! port (Aurora-style — see [`tatu_proto::BRIDGE_HOST`]) and sends
-//! `Request::ReadChainValue` / `WriteChainValue` instead of the local
-//! ptrace path. Freezes also reach the bridge via a per-tick connect-
-//! write-disconnect loop ([`FreezeTarget::Bridge`]).
+//! Native Linux backend only post-pivot #128 — the wine-side bridge
+//! routing was dropped. From the kernel's POV a wine game is just a
+//! Linux process; ptrace + process_vm_* hit it directly.
 
 use std::collections::HashMap;
-use std::path::Path;
 use std::sync::Mutex;
 
-use cheat_runtime::bridge_client::BridgeClient;
 use cheat_runtime::{
     AddrExpr, ChainError, FeatureKind, FreezeRegistry, FreezeTarget, Pid, VType, Value, ValueSpec,
     find_pid_by_exe, load_manifests_for, parse_addr_expr, read_chain, resolve_addr_expr,
     walk_chain, write_chain,
 };
 use serde::Deserialize;
-use tatu_proto::{Request, Response, WireVType, WireValue};
 use tauri::State;
 
-use super::backend::resolve_backend;
 use super::{ActiveCheats, merged_symbols};
-use crate::state::{AppState, GameBackend};
+use crate::state::AppState;
 
 /// Locate a Value feature: returns the owning manifest's `exe`, the
 /// resolved [`ValueSpec`], and the parsed [`AddrExpr`] — saving callers
@@ -93,36 +85,15 @@ fn map_chain_err(e: ChainError) -> String {
 pub fn cheat_runtime_value_read(
     app_id: String,
     feature_uuid: String,
-    state: State<'_, Mutex<AppState>>,
+    _state: State<'_, Mutex<AppState>>,
     active: State<'_, ActiveCheats>,
 ) -> Result<Value, String> {
     let (exe, spec, expr) = locate_value_feature(&app_id, &feature_uuid)?;
     let symbols = merged_symbols(&active)?;
     ensure_symbol_registered(&expr, &symbols)?;
-    match resolve_backend(&state, &app_id) {
-        GameBackend::Linux => {
-            let pid = find_pid_by_exe(&exe).ok_or_else(|| {
-                format!("game process '{exe}' is not running; launch the game first")
-            })?;
-            read_chain(pid, &expr, &spec.offsets, spec.vtype, &symbols).map_err(map_chain_err)
-        }
-        GameBackend::Bridge { wineprefix } => {
-            let (base, full_offsets) = bridge_chain(&expr, &spec.offsets, &symbols)?;
-            let mut client = bridge_connect(&wineprefix)?;
-            let resp = client
-                .request(Request::ReadChainValue {
-                    base,
-                    offsets: full_offsets,
-                    vtype: vtype_to_wire(spec.vtype),
-                })
-                .map_err(|e| format!("bridge ReadChainValue: {e}"))?;
-            match resp {
-                Response::ChainValue { value } => Ok(wire_to_value(value)),
-                Response::Err { message } => Err(format!("bridge: {message}")),
-                other => Err(format!("bridge: unexpected response {other:?}")),
-            }
-        }
-    }
+    let pid = find_pid_by_exe(&exe)
+        .ok_or_else(|| format!("game process '{exe}' is not running; launch the game first"))?;
+    read_chain(pid, &expr, &spec.offsets, spec.vtype, &symbols).map_err(map_chain_err)
 }
 
 #[tauri::command]
@@ -130,7 +101,7 @@ pub fn cheat_runtime_value_write(
     app_id: String,
     feature_uuid: String,
     value: Value,
-    state: State<'_, Mutex<AppState>>,
+    _state: State<'_, Mutex<AppState>>,
     active: State<'_, ActiveCheats>,
 ) -> Result<(), String> {
     let (exe, spec, expr) = locate_value_feature(&app_id, &feature_uuid)?;
@@ -143,95 +114,9 @@ pub fn cheat_runtime_value_write(
     }
     let symbols = merged_symbols(&active)?;
     ensure_symbol_registered(&expr, &symbols)?;
-    match resolve_backend(&state, &app_id) {
-        GameBackend::Linux => {
-            let pid = find_pid_by_exe(&exe).ok_or_else(|| {
-                format!("game process '{exe}' is not running; launch the game first")
-            })?;
-            write_chain(pid, &expr, &spec.offsets, value, &symbols).map_err(map_chain_err)
-        }
-        GameBackend::Bridge { wineprefix } => {
-            let (base, full_offsets) = bridge_chain(&expr, &spec.offsets, &symbols)?;
-            let mut client = bridge_connect(&wineprefix)?;
-            let resp = client
-                .request(Request::WriteChainValue {
-                    base,
-                    offsets: full_offsets,
-                    value: value_to_wire(value),
-                })
-                .map_err(|e| format!("bridge WriteChainValue: {e}"))?;
-            match resp {
-                Response::ChainWritten => Ok(()),
-                Response::Err { message } => Err(format!("bridge: {message}")),
-                other => Err(format!("bridge: unexpected response {other:?}")),
-            }
-        }
-    }
-}
-
-/// Build the `(base, offsets)` pair the bridge needs to resolve a
-/// Value feature's address. The bridge's WalkChain implementation
-/// iterates offsets in REVERSE (matching CE's
-/// `cheat_runtime::chain::walk_chain`), so we can fold the
-/// `SymbolDeref` step into the offsets list:
-///
-/// Linux flow (`read_chain`):
-/// ```text
-/// base = read_u64(sym_addr) + sym_offset   // resolve_addr_expr
-/// target = walk_chain(base, spec.offsets)  // iterates reverse
-/// value = read_at(target, vtype)
-/// ```
-///
-/// Bridge equivalent in one round trip:
-/// ```text
-/// full_offsets = [...spec.offsets, sym_offset]
-/// walk_chain(sym_addr, full_offsets) iterates reverse
-///   = [sym_offset, then spec.offsets[N-1], ..., spec.offsets[0]]
-///   hop 1: deref sym_addr → ptr; cur = ptr + sym_offset    (= Linux base)
-///   hop 2..: walk spec.offsets in reverse                  (= Linux walk_chain)
-/// ```
-///
-/// For `Literal` base, no symbol is involved: `base = addr`,
-/// `offsets = spec.offsets`.
-fn bridge_chain(
-    expr: &AddrExpr,
-    spec_offsets: &[u64],
-    symbols: &HashMap<String, u64>,
-) -> Result<(u64, Vec<u64>), String> {
-    match expr {
-        AddrExpr::Literal(addr) => Ok((*addr, spec_offsets.to_vec())),
-        AddrExpr::SymbolDeref { symbol, offset } => {
-            let sym_addr = symbols.get(symbol).copied().ok_or_else(|| {
-                format!("symbol {symbol:?} not registered — enable the scaffold first")
-            })?;
-            let mut full = Vec::with_capacity(spec_offsets.len() + 1);
-            full.extend_from_slice(spec_offsets);
-            // sym_offset is i64 (apply_offset semantics) but the
-            // wire's offsets are u64. Linux's resolve_addr_expr uses
-            // wrapping_add/sub; we match by casting through u64
-            // (negative offsets wrap, the executor adds them with
-            // wrapping_add and gets the same result).
-            full.push(*offset as u64);
-            Ok((sym_addr, full))
-        }
-    }
-}
-
-fn bridge_connect(wineprefix: &str) -> Result<BridgeClient, String> {
-    BridgeClient::connect(Path::new(wineprefix))
-        .map_err(|e| format!("dial bridge at {wineprefix}: {e}"))
-}
-
-fn vtype_to_wire(v: VType) -> WireVType {
-    v.into()
-}
-
-fn wire_to_value(w: WireValue) -> Value {
-    w.into()
-}
-
-fn value_to_wire(v: Value) -> WireValue {
-    v.into()
+    let pid = find_pid_by_exe(&exe)
+        .ok_or_else(|| format!("game process '{exe}' is not running; launch the game first"))?;
+    write_chain(pid, &expr, &spec.offsets, value, &symbols).map_err(map_chain_err)
 }
 
 #[derive(Debug, Deserialize)]
@@ -247,7 +132,7 @@ pub struct ValueFreezeReq {
 #[tauri::command]
 pub fn cheat_runtime_value_freeze(
     req: ValueFreezeReq,
-    state: State<'_, Mutex<AppState>>,
+    _state: State<'_, Mutex<AppState>>,
     active: State<'_, ActiveCheats>,
     freezes: State<'_, FreezeRegistry>,
 ) -> Result<(), String> {
@@ -272,27 +157,13 @@ pub fn cheat_runtime_value_freeze(
     let symbols = merged_symbols(&active)?;
     ensure_symbol_registered(&expr, &symbols)?;
 
-    let target = match resolve_backend(&state, &req.app_id) {
-        GameBackend::Linux => {
-            // Resolve once up front; the freeze loop writes to the
-            // resolved leaf address, no need to walk the chain on
-            // every tick.
-            let (pid, addr, _) = find_value_target(&exe, &spec, &expr, &active)?;
-            FreezeTarget::Linux {
-                pid,
-                address: addr,
-                bytes: value_to_le_bytes(value),
-            }
-        }
-        GameBackend::Bridge { wineprefix } => {
-            let (base, full_offsets) = bridge_chain(&expr, &spec.offsets, &symbols)?;
-            FreezeTarget::Bridge {
-                wineprefix: std::path::PathBuf::from(wineprefix),
-                base,
-                offsets: full_offsets,
-                value: value_to_wire(value),
-            }
-        }
+    // Resolve once up front; the freeze loop writes to the resolved
+    // leaf address — no need to walk the chain on every tick.
+    let (pid, addr, _) = find_value_target(&exe, &spec, &expr, &active)?;
+    let target = FreezeTarget::Linux {
+        pid,
+        address: addr,
+        bytes: value_to_le_bytes(value),
     };
     freezes
         .start(freeze_key(&req.app_id, &req.feature_uuid), target, None)

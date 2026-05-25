@@ -40,49 +40,6 @@ pub struct AppState {
     /// Disk size cache (installed + previously measured), keyed by Steam app ID.
     #[serde(default)]
     pub size_cache: HashMap<u64, DiskSize>,
-    /// Per-game cheat backend selection. Maps `app_id` (string form,
-    /// matching the `cheat_runtime_*` commands) to the backend that
-    /// should service its hooks. Missing entries default to
-    /// `GameBackend::Linux` — the existing ptrace runtime. The Bridge
-    /// variant routes value reads / writes / recovery through
-    /// `tatu-bridge --connect` over the wineprefix-local AF_UNIX
-    /// socket; it carries the wineprefix path because the bridge
-    /// socket only makes sense in that context.
-    #[serde(default)]
-    pub cheat_backend: HashMap<String, GameBackend>,
-}
-
-/// Per-game cheat backend selection. Persisted in [`AppState`] so the
-/// user's per-title preference survives across tracker restarts.
-///
-/// See README's "Backend selection" section for the decision rules.
-/// In short: `Bridge` is the preferred path for every Windows game
-/// under Proton/Wine; `Linux` is the fallback kept for Linux-native
-/// ELF games (no wineprefix, nothing for the bridge to attach to).
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "kind", rename_all = "lowercase")]
-pub enum GameBackend {
-    /// Fallback Linux ptrace runtime via `cheat-runtime`. Default
-    /// when no per-game choice was persisted — also the only
-    /// applicable backend for Linux-native ELF games.
-    #[default]
-    Linux,
-    /// Preferred Bridge backend for Proton/Wine games — `tatu-bridge`
-    /// running as a Win32 worker inside the same Proton invocation.
-    /// Carries the wineprefix root so the tracker can resolve the
-    /// in-prefix port file written by the bridge on bind
-    /// (`<prefix>/drive_c/users/Public/tatu-bridge.port`, TCP
-    /// loopback Aurora-style — PR #121).
-    Bridge { wineprefix: String },
-}
-
-impl GameBackend {
-    pub fn kind_str(&self) -> &'static str {
-        match self {
-            GameBackend::Linux => "linux",
-            GameBackend::Bridge { .. } => "bridge",
-        }
-    }
 }
 
 impl AppState {

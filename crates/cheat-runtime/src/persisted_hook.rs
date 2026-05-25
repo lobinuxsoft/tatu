@@ -62,24 +62,11 @@ pub enum PersistError {
 /// Which backend produced this persisted hook. Recovery routes
 /// rollback through the same backend that did the original write:
 /// a `Linux` record replays the undo log via `process_vm_writev` +
-/// ptrace POKEDATA; a `Bridge` record dials the in-prefix
-/// `tatu-bridge --connect` over AF_UNIX and asks it to restore the
-/// bytes (so a game still running under Proton sees the trampoline
-/// removed atomically inside its own address space, not from the
-/// Linux host PID's perspective).
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum BackendKind {
-    /// Native Linux ptrace runtime — `cheat-runtime`. Default for
-    /// backwards compatibility with hook records written before Phase 6
-    /// (which never carried this field).
-    #[default]
-    Linux,
-    /// `tatu-bridge --connect` under Wine, talking CHRT v1 over an
-    /// AF_UNIX socket inside the wineprefix.
-    Bridge,
-}
-
+/// ptrace POKEDATA. The wine-side Bridge variant was dropped along
+/// with the bridge architecture (pivot #128); legacy records carrying
+/// `backend: "bridge"` are accepted on load via serde_other_default,
+/// then ignored by the Linux-only recovery path.
+///
 /// One persisted hook record. Stored as JSON on disk; never accessed
 /// directly by the engine — round-trip via [`PersistedHook::write`] /
 /// [`PersistedHook::load_all`].
@@ -93,16 +80,6 @@ pub struct PersistedHook {
     /// scratch.
     pub pid: i32,
     pub exe: String,
-    /// Which backend wrote this hook. Recovery uses it to pick the
-    /// right rollback path (see [`BackendKind`]). Defaults to `Linux`
-    /// for records written before this field existed.
-    #[serde(default)]
-    pub backend: BackendKind,
-    /// For [`BackendKind::Bridge`] records: the wineprefix root
-    /// (`$STEAM_COMPAT_DATA_PATH/pfx`) recovery needs to compute the
-    /// AF_UNIX socket path. Ignored / empty for `Linux` records.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub wineprefix: Option<String>,
     /// ISO-8601 timestamp the enable completed at. Surface-only; the
     /// recovery code doesn't act on it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -287,8 +264,6 @@ mod tests {
             feature_uuid: "abc".into(),
             pid: 1234,
             exe: "Game.exe".into(),
-            backend: BackendKind::Linux,
-            wineprefix: None,
             started_at: Some("2026-05-19T01:23:45Z".into()),
             writes: vec![PersistedWrite {
                 addr: 0x143006e96,
@@ -331,8 +306,6 @@ mod tests {
             feature_uuid: "exist".into(),
             pid: 1,
             exe: "x".into(),
-            backend: BackendKind::Linux,
-            wineprefix: None,
             started_at: None,
             writes: vec![],
             allocs: vec![],
@@ -342,40 +315,23 @@ mod tests {
     }
 
     #[test]
-    fn legacy_records_without_backend_field_default_to_linux() {
-        // Pre-Phase-6 JSON (no `backend` or `wineprefix` keys) must
-        // load as BackendKind::Linux so live recovery works on records
-        // written by older tracker builds.
+    fn legacy_records_with_backend_field_load_cleanly() {
+        // Pre-pivot JSON carrying `backend: "bridge"` and `wineprefix`
+        // must still deserialise — those fields are no longer in the
+        // struct but serde ignores unknown keys by default. Recovery
+        // simply treats every record as Linux now.
         let legacy = r#"{
             "app_id": "1",
             "feature_uuid": "f",
             "pid": 42,
             "exe": "Game.exe",
+            "backend": "bridge",
+            "wineprefix": "/old/path/pfx",
             "writes": [],
             "allocs": []
         }"#;
         let record: PersistedHook = serde_json::from_str(legacy).unwrap();
-        assert_eq!(record.backend, BackendKind::Linux);
-        assert!(record.wineprefix.is_none());
-    }
-
-    #[test]
-    fn bridge_records_round_trip_with_wineprefix() {
-        let record = PersistedHook {
-            app_id: "2725260".into(),
-            feature_uuid: "abc".into(),
-            pid: 0,
-            exe: "Game.exe".into(),
-            backend: BackendKind::Bridge,
-            wineprefix: Some("/run/media/steamapps/compatdata/2725260/pfx".into()),
-            started_at: None,
-            writes: vec![],
-            allocs: vec![],
-        };
-        let json = serde_json::to_string(&record).unwrap();
-        assert!(json.contains("\"backend\":\"bridge\""));
-        assert!(json.contains("wineprefix"));
-        let back: PersistedHook = serde_json::from_str(&json).unwrap();
-        assert_eq!(back, record);
+        assert_eq!(record.app_id, "1");
+        assert_eq!(record.pid, 42);
     }
 }

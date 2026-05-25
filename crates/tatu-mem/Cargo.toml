@@ -8,7 +8,6 @@ description = "Backend-agnostic memory access primitives shared between the Linu
 [dependencies]
 memchr = "2"
 serde = { version = "1", features = ["derive"] }
-tatu-proto = { path = "../tatu-proto" }
 thiserror = "1"
 
 [dev-dependencies]
