@@ -12,6 +12,7 @@ pub use tatu_mem::pattern::{ParseError, Pattern, SCAN_CHUNK_SIZE};
 use crate::maps::MemoryRegion;
 use crate::memory::RuntimeError;
 use crate::memory_access::ProcessVmMem;
+use crate::regions::{VQE_NOSHARED, enumerate_regions};
 
 /// Backwards-compatible function form of [`Pattern::scan`]: kept so
 /// existing call sites (`cheat_runtime::scan(haystack, &pattern)`)
@@ -43,6 +44,30 @@ pub fn scan_in_process(
         region.size(),
         pattern,
     ))
+}
+
+/// Convenience: scan every readable region of `pid` for `pattern`,
+/// concatenating hits across regions. Uses [`crate::regions::enumerate_regions`]
+/// with `VQE_NOSHARED` to skip shared mappings (game DLLs imported by
+/// many processes, /dev/shm, vdso, etc. — they're never the cheat
+/// target and walking them blindly costs `process_vm_readv` calls
+/// that always short-read).
+///
+/// CE's UI does this when you click "Scan all" without a module
+/// restriction. The cost is dominated by reading each region's pages;
+/// region enumeration itself is a single `/proc/<pid>/maps` parse.
+pub fn scan_all_readable(pid: Pid, pattern: &Pattern) -> Result<Vec<u64>, RuntimeError> {
+    let mut hits = Vec::new();
+    for region in enumerate_regions(pid, VQE_NOSHARED) {
+        if !region.is_readable() {
+            continue;
+        }
+        let mut mem = ProcessVmMem::new(pid);
+        let region_hits =
+            tatu_mem::pattern::scan_range(&mut mem, region.base_address, region.size, pattern);
+        hits.extend(region_hits);
+    }
+    Ok(hits)
 }
 
 #[cfg(test)]
