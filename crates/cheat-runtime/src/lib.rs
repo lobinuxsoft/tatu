@@ -56,6 +56,7 @@ pub mod memory_access;
 pub mod migrate;
 pub mod persisted_hook;
 pub mod process;
+pub mod regions;
 pub mod scanner;
 pub mod threads;
 
@@ -92,4 +93,11 @@ pub use persisted_hook::{
     PersistedWrite, load_all as load_all_persisted_hooks, persist_dir,
 };
 pub use process::{find_pid_by_exe, find_pids_by_exe};
+pub use regions::{
+    MEM_MAPPED, MEM_PRIVATE, PAGE_EXECUTE, PAGE_EXECUTE_READ, PAGE_EXECUTE_READWRITE,
+    PAGE_NOACCESS, PAGE_READONLY, PAGE_READWRITE, RegionCache, RegionInfo, VQE_DIRTYONLY,
+    VQE_NOSHARED, VQE_PAGEDONLY, enumerate_regions, enumerate_regions_in, linux_prot_to_windows,
+    perms_to_memory_type, perms_to_windows_protection, query_region, query_region_in,
+    windows_protection_to_linux,
+};
 pub use scanner::{ParseError as PatternParseError, Pattern, scan, scan_in_process};
