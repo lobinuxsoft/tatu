@@ -43,14 +43,11 @@
 
 pub mod alloc;
 pub mod aurora;
-pub mod bridge_client;
 pub mod chain;
 pub mod ct_import;
 pub mod elfsym;
 pub mod executor;
-pub mod extension;
 pub mod freeze;
-pub mod inject;
 pub mod linux_backend;
 pub mod manifest;
 pub mod maps;
@@ -80,9 +77,7 @@ pub use ct_import::{
 };
 pub use elfsym::{ElfSymError, find_libc_symbol, find_module_base, find_module_symbol};
 pub use executor::{ActiveCheat, Engine, ExecError};
-pub use extension::{Extension, ExtensionError};
 pub use freeze::{FreezeError, FreezeHandle, FreezeKey, FreezeRegistry, FreezeTarget};
-pub use inject::{InjectError, inject_so};
 pub use manifest::{
     FeatureKind, Manifest, ManifestError, ManifestFeature, VType, ValueSpec, load_manifests_for,
     manifests_dir_for,
@@ -93,7 +88,7 @@ pub use migrate::{MigrateError, MigrateReport, migrate_default_dirs, migrate_dir
 pub use nix::unistd::Pid;
 pub use parser::{ParseError as ScriptParseError, Script, Statement, parse as parse_script};
 pub use persisted_hook::{
-    BackendKind, LoadAllReport as PersistedLoadAllReport, PersistError, PersistedAlloc,
+    LoadAllReport as PersistedLoadAllReport, PersistError, PersistedAlloc,
     PersistedHook, PersistedWrite, load_all as load_all_persisted_hooks, persist_dir,
 };
 pub use process::{find_pid_by_exe, find_pids_by_exe};

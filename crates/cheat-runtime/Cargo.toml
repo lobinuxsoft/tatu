@@ -12,7 +12,6 @@ description = "Linux-native Cheat Engine Auto-Assembler runtime. Reusable from a
 crate-type = ["rlib", "cdylib"]
 
 [dependencies]
-cheat-runtime-extension = { path = "../cheat-runtime-extension" }
 dirs = "6"
 goblin = { version = "0.10", default-features = false, features = ["std", "elf32", "elf64", "endian_fd"] }
 nix = { version = "0.30", features = ["uio", "process", "ptrace", "signal"] }
@@ -21,7 +20,6 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tatu-engine = { path = "../tatu-engine" }
 tatu-mem = { path = "../tatu-mem" }
-tatu-proto = { path = "../tatu-proto" }
 thiserror = "2"
 
 [dev-dependencies]

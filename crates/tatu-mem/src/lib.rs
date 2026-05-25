@@ -29,7 +29,80 @@ pub mod addr_expr;
 pub mod chain;
 pub mod pattern;
 
-pub use tatu_proto::{WireVType, WireValue};
+use serde::{Deserialize, Serialize};
+
+/// Type tag for [`WireValue`] payloads. Mirror of
+/// `cheat_runtime::manifest::VType`. Originally lived in `tatu-proto`
+/// as the wire-format for the tracker ↔ bridge socket; post-pivot
+/// #128 the bridge is gone, types stay here as the local shared
+/// vocabulary between `cheat-runtime` and the tracker handlers.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum WireVType {
+    U32,
+    I32,
+    U64,
+    I64,
+    F32,
+    F64,
+}
+
+impl WireVType {
+    pub const fn size_bytes(self) -> usize {
+        match self {
+            WireVType::U32 | WireVType::I32 | WireVType::F32 => 4,
+            WireVType::U64 | WireVType::I64 | WireVType::F64 => 8,
+        }
+    }
+}
+
+/// Type-tagged numeric value — mirror of `cheat_runtime::chain::Value`.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub enum WireValue {
+    U32(u32),
+    I32(i32),
+    U64(u64),
+    I64(i64),
+    F32(f32),
+    F64(f64),
+}
+
+impl WireValue {
+    pub const fn vtype(&self) -> WireVType {
+        match self {
+            WireValue::U32(_) => WireVType::U32,
+            WireValue::I32(_) => WireVType::I32,
+            WireValue::U64(_) => WireVType::U64,
+            WireValue::I64(_) => WireVType::I64,
+            WireValue::F32(_) => WireVType::F32,
+            WireValue::F64(_) => WireVType::F64,
+        }
+    }
+
+    pub fn to_le_bytes(self) -> Vec<u8> {
+        match self {
+            WireValue::U32(v) => v.to_le_bytes().to_vec(),
+            WireValue::I32(v) => v.to_le_bytes().to_vec(),
+            WireValue::U64(v) => v.to_le_bytes().to_vec(),
+            WireValue::I64(v) => v.to_le_bytes().to_vec(),
+            WireValue::F32(v) => v.to_le_bytes().to_vec(),
+            WireValue::F64(v) => v.to_le_bytes().to_vec(),
+        }
+    }
+
+    pub fn from_le_bytes(vtype: WireVType, bytes: &[u8]) -> Option<Self> {
+        if bytes.len() != vtype.size_bytes() {
+            return None;
+        }
+        Some(match vtype {
+            WireVType::U32 => WireValue::U32(u32::from_le_bytes(bytes.try_into().ok()?)),
+            WireVType::I32 => WireValue::I32(i32::from_le_bytes(bytes.try_into().ok()?)),
+            WireVType::U64 => WireValue::U64(u64::from_le_bytes(bytes.try_into().ok()?)),
+            WireVType::I64 => WireValue::I64(i64::from_le_bytes(bytes.try_into().ok()?)),
+            WireVType::F32 => WireValue::F32(f32::from_le_bytes(bytes.try_into().ok()?)),
+            WireVType::F64 => WireValue::F64(f64::from_le_bytes(bytes.try_into().ok()?)),
+        })
+    }
+}
 
 /// Backend-agnostic remote-memory I/O. Every method targets a single
 /// remote address space; the concrete impl owns whatever handle /

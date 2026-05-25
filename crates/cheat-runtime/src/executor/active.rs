@@ -13,7 +13,7 @@ use tatu_engine::EnableOutcome;
 
 use crate::executor::ExecError;
 use crate::linux_backend::LinuxBackend;
-use crate::persisted_hook::{BackendKind, PersistedAlloc, PersistedHook, PersistedWrite};
+use crate::persisted_hook::{PersistedAlloc, PersistedHook, PersistedWrite};
 
 #[derive(Debug)]
 #[must_use = "ActiveCheat owns the undo log; call .disable() or it will roll back on drop"]
@@ -59,8 +59,6 @@ impl ActiveCheat {
             feature_uuid,
             pid: self.pid.as_raw(),
             exe,
-            backend: BackendKind::Linux,
-            wineprefix: None,
             started_at,
             writes: self
                 .outcome

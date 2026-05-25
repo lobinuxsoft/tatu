@@ -7,7 +7,6 @@ mod inventory;
 mod shortcuts;
 mod state;
 mod steam;
-mod tatu_launcher;
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -94,18 +93,7 @@ pub fn run() {
             commands::cheat_runtime_cmd::values::cheat_runtime_value_read,
             commands::cheat_runtime_cmd::values::cheat_runtime_value_write,
             commands::cheat_runtime_cmd::values::cheat_runtime_value_freeze,
-            commands::cheat_runtime_cmd::backend::cheat_runtime_backend_get,
-            commands::cheat_runtime_cmd::backend::cheat_runtime_backend_set,
-            commands::cheat_runtime_cmd::backend::cheat_runtime_backend_recommend,
             commands::cheat_search_cmd::open_fearless_search,
-            commands::tatu_launcher_cmd::tatu_launcher_status,
-            commands::tatu_launcher_cmd::tatu_launcher_install,
-            commands::tatu_launcher_cmd::tatu_launcher_set_for_app,
-            commands::tatu_launcher_cmd::tatu_launcher_get_for_app,
-            commands::launcher_config_cmd::launcher_config_get_for_app,
-            commands::launcher_config_cmd::launcher_config_set_for_app,
-            commands::launcher_config_cmd::launcher_config_unset_app,
-            commands::launcher_config_cmd::launcher_list_protons,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

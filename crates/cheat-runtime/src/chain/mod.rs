@@ -28,7 +28,7 @@ use std::collections::HashMap;
 use nix::unistd::Pid;
 use tatu_mem::addr_expr;
 use tatu_mem::chain as mem_chain;
-use tatu_proto::{WireVType, WireValue};
+use tatu_mem::{WireVType, WireValue};
 
 use crate::manifest::VType;
 use crate::memory::RuntimeError;

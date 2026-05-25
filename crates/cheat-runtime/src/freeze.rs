@@ -23,16 +23,13 @@
 //! click, not an error.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
 use nix::unistd::Pid;
-use tatu_proto::{Request, Response, WireValue};
 
-use crate::bridge_client::BridgeClient;
 use crate::memory::write_bytes;
 
 pub const DEFAULT_INTERVAL_MS: u64 = 16;
@@ -45,7 +42,9 @@ pub enum FreezeError {
     Poisoned,
 }
 
-/// What the freeze worker writes on every tick.
+/// What the freeze worker writes on every tick. Linux ptrace only
+/// post-pivot #128 — the wine-side Bridge variant was dropped along
+/// with the bridge architecture.
 pub enum FreezeTarget {
     /// Native Linux ptrace runtime. Loops `process_vm_writev` against
     /// `pid` at `address` with `bytes`. Direct, no protocol overhead.
@@ -53,15 +52,6 @@ pub enum FreezeTarget {
         pid: Pid,
         address: u64,
         bytes: Vec<u8>,
-    },
-    /// Tatu bridge inside a wineprefix. Loops `Request::WriteChainValue`
-    /// over a fresh TCP connection each tick so the bridge's single-
-    /// client serve loop stays free for tracker traffic between ticks.
-    Bridge {
-        wineprefix: PathBuf,
-        base: u64,
-        offsets: Vec<u64>,
-        value: WireValue,
     },
 }
 
@@ -155,70 +145,18 @@ impl Drop for FreezeRegistry {
 }
 
 fn run_freeze(target: FreezeTarget, cancel: Arc<AtomicBool>, interval: Duration) {
-    match target {
-        FreezeTarget::Linux {
-            pid,
-            address,
-            bytes,
-        } => {
-            while !cancel.load(Ordering::Relaxed) {
-                if write_bytes(pid, address, &bytes).is_err() {
-                    // Target gone or address unmapped — exit silently. The
-                    // stale registry entry survives until stop() is called.
-                    break;
-                }
-                std::thread::sleep(interval);
-            }
+    let FreezeTarget::Linux {
+        pid,
+        address,
+        bytes,
+    } = target;
+    while !cancel.load(Ordering::Relaxed) {
+        if write_bytes(pid, address, &bytes).is_err() {
+            // Target gone or address unmapped — exit silently. The
+            // stale registry entry survives until stop() is called.
+            break;
         }
-        FreezeTarget::Bridge {
-            wineprefix,
-            base,
-            offsets,
-            value,
-        } => {
-            let mut consecutive_errs = 0u32;
-            while !cancel.load(Ordering::Relaxed) {
-                match bridge_tick(&wineprefix, base, &offsets, value) {
-                    Ok(()) => {
-                        consecutive_errs = 0;
-                    }
-                    Err(_) => {
-                        // Bridge transient errors are common (port file
-                        // not yet ready right after a game launch, the
-                        // bridge briefly busy serving another client).
-                        // Tolerate a short run of failures; abort the
-                        // loop after a sustained outage so we don't hot-
-                        // spin a doomed worker forever.
-                        consecutive_errs += 1;
-                        if consecutive_errs > 20 {
-                            break;
-                        }
-                    }
-                }
-                std::thread::sleep(interval);
-            }
-        }
-    }
-}
-
-fn bridge_tick(
-    wineprefix: &std::path::Path,
-    base: u64,
-    offsets: &[u64],
-    value: WireValue,
-) -> Result<(), String> {
-    let mut client = BridgeClient::connect(wineprefix).map_err(|e| format!("connect: {e}"))?;
-    let resp = client
-        .request(Request::WriteChainValue {
-            base,
-            offsets: offsets.to_vec(),
-            value,
-        })
-        .map_err(|e| format!("write: {e}"))?;
-    match resp {
-        Response::ChainWritten => Ok(()),
-        Response::Err { message } => Err(message),
-        other => Err(format!("unexpected response {other:?}")),
+        std::thread::sleep(interval);
     }
 }
 

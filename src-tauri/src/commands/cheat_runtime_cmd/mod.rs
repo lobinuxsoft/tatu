@@ -24,41 +24,30 @@
 //!   left behind by a tracker crash or a forced game exit.
 //! - [`values`] — typed read/write/freeze over pointer-chains.
 
-pub mod backend;
 pub mod features;
 pub mod orphans;
 pub mod toggles;
 pub mod values;
 
 use std::collections::HashMap;
-use std::net::TcpStream;
-use std::path::Path;
 use std::sync::Mutex;
-use std::time::Duration;
 
 use cheat_runtime::{ActiveCheat, FreezeRegistry, Pid};
-use tatu_proto::{BRIDGE_HOST, WireOutcome, bridge_port_file_path_linux};
 
-/// One enabled cheat as seen by the registry. The variant decides
-/// which backend will service the eventual disable: a Linux record
-/// keeps the live [`ActiveCheat`] so its in-memory undo log is the
-/// source of truth; a Bridge record keeps the [`WireOutcome`] the
-/// bridge returned (the bridge holds no per-cheat state) plus the
-/// wineprefix it lives in.
+/// One enabled cheat as seen by the registry. Linux-only post-pivot
+/// #128 — the wine-side Bridge variant was dropped along with the
+/// bridge architecture. The variant is preserved (vs collapsing to a
+/// transparent newtype) so future backends (Phase E in-process
+/// extension, #135) can re-add their own arm without breaking call
+/// sites that match on it.
 pub enum ActiveCheatEntry {
     Linux(ActiveCheat),
-    Bridge {
-        wineprefix: String,
-        outcome: WireOutcome,
-        symbols: HashMap<String, u64>,
-    },
 }
 
 impl ActiveCheatEntry {
     pub fn symbols(&self) -> HashMap<String, u64> {
         match self {
             ActiveCheatEntry::Linux(c) => c.symbols().clone(),
-            ActiveCheatEntry::Bridge { symbols, .. } => symbols.clone(),
         }
     }
 }
@@ -96,9 +85,6 @@ pub(super) fn purge_stale_cheats(
         .iter()
         .filter_map(|(uuid, entry)| match entry {
             ActiveCheatEntry::Linux(c) if !pid_is_alive(c.pid()) => Some(uuid.clone()),
-            ActiveCheatEntry::Bridge { wineprefix, .. } if !bridge_is_alive(wineprefix) => {
-                Some(uuid.clone())
-            }
             _ => None,
         })
         .collect();
@@ -118,32 +104,6 @@ pub(super) fn purge_stale_cheats(
         }
     }
     Ok(())
-}
-
-/// Bridge liveness probe — reads the port file the bridge wrote on
-/// bind and attempts a short-timeout TCP connect. Returns `true` if
-/// the connect succeeds, `false` on any failure (file missing,
-/// `ECONNREFUSED`, unparseable port).
-///
-/// 100 ms timeout: ample for an in-prefix bridge that's actually
-/// listening (loopback on the same host is ~µs) and short enough that
-/// `cheat_runtime_list_features` doesn't add perceptible latency to
-/// the UI refresh even when every Bridge entry is checked.
-fn bridge_is_alive(wineprefix: &str) -> bool {
-    let port_file = bridge_port_file_path_linux(Path::new(wineprefix));
-    let body = match std::fs::read_to_string(&port_file) {
-        Ok(b) => b,
-        Err(_) => return false,
-    };
-    let port: u16 = match body.trim().parse() {
-        Ok(p) => p,
-        Err(_) => return false,
-    };
-    let addr = match format!("{BRIDGE_HOST}:{port}").parse::<std::net::SocketAddr>() {
-        Ok(a) => a,
-        Err(_) => return false,
-    };
-    TcpStream::connect_timeout(&addr, Duration::from_millis(100)).is_ok()
 }
 
 /// Merge the symbol tables of every currently-active cheat into one map.
