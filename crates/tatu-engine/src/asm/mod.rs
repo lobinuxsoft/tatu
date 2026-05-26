@@ -34,17 +34,23 @@
 //! needs them.
 
 mod arith;
+mod cmov;
 mod control_flow;
 mod data_move;
+mod misc;
 mod operands;
 mod sse;
+mod x87;
 
 use std::collections::HashMap;
 
 use self::arith::{Arith, emit_arith, emit_cmp, emit_test};
+use self::cmov::{emit_cmov, is_cmov};
 use self::control_flow::{Mnemonic, emit_jcc, emit_ret, emit_unary_target, is_conditional_jump};
 use self::data_move::{emit_lea, emit_mov, emit_pop, emit_push};
+use self::misc::dispatch_misc_mnemonic;
 use self::sse::dispatch_sse_mnemonic;
+use self::x87::dispatch_x87_mnemonic;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AsmError {
@@ -102,10 +108,20 @@ pub fn compile_line(
         // the same token.
         "nop" if rest.is_empty() => Ok(Some(vec![0x90])),
         m if is_conditional_jump(m) => Ok(Some(emit_jcc(m, rest, symbols, base_addr)?)),
-        // SSE / SSE2 scalar — Tier-2. Single dispatcher returning Ok(None)
-        // when the mnemonic isn't in the SSE set, so callers fall through
-        // to the final `_ => Ok(None)` catch-all unchanged.
-        m => dispatch_sse_mnemonic(m, rest, symbols, base_addr),
+        m if is_cmov(m) => Ok(Some(emit_cmov(m, rest, symbols, base_addr)?)),
+        // Three Tier-2/3 dispatch helpers — each returns Ok(None) when the
+        // mnemonic isn't in its set, so we chain them with `?` short-circuit
+        // ordering: SSE first (highest frequency post-Tier-2), then x87,
+        // then misc (logical, shifts, inc/dec, 0-arg, movzx/movsxd, imul).
+        m => {
+            if let Some(bytes) = dispatch_sse_mnemonic(m, rest, symbols, base_addr)? {
+                return Ok(Some(bytes));
+            }
+            if let Some(bytes) = dispatch_x87_mnemonic(m, rest, symbols, base_addr)? {
+                return Ok(Some(bytes));
+            }
+            dispatch_misc_mnemonic(m, rest, symbols, base_addr)
+        }
     }
 }
 
@@ -122,9 +138,12 @@ mod tests {
 
     #[test]
     fn unknown_mnemonic_returns_none() {
-        // `imul` isn't in the Phase B subset — must fall through to None
-        // so the executor's compile_raw can surface its own Unsupported.
-        let bytes = compile_line("imul rax, rbx, 4", &HashMap::new(), 0).unwrap();
+        // Truly fake mnemonic — must fall through to None so the
+        // executor's compile_raw can surface its own Unsupported.
+        // (Real mnemonics keep being added; pinning a specific
+        // unsupported one here causes false breakage. `fizzbuzz` is
+        // safely never going to be an Intel mnemonic.)
+        let bytes = compile_line("fizzbuzz rax, rbx", &HashMap::new(), 0).unwrap();
         assert!(bytes.is_none());
     }
 

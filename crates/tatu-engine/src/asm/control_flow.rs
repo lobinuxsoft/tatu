@@ -16,6 +16,7 @@ pub(super) enum Mnemonic {
 pub(super) fn is_conditional_jump(m: &str) -> bool {
     matches!(
         m,
+        // Canonical Intel mnemonics.
         "je" | "jne"
             | "jg"
             | "jge"
@@ -31,6 +32,21 @@ pub(super) fn is_conditional_jump(m: &str) -> bool {
             | "jnc"
             | "js"
             | "jns"
+            | "jo"
+            | "jno"
+            | "jp"
+            | "jnp"
+            | "jpe"
+            | "jpo"
+            // CE-AA / NASM-style aliases (still appear in older / hand-rolled tables).
+            | "jna"   // = jbe
+            | "jnae"  // = jb
+            | "jnb"   // = jae
+            | "jnbe"  // = ja
+            | "jng"   // = jle
+            | "jnge"  // = jl
+            | "jnl"   // = jge
+            | "jnle" // = jg
     )
 }
 
@@ -87,16 +103,20 @@ pub(super) fn emit_jcc(
     match mnemonic {
         "je" | "jz" => a.je(target)?,
         "jne" | "jnz" => a.jne(target)?,
-        "jg" => a.jg(target)?,
-        "jge" => a.jge(target)?,
-        "jl" => a.jl(target)?,
-        "jle" => a.jle(target)?,
-        "ja" => a.ja(target)?,
-        "jae" | "jnc" => a.jae(target)?,
-        "jb" | "jc" => a.jb(target)?,
-        "jbe" => a.jbe(target)?,
+        "jg" | "jnle" => a.jg(target)?,
+        "jge" | "jnl" => a.jge(target)?,
+        "jl" | "jnge" => a.jl(target)?,
+        "jle" | "jng" => a.jle(target)?,
+        "ja" | "jnbe" => a.ja(target)?,
+        "jae" | "jnc" | "jnb" => a.jae(target)?,
+        "jb" | "jc" | "jnae" => a.jb(target)?,
+        "jbe" | "jna" => a.jbe(target)?,
         "js" => a.js(target)?,
         "jns" => a.jns(target)?,
+        "jo" => a.jo(target)?,
+        "jno" => a.jno(target)?,
+        "jp" | "jpe" => a.jp(target)?,
+        "jnp" | "jpo" => a.jnp(target)?,
         _ => return Err(AsmError::Unsupported(mnemonic.into())),
     };
     Ok(a.assemble(base)?)
