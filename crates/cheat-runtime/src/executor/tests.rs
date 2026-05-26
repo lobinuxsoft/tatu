@@ -10,13 +10,38 @@ fn engine_for_self() -> Engine {
 
 #[test]
 fn enable_with_only_noops_creates_empty_active() {
-    let script = parse("[ENABLE]\nregistersymbol(foo)\nlabel(bar)\n{$lua}\n[DISABLE]\n").unwrap();
+    // `{$begin_obfuscate}` is a no-op CE directive — used here as a
+    // generic stand-in. We deliberately omit `{$lua}` because it now
+    // forces the executor into the `LuaNotSupported` path (covered by
+    // [`enable_with_lua_directive_returns_lua_not_supported`] below).
+    let script =
+        parse("[ENABLE]\nregistersymbol(foo)\nlabel(bar)\n{$begin_obfuscate}\n[DISABLE]\n")
+            .unwrap();
     let mut eng = engine_for_self();
-    // We can't actually scan/write without a real symbol; this only checks
-    // that noop statements pass through cleanly.
     let active = eng.enable(&script).expect("noop enable should succeed");
     assert_eq!(active.writes(), 0);
     active.disable().unwrap();
+}
+
+#[test]
+fn enable_with_lua_directive_returns_lua_not_supported() {
+    let script = parse("[ENABLE]\n{$lua}\npause()\n[DISABLE]\n").unwrap();
+    let mut eng = engine_for_self();
+    let err = eng.enable(&script).expect_err("lua_only must not succeed");
+    assert!(
+        matches!(err, ExecError::LuaNotSupported),
+        "expected LuaNotSupported, got {err:?}"
+    );
+}
+
+#[test]
+fn enable_with_pure_lua_body_returns_lua_not_supported() {
+    // No `[ENABLE]` block at all — pure CE `{$lua}` payload that CE
+    // would normally hand to its embedded interpreter.
+    let script = parse("{$lua}\nautoAssemble([[ ... ]])\n").unwrap();
+    let mut eng = engine_for_self();
+    let err = eng.enable(&script).expect_err("lua_only must not succeed");
+    assert!(matches!(err, ExecError::LuaNotSupported));
 }
 
 #[test]
@@ -53,11 +78,16 @@ fn alloc_enable_then_disable_round_trips_codecave() {
 }
 
 #[test]
-fn dealloc_of_unknown_symbol_errors() {
+fn dealloc_of_unknown_symbol_is_lenient_noop() {
+    // CE's autoassembler silently ignores `dealloc(name)` when `name`
+    // was not previously allocated. The wild (FearLess corpus, audit
+    // 2026-05-26) routinely pairs cross-script cleanup blocks that
+    // dealloc names a companion script already freed; erroring here
+    // would block legitimate idempotent disables.
     let script = parse("[ENABLE]\ndealloc(missing)\n[DISABLE]\n").unwrap();
     let mut eng = engine_for_self();
-    let err = eng.enable(&script).unwrap_err();
-    assert!(matches!(err, ExecError::DeallocUnknown(name) if name == "missing"));
+    let active = eng.enable(&script).expect("dealloc(unknown) must no-op");
+    active.disable().unwrap();
 }
 
 #[test]

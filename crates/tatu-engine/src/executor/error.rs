@@ -30,4 +30,10 @@ pub enum ExecError {
     OrphanWrite(String),
     #[error("unsupported statement: {0}")]
     Unsupported(String),
+    /// Script body contains a `{$lua}` directive (or is a pure-Lua
+    /// payload with no `[ENABLE]` block). Tatu has no Lua VM and refuses
+    /// to half-execute these — the UI surfaces this as
+    /// "Lua scripting not supported".
+    #[error("script requires the Cheat Engine Lua interpreter")]
+    LuaNotSupported,
 }

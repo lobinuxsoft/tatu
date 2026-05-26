@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use tatu_mem::pattern::Pattern;
 
 use crate::backend::{Backend, ReadableRegion};
-use crate::parser::{Script, Statement};
+use crate::parser::{NameList, Script, Statement};
 
 use super::EnableOutcome;
 use super::error::ExecError;
@@ -70,6 +70,13 @@ impl<B: Backend> Engine<B> {
     /// On any error, every prior write is rolled back via the same
     /// backend before returning.
     pub fn enable(&mut self, script: &Script) -> Result<EnableOutcome, ExecError> {
+        if script.lua_only {
+            // Surface as a typed error rather than silently succeeding —
+            // the UI distinguishes "this entry is broken" from "this
+            // entry's enable path is in CE's Lua interpreter, which
+            // tatu doesn't ship".
+            return Err(ExecError::LuaNotSupported);
+        }
         let mut outcome = EnableOutcome::default();
 
         if let Err(e) = self.pre_resolve_symbols(script, &mut outcome) {
@@ -125,6 +132,27 @@ impl<B: Backend> Engine<B> {
                     outcome
                         .allocs
                         .insert(symbol.clone(), (addr, *size as usize));
+                }
+                Statement::GlobalAlloc { symbol, size } => {
+                    // CE's `globalalloc` is process-global; tatu treats it
+                    // identically to `alloc` because per-toggle rollback
+                    // owns the lifetime anyway. No `near` hint by spec.
+                    let addr = self.backend.alloc(*size as usize, None)?;
+                    self.symbols.insert(symbol.clone(), addr);
+                    outcome
+                        .allocs
+                        .insert(symbol.clone(), (addr, *size as usize));
+                }
+                Statement::Define { name, value } => {
+                    // Defines that resolve to a numeric literal go straight
+                    // into the symbol table; non-numeric values are deferred
+                    // until the asm compiler asks for them via `Define`
+                    // lookup. Symbol-table insert keeps `register_symbol`
+                    // happy and matches CE's behaviour for the common
+                    // module-relative-offset pattern.
+                    if let Some(addr) = parse_numeric_token(value) {
+                        self.symbols.insert(name.clone(), addr);
+                    }
                 }
                 Statement::LabelSite(name) => {
                     if let Some(addr) = self.symbols.get(name).copied() {
@@ -197,17 +225,35 @@ impl<B: Backend> Engine<B> {
                     outcome.undo.push((base, original));
                     cursor = Some(base + bytes.len() as u64);
                 }
-                Statement::Dealloc(symbol) => {
-                    let (addr, size) = outcome
-                        .allocs
-                        .remove(symbol)
-                        .ok_or_else(|| ExecError::DeallocUnknown(symbol.clone()))?;
-                    self.backend.dealloc(addr, size)?;
-                    self.symbols.remove(symbol);
-                }
+                Statement::Dealloc(list) => match list {
+                    NameList::Wildcard => {
+                        // `dealloc(*)` inside an `[ENABLE]` block: release
+                        // every codecave this script has allocated so far.
+                        // Rare but legal (some scripts pre-clean before
+                        // reallocating).
+                        for (name, (addr, size)) in outcome.allocs.drain() {
+                            self.backend.dealloc(addr, size)?;
+                            self.symbols.remove(&name);
+                        }
+                    }
+                    NameList::Names(names) => {
+                        for symbol in names {
+                            // No-op on unknown names: CE's `dealloc` is
+                            // lenient when a name was already freed by a
+                            // companion script. Erroring here would block
+                            // legitimate idempotent disables.
+                            if let Some((addr, size)) = outcome.allocs.remove(symbol) {
+                                self.backend.dealloc(addr, size)?;
+                                self.symbols.remove(symbol);
+                            }
+                        }
+                    }
+                },
                 // Symbol providers already ran in pass 1.
                 Statement::AobScanModule { .. }
                 | Statement::Alloc { .. }
+                | Statement::GlobalAlloc { .. }
+                | Statement::Define { .. }
                 | Statement::RegisterSymbol(_)
                 | Statement::UnregisterSymbol(_)
                 | Statement::Label(_)
