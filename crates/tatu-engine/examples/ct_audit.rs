@@ -24,6 +24,7 @@ use tatu_engine::parser::{Statement, parse};
 
 const SUPPORTED_CALLS: &[&str] = &[
     "aobscanmodule",
+    "aobscan",
     "registersymbol",
     "unregistersymbol",
     "label",
@@ -167,6 +168,7 @@ fn tally(
             Statement::AobScanModule { .. } => {
                 *calls.entry("aobscanmodule".into()).or_insert(0) += 1
             }
+            Statement::AobScan { .. } => *calls.entry("aobscan".into()).or_insert(0) += 1,
             Statement::RegisterSymbol(_) => *calls.entry("registersymbol".into()).or_insert(0) += 1,
             Statement::UnregisterSymbol(_) => {
                 *calls.entry("unregistersymbol".into()).or_insert(0) += 1

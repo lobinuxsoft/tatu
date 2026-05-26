@@ -116,7 +116,8 @@ impl<B: Backend> Engine<B> {
             match stmt {
                 Statement::AobScanModule {
                     symbol, pattern, ..
-                } => {
+                }
+                | Statement::AobScan { symbol, pattern } => {
                     let addr = self.scan_unique(pattern, symbol)?;
                     self.symbols.insert(symbol.clone(), addr);
                 }
@@ -251,6 +252,7 @@ impl<B: Backend> Engine<B> {
                 },
                 // Symbol providers already ran in pass 1.
                 Statement::AobScanModule { .. }
+                | Statement::AobScan { .. }
                 | Statement::Alloc { .. }
                 | Statement::GlobalAlloc { .. }
                 | Statement::Define { .. }
