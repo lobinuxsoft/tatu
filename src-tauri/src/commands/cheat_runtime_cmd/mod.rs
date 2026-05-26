@@ -25,6 +25,7 @@
 //! - [`values`] — typed read/write/freeze over pointer-chains.
 
 pub mod features;
+pub mod import;
 pub mod orphans;
 pub mod toggles;
 pub mod values;

@@ -11,6 +11,14 @@ use super::{CtImportError, ImportReport, convert_ct_file};
 const CT_SUBDIR: &str = "backlog-tracker/cheat-tables";
 const MANIFEST_SUBDIR: &str = "backlog-tracker/trainers";
 
+/// Resolve `$XDG_CONFIG_HOME/backlog-tracker/cheat-tables/<app_id>/`. Used
+/// by the UI's "Import .CT" command to drop a fresh `.ct` into the
+/// directory the auto-importer scans.
+pub fn ct_tables_dir_for(app_id: &str) -> Result<std::path::PathBuf, CtImportError> {
+    let config = dirs::config_dir().ok_or(CtImportError::NoConfigDir)?;
+    Ok(config.join(CT_SUBDIR).join(app_id))
+}
+
 /// Auto-import every `.ct` file under `cheat-tables/<app_id>/` into the
 /// corresponding `trainers/<app_id>/` manifest directory.
 ///

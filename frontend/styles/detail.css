@@ -108,6 +108,12 @@
 .ce-tables-header { display: flex; align-items: center; gap: 0.5rem; font-family: var(--font-display); font-size: 0.72rem; font-weight: 700; text-transform: var(--display-transform); letter-spacing: var(--display-tracking); color: var(--fg-muted); margin-bottom: 0.4rem; }
 .ce-refresh-btn { margin-left: auto; background: transparent; color: var(--fg-muted); border: 1px solid var(--border); padding: 0.2rem 0.5rem; border-radius: var(--r-sm); font-family: var(--font-display); font-size: 0.65rem; cursor: pointer; transition: color var(--t-fast), border-color var(--t-fast); }
 .ce-refresh-btn:hover { color: var(--fg); border-color: var(--accent); }
+.ce-import-btn { margin-left: auto; background: var(--accent); color: var(--bg-panel); border: 1px solid var(--accent); padding: 0.2rem 0.6rem; border-radius: var(--r-sm); font-family: var(--font-display); font-size: 0.65rem; font-weight: 700; text-transform: var(--display-transform); letter-spacing: var(--display-tracking); cursor: pointer; transition: opacity var(--t-fast); }
+.ce-import-btn:hover:not(:disabled) { opacity: 0.85; }
+.ce-import-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+/* When both Import + Refresh sit in the same header, only Import owns
+   margin-left:auto (pushes right); Refresh follows immediately after. */
+.ce-import-btn + .ce-refresh-btn { margin-left: 0.4rem; }
 .ce-tables-list { list-style: none; padding: 0; margin: 0; }
 .ce-table-row { display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0; border-bottom: 1px solid var(--border-subtle); }
 .ce-table-info { flex: 1; min-width: 0; }
