@@ -39,10 +39,17 @@ function renderCeBanner(status) {
 // section and tables list with no banner above them.
 
 function renderTablesSection(gameId, tables) {
+  // Hidden file input lives outside the table list so it survives a
+  // re-render mid-pick (loadCheats() rewrites .ce-tables-section but the
+  // panel itself is stable). The visible button proxies the click.
+  const importControls =
+    `<button class="ce-import-btn" data-action="import-ct" title="Pick a .CT file to import into this game's library">Import .CT</button>` +
+    `<input type="file" class="ce-import-input" accept=".ct,.CT" hidden>`;
   if (!tables.length) {
     return (
       `<div class="ce-tables-section">` +
         `<div class="ce-tables-header">Available .CT tables` +
+          importControls +
           `<button class="ce-refresh-btn" data-action="refresh-tables">Refresh</button>` +
         `</div>` +
         `<div class="ach-empty">` +
@@ -54,6 +61,7 @@ function renderTablesSection(gameId, tables) {
   let html =
     `<div class="ce-tables-section">` +
       `<div class="ce-tables-header">Available .CT tables` +
+        importControls +
         `<button class="ce-refresh-btn" data-action="refresh-tables">Refresh</button>` +
       `</div>` +
       `<ul class="ce-tables-list">`;
@@ -106,6 +114,7 @@ function wireTables(panel, gameId) {
   if (refresh) {
     refresh.addEventListener("click", () => loadCheats(gameId));
   }
+  wireImportButton(panel, gameId);
   panel.querySelectorAll(".ce-open-btn").forEach(btn => {
     btn.addEventListener("click", async () => {
       const tableName = btn.dataset.table;
@@ -408,6 +417,70 @@ function wireValueRows(panel, gameId) {
           freezeCb.disabled = false;
         }
       });
+    }
+  });
+}
+
+/// Wire the "Import .CT" button: trigger hidden <input type="file">, read
+/// the picked file as bytes, hand off to the backend command which copies
+/// into `cheat-tables/<app_id>/` and runs `auto_import_for_app` so the new
+/// manifest appears in the list without a restart.
+function wireImportButton(panel, gameId) {
+  const btn = panel.querySelector(".ce-import-btn");
+  const input = panel.querySelector(".ce-import-input");
+  if (!btn || !input) return;
+
+  btn.addEventListener("click", () => input.click());
+
+  input.addEventListener("change", async () => {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    const original = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "Importing…";
+    try {
+      const buf = await file.arrayBuffer();
+      const contents = Array.from(new Uint8Array(buf));
+      const summary = await invoke("cheat_runtime_import_ct", {
+        appId: String(gameId),
+        fileName: file.name,
+        contents,
+      });
+      // Summary fields: created[], skipped[], failed[][file, err], written_to
+      const created = (summary.created || []).length;
+      const skipped = (summary.skipped || []).length;
+      const failed = (summary.failed || []).length;
+      let msg;
+      if (failed > 0) {
+        const [name, err] = summary.failed[0];
+        msg = `✗ ${name}: ${err}`;
+        btn.title = msg;
+      } else if (created > 0) {
+        msg = `✓ Imported (${created} new)`;
+      } else if (skipped > 0) {
+        msg = `✓ Already imported`;
+      } else {
+        msg = `✓ Done`;
+      }
+      btn.textContent = msg;
+      loadCheats(gameId);
+      setTimeout(() => {
+        btn.textContent = original;
+        btn.removeAttribute("title");
+        btn.disabled = false;
+      }, 3000);
+    } catch (e) {
+      btn.textContent = "✗ Error";
+      btn.title = String(e);
+      setTimeout(() => {
+        btn.textContent = original;
+        btn.removeAttribute("title");
+        btn.disabled = false;
+      }, 3000);
+    } finally {
+      // Reset so the same file can be re-picked (no change event on
+      // identical selection otherwise).
+      input.value = "";
     }
   });
 }
