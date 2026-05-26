@@ -1,0 +1,13 @@
+[package]
+name = "tatu-mem"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Backend-agnostic memory access primitives shared between the Linux ptrace runtime (cheat-runtime) and the Win32 in-prefix bridge (tatu-bridge). Defines the MemoryAccess trait and the pure-logic algorithms (AOB pattern scan, pointer-chain walk, typed value read/write, CE address-expression parser) that compile against either backend."
+
+[dependencies]
+memchr = "2"
+serde = { version = "1", features = ["derive"] }
+thiserror = "1"
+
+[dev-dependencies]

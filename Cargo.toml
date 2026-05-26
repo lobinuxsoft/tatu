@@ -1,0 +1,9 @@
+[workspace]
+resolver = "3"
+members = [
+    "src-tauri",
+    "crates/cheat-runtime",
+    "crates/ce-launcher",
+    "crates/tatu-engine",
+    "crates/tatu-mem",
+]

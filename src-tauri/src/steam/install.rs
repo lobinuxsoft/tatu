@@ -1,4 +1,8 @@
+use std::fs;
 use std::path::PathBuf;
+use std::sync::OnceLock;
+
+use regex::Regex;
 
 /// Locate the user's Steam client install directory.
 /// Exposed as `pub(crate)` so sibling modules (disk, collections) can reuse
@@ -61,4 +65,76 @@ pub fn detect_steam_id() -> Option<String> {
 
     // If only one account and no timestamp matched, return it.
     best_id.or(current_id)
+}
+
+/// Enumerate every Steam library on the system by parsing
+/// `libraryfolders.vdf` under the resolved Steam install directory.
+/// Returns the libraries in declaration order; the first one is
+/// always Steam's primary install dir (Valve always emits index 0
+/// for the canonical location).
+///
+/// Failure modes folded into an empty vec: Steam not installed, the
+/// VDF missing or unreadable, no `"path"` entries inside.
+pub(crate) fn library_paths() -> Vec<PathBuf> {
+    let Some(steam) = steam_install_dir() else {
+        return Vec::new();
+    };
+    let vdf = steam.join("steamapps").join("libraryfolders.vdf");
+    let Ok(content) = fs::read_to_string(&vdf) else {
+        return Vec::new();
+    };
+    parse_library_paths(&content)
+        .into_iter()
+        .map(PathBuf::from)
+        .collect()
+}
+
+/// Pure helper kept separate for tests. Extracts every `"path"` value
+/// from a `libraryfolders.vdf` blob. Windows-style `\\` separators
+/// are normalised to forward slashes so callers can join them with
+/// `Path::join` portably.
+pub(crate) fn parse_library_paths(content: &str) -> Vec<String> {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    let re = RE.get_or_init(|| Regex::new(r#""path"\s*"([^"]+)""#).expect("static regex"));
+    re.captures_iter(content)
+        .map(|c| c[1].replace("\\\\", "/"))
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_library_paths_extracts_unix_paths() {
+        let vdf = r#"
+            "libraryfolders"
+            {
+                "0"
+                {
+                    "path"		"/home/user/.local/share/Steam"
+                }
+                "1"
+                {
+                    "path"		"/run/media/user/SSD/SteamLibrary"
+                }
+            }
+        "#;
+        assert_eq!(
+            parse_library_paths(vdf),
+            vec![
+                "/home/user/.local/share/Steam".to_string(),
+                "/run/media/user/SSD/SteamLibrary".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_library_paths_normalises_windows_escapes() {
+        let vdf = r#""path"		"C:\\Program Files (x86)\\Steam""#;
+        assert_eq!(
+            parse_library_paths(vdf),
+            vec!["C:/Program Files (x86)/Steam".to_string()]
+        );
+    }
 }

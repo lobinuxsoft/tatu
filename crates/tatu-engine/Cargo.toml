@@ -1,0 +1,11 @@
+[package]
+name = "tatu-engine"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Backend-agnostic CE Auto-Assembler engine — parser, x86_64 assembler, and (in a follow-up) the Engine state machine. Compiles on Linux + Windows; the platform-specific I/O backend (ptrace runtime, Win32 bridge) is injected via the tatu-mem MemoryAccess trait + this crate's Backend extension trait."
+
+[dependencies]
+iced-x86 = { version = "1", default-features = false, features = ["std", "decoder", "encoder", "code_asm"] }
+tatu-mem = { path = "../tatu-mem" }
+thiserror = "1"

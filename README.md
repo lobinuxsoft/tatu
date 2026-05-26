@@ -69,6 +69,20 @@ Tatu is **early-stage and not yet production-ready**. The Win32 bridge has been 
 
 No public releases have been cut yet — the version listed in `Cargo.toml` reflects pre-release work.
 
+## Backend selection
+
+Tatu ships two cheat backends; the tracker picks one per game. The bridge under Wine is the **preferred** path for every Windows game and the only path that handles modern engines correctly; the Linux ptrace runtime is a **fallback** kept alive for native Linux titles where the bridge cannot apply.
+
+| Game runs as… | Preferred backend | Why |
+|---|---|---|
+| Windows binary under Proton/Wine | **`tatu-bridge` (Bridge)** | `OpenProcess` / `VirtualAllocEx` / `WriteProcessMemory` are native Win32 calls under Wine; cross-process `WriteProcessMemory` plus `SuspendThread` + `FlushInstructionCache` is the only safe way to patch `.text` on Win64 (kernel auto-lifts protection but the i-cache stays stale, see PR [#121](https://github.com/lobinuxsoft/tatu/pull/121)). |
+| Linux native ELF | `cheat-runtime` (Linux ptrace) | No wineprefix exists; the bridge has nothing to attach to. `process_vm_writev` + `PTRACE_ATTACH` is the only available primitive. |
+| Anti-cheat (EAC / BattlEye / Vanguard) | **Refused** | Out of scope (see "What Tatu is NOT"). Tracker detects and refuses both backends. |
+
+The toggle is per-game and lives in the cheats panel banner — *Switch to Tatu* installs the compat tool drop-in idempotently, patches Steam's `CompatToolMapping`, and persists the bridge choice in the tracker state. *Revert to Linux* flips the routing only; `config.vdf` stays at whatever the user last set so a manual Proton-GE override survives toggling cheats off.
+
+**Why the bridge wins for Proton games.** `process_vm_writev` over an emulated Win64 address space lands at file-mapped pages whose protection bits Wine has not synchronised with the kernel's actual mapping; cross-process patches succeed silently and corrupt the i-cache. Doing the patch from a Win32 worker inside the same Proton invocation hits `WriteProcessMemory`'s atomic `SuspendThread` + `VirtualProtect` + `FlushInstructionCache` cycle that the platform actually guarantees. For Unreal Engine titles in particular, anything else risks `FMallocBinned2` canary mismatches after a few seconds of combat.
+
 ## Building from source
 
 ### Requirements

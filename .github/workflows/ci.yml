@@ -66,10 +66,10 @@ jobs:
         include:
           - target: linux-amd64
             os: ubuntu-latest
-            binary: game-progress-tracker
-          - target: windows-amd64
-            os: windows-latest
-            binary: game-progress-tracker.exe
+            binary: tatu-tracker
+        # windows-amd64 disabled while the tool stays Linux-only.
+        # Re-add `- target: windows-amd64 / os: windows-latest /
+        # binary: tatu-tracker.exe` if/when tracker ships to Windows.
     steps:
       - uses: actions/checkout@v6
 
@@ -96,3 +96,4 @@ jobs:
           name: build-${{ matrix.target }}
           path: src-tauri/target/release/${{ matrix.binary }}
           retention-days: 7
+

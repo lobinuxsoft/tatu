@@ -64,3 +64,96 @@
 .badge-level { font-size: 0.6rem; color: var(--accent); }
 .badge-xp { font-size: 0.58rem; color: var(--fg-dim); }
 .badge-unlocked-info { font-size: 0.72rem; color: var(--fg-dim); margin-top: 0.3rem; }
+.cheat-search-bar { margin-bottom: 0.8rem; }
+.cheat-search-btn { background: var(--bg-3); color: var(--fg); border: 1px solid var(--border); padding: 0.4rem 0.8rem; border-radius: var(--r); font-family: var(--font-display); font-size: 0.72rem; font-weight: 700; text-transform: var(--display-transform); letter-spacing: var(--display-tracking); cursor: pointer; transition: background var(--t-fast), border-color var(--t-fast); }
+.cheat-search-btn:hover:not(:disabled) { background: var(--bg-2); border-color: var(--accent); }
+.cheat-search-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.cheat-pill { display: inline-block; padding: 0.25rem 0.6rem; border-radius: var(--r-lg); font-size: 0.72rem; font-weight: 600; }
+.cheat-pill-on { background: var(--bg-3); color: var(--success-strong); border: 1px solid var(--success-border); }
+.cheat-pill-off { background: var(--bg-3); color: var(--fg-muted); border: 1px solid var(--border); }
+
+.cheat-switch { position: relative; display: inline-block; width: 36px; height: 20px; flex-shrink: 0; }
+.cheat-switch input { opacity: 0; width: 0; height: 0; }
+.cheat-switch-slider { position: absolute; inset: 0; background: var(--bg-3); border: 1px solid var(--border); border-radius: 999px; transition: background var(--t-fast), border-color var(--t-fast); cursor: pointer; }
+.cheat-switch-slider::before { content: ""; position: absolute; height: 14px; width: 14px; left: 2px; top: 2px; background: var(--fg-muted); border-radius: 50%; transition: transform var(--t-fast), background var(--t-fast); }
+.cheat-switch input:checked + .cheat-switch-slider { background: var(--accent); border-color: var(--accent); }
+.cheat-switch input:checked + .cheat-switch-slider::before { transform: translateX(16px); background: var(--bg-panel); }
+.cheat-switch input:disabled + .cheat-switch-slider { opacity: 0.35; cursor: not-allowed; }
+.cheat-switch input:disabled + .cheat-switch-slider::before { cursor: not-allowed; }
+
+.ce-banner { display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.75rem; margin-bottom: 0.8rem; border-radius: var(--r); font-size: 0.75rem; }
+.ce-banner-ok   { background: var(--bg-3); color: var(--success-strong); border: 1px solid var(--success-border); }
+.ce-banner-warn { background: var(--bg-3); color: var(--fg);             border: 1px solid var(--border); }
+.ce-banner-err  { background: var(--bg-3); color: var(--danger-strong, #d77); border: 1px solid var(--danger-border, var(--border)); }
+.ce-install-btn { margin-left: auto; background: var(--accent); color: var(--bg-panel); border: none; padding: 0.3rem 0.7rem; border-radius: var(--r); font-family: var(--font-display); font-size: 0.7rem; font-weight: 700; text-transform: var(--display-transform); letter-spacing: var(--display-tracking); cursor: pointer; transition: opacity var(--t-fast); }
+.ce-install-btn:hover:not(:disabled) { opacity: 0.85; }
+.ce-install-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.tatu-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+.tatu-backend-label { color: var(--fg-muted); font-family: var(--font-display); font-size: 0.7rem; text-transform: var(--display-transform); letter-spacing: var(--display-tracking); }
+.tatu-backend-pill { padding: 0.15rem 0.55rem; border-radius: var(--r-sm); font-family: var(--font-display); font-size: 0.7rem; font-weight: 700; text-transform: var(--display-transform); letter-spacing: var(--display-tracking); }
+.tatu-pill-on  { background: var(--accent); color: var(--bg-panel); }
+.tatu-pill-off { background: transparent; color: var(--fg-muted); border: 1px solid var(--border); }
+.tatu-version { margin-left: auto; color: var(--fg-muted); font-size: 0.65rem; font-family: var(--font-display); letter-spacing: var(--display-tracking); }
+.tatu-toggle-btn, .tatu-install-btn { margin-left: 0; }
+
+.tatu-proton-label { display: inline-flex; align-items: center; gap: 0.3rem; color: var(--fg-muted); font-family: var(--font-display); font-size: 0.7rem; text-transform: var(--display-transform); letter-spacing: var(--display-tracking); }
+.tatu-proton-select { background: var(--bg-2); color: var(--fg); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 0.15rem 0.4rem; font-size: 0.7rem; font-family: var(--font-display); cursor: pointer; transition: border-color var(--t-fast), background var(--t-fast); }
+.tatu-proton-select:hover:not(:disabled) { border-color: var(--accent); }
+.tatu-proton-select:disabled { opacity: 0.5; cursor: not-allowed; }
+.tatu-proton-saved { border-color: var(--success-strong) !important; background: var(--bg-3) !important; }
+.tatu-proton-error { border-color: var(--danger-strong, #d77) !important; }
+
+.ce-tables-section { margin-bottom: 1rem; }
+.ce-tables-header { display: flex; align-items: center; gap: 0.5rem; font-family: var(--font-display); font-size: 0.72rem; font-weight: 700; text-transform: var(--display-transform); letter-spacing: var(--display-tracking); color: var(--fg-muted); margin-bottom: 0.4rem; }
+.ce-refresh-btn { margin-left: auto; background: transparent; color: var(--fg-muted); border: 1px solid var(--border); padding: 0.2rem 0.5rem; border-radius: var(--r-sm); font-family: var(--font-display); font-size: 0.65rem; cursor: pointer; transition: color var(--t-fast), border-color var(--t-fast); }
+.ce-refresh-btn:hover { color: var(--fg); border-color: var(--accent); }
+.ce-tables-list { list-style: none; padding: 0; margin: 0; }
+.ce-table-row { display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0; border-bottom: 1px solid var(--border-subtle); }
+.ce-table-info { flex: 1; min-width: 0; }
+.ce-table-name { font-size: 0.85rem; color: var(--fg); word-break: break-all; }
+.ce-table-meta { font-size: 0.65rem; color: var(--fg-dim); margin-top: 0.1rem; font-family: var(--font-display); }
+.ce-open-btn { background: var(--accent); color: var(--bg-panel); border: none; padding: 0.35rem 0.7rem; border-radius: var(--r); font-family: var(--font-display); font-size: 0.7rem; font-weight: 700; text-transform: var(--display-transform); letter-spacing: var(--display-tracking); cursor: pointer; flex-shrink: 0; transition: opacity var(--t-fast); }
+.ce-open-btn:hover:not(:disabled) { opacity: 0.85; }
+.ce-open-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.cheat-runtime-section { margin-bottom: 1rem; }
+.cheat-runtime-header { display: flex; align-items: center; gap: 0.5rem; font-family: var(--font-display); font-size: 0.72rem; font-weight: 700; text-transform: var(--display-transform); letter-spacing: var(--display-tracking); color: var(--fg-muted); margin-bottom: 0.4rem; }
+.cheat-runtime-list { list-style: none; padding: 0; margin: 0; }
+.cheat-runtime-item { display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0; border-bottom: 1px solid var(--border-subtle); }
+.cheat-runtime-info { flex: 1; min-width: 0; }
+.cheat-runtime-name { font-size: 0.85rem; font-weight: 600; color: var(--fg); }
+.cheat-runtime-meta { font-size: 0.65rem; color: var(--fg-dim); margin-top: 0.15rem; font-family: var(--font-display); }
+.cheat-runtime-header-row { list-style: none; padding: 0.8rem 0 0.3rem; border-bottom: 1px solid var(--border-subtle); }
+.cheat-runtime-header-text { font-family: var(--font-display); font-size: 0.7rem; font-weight: 700; text-transform: var(--display-transform); letter-spacing: var(--display-tracking); color: var(--fg-muted); }
+
+/* Orphan-hooks banner: appears at the top of the cheats panel when the
+   tracker finds persisted hook records whose game PID is still alive. */
+.orphans-banner { background: rgba(255, 180, 80, 0.08); border: 1px solid rgba(255, 180, 80, 0.35); border-radius: var(--r); padding: 0.6rem 0.8rem; margin-bottom: 0.8rem; }
+.orphans-title { font-family: var(--font-display); font-size: 0.75rem; font-weight: 700; color: #ffb04f; text-transform: var(--display-transform); letter-spacing: var(--display-tracking); }
+.orphans-help { font-size: 0.7rem; color: var(--fg-muted); margin: 0.4rem 0 0.5rem; line-height: 1.4; }
+.orphans-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.35rem; }
+.orphans-item { display: grid; grid-template-columns: 1fr auto auto; gap: 0.5rem; align-items: center; padding: 0.4rem 0.5rem; background: var(--bg-2); border-radius: var(--r); }
+.orphans-name { font-size: 0.8rem; font-weight: 600; color: var(--fg); grid-column: 1; }
+.orphans-meta { font-size: 0.6rem; color: var(--fg-dim); font-family: var(--font-display); grid-column: 1; grid-row: 2; }
+.orphans-restore, .orphans-dismiss { background: var(--bg-3); color: var(--fg); border: 1px solid var(--border); padding: 0.3rem 0.6rem; border-radius: var(--r); font-size: 0.7rem; cursor: pointer; transition: background var(--t-fast), border-color var(--t-fast); }
+.orphans-restore { grid-column: 2; grid-row: 1 / span 2; background: var(--accent); color: var(--bg-panel); border-color: var(--accent); font-weight: 700; }
+.orphans-restore:hover:not(:disabled) { opacity: 0.85; }
+.orphans-dismiss { grid-column: 3; grid-row: 1 / span 2; }
+.orphans-dismiss:hover:not(:disabled) { border-color: var(--fg-muted); }
+.orphans-restore:disabled, .orphans-dismiss:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Value-kind rows: CE pointer-chain entries with read/write/freeze. */
+.cheat-runtime-vtype { font-family: var(--font-display); font-size: 0.6rem; font-weight: 700; color: var(--accent); padding: 0.05rem 0.3rem; background: rgba(0, 0, 0, 0.12); border-radius: 4px; margin-left: 0.4rem; vertical-align: middle; text-transform: uppercase; letter-spacing: var(--display-tracking); }
+.cheat-runtime-value-blocked { opacity: 0.45; }
+.cheat-runtime-value-controls { display: flex; align-items: center; gap: 0.3rem; flex-shrink: 0; }
+.cheat-value-read, .cheat-value-set { background: var(--bg-3); color: var(--fg); border: 1px solid var(--border); padding: 0.25rem 0.55rem; border-radius: var(--r); font-size: 0.7rem; cursor: pointer; transition: opacity var(--t-fast), background var(--t-fast); }
+.cheat-value-read:hover:not(:disabled), .cheat-value-set:hover:not(:disabled) { background: var(--accent); color: var(--bg-panel); border-color: var(--accent); }
+.cheat-value-read:disabled, .cheat-value-set:disabled { opacity: 0.4; cursor: not-allowed; }
+.cheat-value-input { background: var(--bg-2); color: var(--fg); border: 1px solid var(--border); padding: 0.25rem 0.4rem; border-radius: var(--r); width: 6.5rem; font-family: var(--font-display); font-size: 0.75rem; }
+.cheat-value-input:disabled { opacity: 0.4; cursor: not-allowed; }
+.cheat-value-flash-ok { border-color: #6cf08a !important; box-shadow: 0 0 0 2px rgba(108, 240, 138, 0.25); }
+.cheat-value-flash-err { border-color: #ff6c6c !important; box-shadow: 0 0 0 2px rgba(255, 108, 108, 0.25); }
+.cheat-switch-sm { width: 28px; height: 16px; }
+.cheat-switch-sm .cheat-switch-slider::before { height: 10px; width: 10px; }
+.cheat-switch-sm input:checked + .cheat-switch-slider::before { transform: translateX(12px); }
