@@ -364,6 +364,44 @@ impl Debugger {
     pub fn event_queue(&self) -> Arc<EventQueue> {
         Arc::clone(&self.queue)
     }
+
+    /// Read memory through the PTRACE_PEEKDATA fallback path. Routes
+    /// to an already-paused thread via `crate::thread_control::find_paused_thread`,
+    /// or falls back to any registered TID if none is currently held.
+    ///
+    /// 1:1 with CE `ReadProcessMemoryDebug` (api.c:3033) entry into
+    /// the per-thread PEEKDATA loop, minus the socket-IPC dispatch.
+    pub fn read_memory_debug(&self, addr: u64, len: usize) -> Result<Vec<u8>, DebugError> {
+        let tid = self.pick_tid_for_memory_op()?;
+        crate::memory_debug::read_via_ptrace(tid, addr, len).map_err(Into::into)
+    }
+
+    /// Write memory through the PTRACE_POKEDATA fallback path —
+    /// works on read-only pages (the only safe way to patch `.text`
+    /// without `mprotect`). Routes to a paused TID like
+    /// [`read_memory_debug`].
+    ///
+    /// 1:1 with CE `WriteProcessMemoryDebug` (api.c:2667) entry into
+    /// the per-thread POKEDATA loop.
+    pub fn write_memory_debug(&self, addr: u64, buffer: &[u8]) -> Result<usize, DebugError> {
+        let tid = self.pick_tid_for_memory_op()?;
+        crate::memory_debug::write_via_ptrace(tid, addr, buffer).map_err(Into::into)
+    }
+
+    fn pick_tid_for_memory_op(&self) -> Result<Pid, DebugError> {
+        if let Some(tid) = crate::thread_control::find_paused_thread(self.pid) {
+            return Ok(tid);
+        }
+        // Fall back to any registered TID. The caller is expected to
+        // have stopped it via wait_for_event before calling.
+        self.threads
+            .lock()
+            .expect("threads poisoned")
+            .keys()
+            .next()
+            .copied()
+            .ok_or(DebugError::UnknownThread(self.pid))
+    }
 }
 
 impl Drop for Debugger {
