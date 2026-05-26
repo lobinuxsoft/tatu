@@ -137,6 +137,15 @@ pub struct ManifestFeature {
     /// Toggle and Header.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value: Option<ValueSpec>,
+    /// Nested children. CE tables routinely group cheats under
+    /// [`FeatureKind::Header`] entries, sometimes arbitrarily deep — the
+    /// `ender_magnolia_v11.ct` import exposes 5 levels, `elden_ring`
+    /// tables go up to 7. The UI renders this as a collapsible tree.
+    ///
+    /// Flat manifests (no nesting) deserialise with `children = []` and
+    /// the UI still works — the field is optional in JSON.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub children: Vec<ManifestFeature>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -151,6 +160,46 @@ pub enum ManifestError {
     },
     #[error("could not resolve config dir (XDG_CONFIG_HOME / HOME unset?)")]
     NoConfigDir,
+}
+
+impl ManifestFeature {
+    /// Depth-first iterator over `self` + every descendant in
+    /// `self.children`. Use this from any code that wants to find a
+    /// feature by UUID without caring about the tree structure
+    /// (`cheat_runtime_enable`, `locate_feature_script`,
+    /// `locate_value_feature`).
+    pub fn iter_recursive(&self) -> RecursiveFeatureIter<'_> {
+        RecursiveFeatureIter { stack: vec![self] }
+    }
+}
+
+impl Manifest {
+    /// Depth-first iterator over every feature in every subtree of this
+    /// manifest. Equivalent to chaining `iter_recursive` over each
+    /// top-level feature.
+    pub fn features_recursive(&self) -> impl Iterator<Item = &ManifestFeature> {
+        self.features.iter().flat_map(|f| f.iter_recursive())
+    }
+}
+
+/// Depth-first iterator returned by [`ManifestFeature::iter_recursive`].
+/// Yields the root first, then descends into each child's subtree in order.
+pub struct RecursiveFeatureIter<'a> {
+    stack: Vec<&'a ManifestFeature>,
+}
+
+impl<'a> Iterator for RecursiveFeatureIter<'a> {
+    type Item = &'a ManifestFeature;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let node = self.stack.pop()?;
+        // Push children in reverse so the leftmost child is visited
+        // first (LIFO stack flips order).
+        for child in node.children.iter().rev() {
+            self.stack.push(child);
+        }
+        Some(node)
+    }
 }
 
 pub fn manifests_dir_for(app_id: &str) -> Result<PathBuf, ManifestError> {
@@ -249,6 +298,7 @@ mod tests {
                     kind: FeatureKind::Toggle,
                     script: Some("[ENABLE]\n[DISABLE]\n".into()),
                     value: None,
+                    children: Vec::new(),
                 },
                 ManifestFeature {
                     uuid: "h".into(),
@@ -257,6 +307,7 @@ mod tests {
                     kind: FeatureKind::Header,
                     script: None,
                     value: None,
+                    children: Vec::new(),
                 },
                 ManifestFeature {
                     uuid: "v".into(),
@@ -269,6 +320,7 @@ mod tests {
                         offsets: vec![0x13C, 0x8B8, 0x2D0],
                         vtype: VType::U32,
                     }),
+                    children: Vec::new(),
                 },
             ],
         };
@@ -310,6 +362,88 @@ mod tests {
         assert_eq!(VType::F64.size_bytes(), 8);
         assert!(VType::F32.is_float() && VType::F64.is_float());
         assert!(!VType::U32.is_float() && !VType::I64.is_float());
+    }
+
+    #[test]
+    fn nested_children_round_trip_preserves_tree() {
+        // Mirrors the real-world CE shape recovered from
+        // `ender_magnolia_v11.ct` (depth 5) and `elden_ring` tables
+        // (depth 7): a Header parent owns child Toggles + grandchildren.
+        let leaf = ManifestFeature {
+            uuid: "leaf".into(),
+            name: "God Mode".into(),
+            category: None,
+            kind: FeatureKind::Toggle,
+            script: Some("[ENABLE]\n[DISABLE]\n".into()),
+            value: None,
+            children: Vec::new(),
+        };
+        let sub_header = ManifestFeature {
+            uuid: "sub".into(),
+            name: "Combat".into(),
+            category: None,
+            kind: FeatureKind::Header,
+            script: None,
+            value: None,
+            children: vec![leaf.clone()],
+        };
+        let m = Manifest {
+            exe: "Game.exe".into(),
+            title: "Nested".into(),
+            features: vec![ManifestFeature {
+                uuid: "root".into(),
+                name: "Player".into(),
+                category: None,
+                kind: FeatureKind::Header,
+                script: None,
+                value: None,
+                children: vec![sub_header],
+            }],
+        };
+        let text = serde_json::to_string(&m).unwrap();
+        let back: Manifest = serde_json::from_str(&text).unwrap();
+        assert_eq!(m, back);
+        // Tree shape preserved at depth 3.
+        assert_eq!(back.features[0].children[0].children[0].uuid, "leaf");
+    }
+
+    #[test]
+    fn flat_manifest_without_children_field_still_loads() {
+        // Manifests written before #133 don't have a `children` array.
+        // `#[serde(default)]` must populate it as empty so older files
+        // on disk continue to work without an out-of-band migration.
+        let m: Manifest = serde_json::from_str(
+            r#"{
+                "exe": "Game.exe",
+                "features": [
+                    {"uuid":"u","name":"God Mode","script":"[ENABLE]\n[DISABLE]\n"}
+                ]
+            }"#,
+        )
+        .unwrap();
+        assert!(m.features[0].children.is_empty());
+    }
+
+    #[test]
+    fn empty_children_omitted_in_serialised_output() {
+        // skip_serializing_if = "Vec::is_empty" keeps the JSON tidy for
+        // the 99% of features that don't have children. Without this,
+        // every flat-manifest dump would gain a noisy `"children": []`.
+        let m = Manifest {
+            exe: "G".into(),
+            title: "T".into(),
+            features: vec![ManifestFeature {
+                uuid: "u".into(),
+                name: "n".into(),
+                category: None,
+                kind: FeatureKind::Toggle,
+                script: Some("[ENABLE]\n[DISABLE]\n".into()),
+                value: None,
+                children: Vec::new(),
+            }],
+        };
+        let json = serde_json::to_string(&m).unwrap();
+        assert!(!json.contains("\"children\""));
     }
 
     #[test]
