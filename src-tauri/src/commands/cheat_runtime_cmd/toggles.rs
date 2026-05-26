@@ -47,9 +47,17 @@ pub fn cheat_runtime_enable(
         "[enable {feature_uuid}] linux runtime, pid {}",
         pid.as_raw()
     );
-    let script = parse_script(&script_src).map_err(|e| format!("parse: {e}"))?;
+    let script = parse_script(&script_src).map_err(|e| {
+        let msg = format!("parse: {e}");
+        eprintln!("[enable {feature_uuid}] {msg}");
+        msg
+    })?;
     let mut engine = Engine::new(pid);
-    let cheat = engine.enable(&script).map_err(|e| format!("enable: {e}"))?;
+    let cheat = engine.enable(&script).map_err(|e| {
+        let msg = format!("enable: {e}");
+        eprintln!("[enable {feature_uuid}] {msg}");
+        msg
+    })?;
     eprintln!(
         "[enable {feature_uuid}] success, symbols={:?}",
         cheat.symbols().keys().collect::<Vec<_>>()
