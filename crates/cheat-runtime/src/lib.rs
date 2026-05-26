@@ -61,6 +61,7 @@ pub mod process;
 pub mod ptrace_helpers;
 pub mod regions;
 pub mod scanner;
+pub mod symbol_table;
 pub mod thread_context;
 pub mod thread_control;
 pub mod threads;
@@ -112,6 +113,7 @@ pub use regions::{
     windows_protection_to_linux,
 };
 pub use scanner::{ParseError as PatternParseError, Pattern, scan, scan_in_process};
+pub use symbol_table::{Module, SymbolError, SymbolSpec, SymbolTable, enumerate_modules};
 pub use thread_context::{
     ContextFlags, ThreadContext, get_thread_context, read_debug_register, set_thread_context,
     write_debug_register,
