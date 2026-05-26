@@ -350,6 +350,27 @@ fn aobscan_with_two_args_errors() {
 }
 
 #[test]
+fn parse_aobscan_global_two_args() {
+    // CE-AA's 2-arg form for Mono / JIT-emitted targets where the
+    // executable image can't carry the bytes. Enigma of Fear and
+    // similar Unity tables use this almost exclusively.
+    let stmt = classify("aobscan(INJECT,F2 0F 5C C1 F2 0F 5A E8)").unwrap();
+    assert_eq!(
+        stmt,
+        Statement::AobScan {
+            symbol: "INJECT".into(),
+            pattern: "F2 0F 5C C1 F2 0F 5A E8".into(),
+        }
+    );
+}
+
+#[test]
+fn aobscan_with_one_arg_errors() {
+    let err = classify("aobscan(foo)").unwrap_err();
+    assert!(matches!(err, ParseError::BadCall { fn_name, .. } if fn_name == "aobscan"));
+}
+
+#[test]
 fn anonymous_forward_label_rewritten_to_next_label() {
     let src = "[ENABLE]\n\
                codecave:\n\

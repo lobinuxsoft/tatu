@@ -93,6 +93,15 @@ pub enum Statement {
         scope: String,
         pattern: String,
     },
+    /// `aobscan(symbol, pattern)` — process-wide scan with no module scope.
+    /// CE-AA's 2-arg form, commonly used by Mono / Unity table authors who
+    /// can't rely on the game's executable carrying the bytes (the JIT
+    /// stores them in anonymous \[heap\] regions). Tatu's executor already
+    /// scans every readable region for the module form too, so the
+    /// behaviour is identical at run-time — the distinction is preserved
+    /// in the AST so a future module-scoping pass can honour it without
+    /// reparsing.
+    AobScan { symbol: String, pattern: String },
     /// `registersymbol(name [name …])` — publish one or more symbols for
     /// cross-script lookups. CE-AA accepts both `name`, `a, b, c` and
     /// `a b c` shapes; all normalise to a [`NameList`]. Wildcard `(*)` is
@@ -281,7 +290,8 @@ fn classify(line: &str) -> Result<Statement, ParseError> {
         let fn_name = line[..open].trim();
         let args = &line[open + 1..line.len() - 1];
         match fn_name {
-            "aobscanmodule" => return parse_aobscan(args),
+            "aobscanmodule" => return parse_aobscanmodule(args),
+            "aobscan" => return parse_aobscan_global(args),
             "registersymbol" => {
                 return parse_name_list_call(args, "registersymbol", Statement::RegisterSymbol);
             }
@@ -299,7 +309,7 @@ fn classify(line: &str) -> Result<Statement, ParseError> {
     Ok(Statement::Raw(line.to_string()))
 }
 
-fn parse_aobscan(args: &str) -> Result<Statement, ParseError> {
+fn parse_aobscanmodule(args: &str) -> Result<Statement, ParseError> {
     let parts: Vec<&str> = args.splitn(3, ',').map(str::trim).collect();
     if parts.len() != 3 {
         return Err(ParseError::BadCall {
@@ -311,6 +321,25 @@ fn parse_aobscan(args: &str) -> Result<Statement, ParseError> {
         symbol: parts[0].to_string(),
         scope: parts[1].to_string(),
         pattern: parts[2].to_string(),
+    })
+}
+
+/// `aobscan(symbol, pattern)` — no module scope. CE-AA's 2-arg form, used
+/// pervasively by Mono / Unity table authors who can't pin the JIT-emitted
+/// bytes to a static module image. Parser keeps the variant distinct from
+/// [`Statement::AobScanModule`] for downstream introspection; executor
+/// scans all readable regions either way (see `engine::scan_unique`).
+fn parse_aobscan_global(args: &str) -> Result<Statement, ParseError> {
+    let parts: Vec<&str> = args.splitn(2, ',').map(str::trim).collect();
+    if parts.len() != 2 {
+        return Err(ParseError::BadCall {
+            fn_name: "aobscan".into(),
+            detail: format!("expected 2 args, got {}", parts.len()),
+        });
+    }
+    Ok(Statement::AobScan {
+        symbol: parts[0].to_string(),
+        pattern: parts[1].to_string(),
     })
 }
 

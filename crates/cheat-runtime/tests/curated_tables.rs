@@ -188,6 +188,29 @@ fn fixture_05_lua_only_marks_script() {
 }
 
 #[test]
+fn fixture_07_aobscan_global() {
+    // Mono / JIT pattern: 2-arg `aobscan(symbol, pattern)` with no
+    // module scope. Pre-Tier-3 (post-Tier-2 SSE2) this errored with
+    // BadCall(aobscan); post-fix it projects to Statement::AobScan and
+    // the executor walks every readable region just like with the
+    // module form.
+    let scripts = load_fixture("07_aobscan_no_module.ct");
+    let script = parse(&scripts[0]).expect("aobscan(_, _) must parse");
+    let has_aobscan = script
+        .enable
+        .iter()
+        .any(|s| matches!(s, Statement::AobScan { symbol, .. } if symbol == "INJECT"));
+    assert!(
+        has_aobscan,
+        "expected Statement::AobScan with symbol 'INJECT'"
+    );
+    // The companion exe-binding heuristic should pick up the `{ Game :
+    // fixture.exe }` comment block — sanity check that the fixture's
+    // ct_import path also handles aobscan-only tables.
+    assert!(!script.lua_only);
+}
+
+#[test]
 fn fixture_06_mixed_lua_asm_marks_lua_only() {
     // {$lua} inside an [ENABLE] block also forces lua_only=true — CE
     // would hand the block to its Lua interpreter, and we can't
