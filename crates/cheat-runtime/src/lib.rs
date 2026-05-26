@@ -45,6 +45,7 @@ pub mod alloc;
 pub mod aurora;
 pub mod chain;
 pub mod ct_import;
+pub mod debug;
 pub mod elfsym;
 pub mod executor;
 pub mod freeze;
@@ -79,6 +80,7 @@ pub use ct_import::{
     CtImportError, ImportReport, auto_import_default_dirs, auto_import_for_app, convert_ct_file,
     import_dirs as ct_import_dirs,
 };
+pub use debug::{BpSize, BpType, DebugError, DebugEvent, DebugEventKind, Debugger};
 pub use elfsym::{ElfSymError, find_libc_symbol, find_module_base, find_module_symbol};
 pub use executor::{ActiveCheat, Engine, ExecError};
 pub use freeze::{FreezeError, FreezeHandle, FreezeKey, FreezeRegistry, FreezeTarget};
