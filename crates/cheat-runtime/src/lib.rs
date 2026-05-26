@@ -59,6 +59,7 @@ pub mod process;
 pub mod ptrace_helpers;
 pub mod regions;
 pub mod scanner;
+pub mod thread_context;
 pub mod threads;
 
 // parser + asm live in tatu-engine since Phase 7A1 — re-exported
@@ -106,3 +107,7 @@ pub use regions::{
     windows_protection_to_linux,
 };
 pub use scanner::{ParseError as PatternParseError, Pattern, scan, scan_in_process};
+pub use thread_context::{
+    ContextFlags, ThreadContext, get_thread_context, read_debug_register, set_thread_context,
+    write_debug_register,
+};
