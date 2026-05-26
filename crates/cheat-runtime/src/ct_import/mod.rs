@@ -48,7 +48,9 @@ use crate::manifest::Manifest;
 use self::heuristics::derive_exe;
 use self::xml_walker::walk_entries;
 
-pub use self::disk::{auto_import_default_dirs, auto_import_for_app, import_dirs};
+pub use self::disk::{
+    auto_import_default_dirs, auto_import_for_app, ct_tables_dir_for, import_dirs,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CtImportError {
