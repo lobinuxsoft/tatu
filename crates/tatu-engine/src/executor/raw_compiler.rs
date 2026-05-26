@@ -36,6 +36,20 @@ pub(super) fn compile_raw<B: Backend>(
             .ok_or_else(|| ExecError::Unsupported(format!("dq with bad operand: {line:?}")));
     }
     if let Some(rest) = trimmed
+        .strip_prefix("dd ")
+        .or_else(|| trimmed.strip_prefix("dd\t"))
+    {
+        return parse_dd(rest, symbols)
+            .ok_or_else(|| ExecError::Unsupported(format!("dd with bad operand: {line:?}")));
+    }
+    if let Some(rest) = trimmed
+        .strip_prefix("dw ")
+        .or_else(|| trimmed.strip_prefix("dw\t"))
+    {
+        return parse_dw(rest, symbols)
+            .ok_or_else(|| ExecError::Unsupported(format!("dw with bad operand: {line:?}")));
+    }
+    if let Some(rest) = trimmed
         .strip_prefix("nop ")
         .or_else(|| trimmed.strip_prefix("nop\t"))
     {
@@ -92,6 +106,47 @@ pub(super) fn parse_dq(operand: &str, symbols: &HashMap<String, u64>) -> Option<
         return Some(u64::from_str_radix(hex, 16).ok()?.to_le_bytes().to_vec());
     }
     Some(t.parse::<u64>().ok()?.to_le_bytes().to_vec())
+}
+
+/// `dd N` — single 32-bit literal. CE-AA's typical usage is a single
+/// value (`dd 00000000` to zero a 4-byte slot or `dd (float)1.0` for a
+/// float constant). Multi-value `dd a, b, c` is rare in the audit corpus;
+/// when one shows up we extend.
+pub(super) fn parse_dd(operand: &str, symbols: &HashMap<String, u64>) -> Option<Vec<u8>> {
+    let t = operand.trim();
+    // (float)N — CE-AA's IEEE-754 single literal.
+    if let Some(rest) = t.strip_prefix("(float)") {
+        let f: f32 = rest.trim().parse().ok()?;
+        return Some(f.to_bits().to_le_bytes().to_vec());
+    }
+    if let Some(addr) = symbols.get(t) {
+        return Some((*addr as u32).to_le_bytes().to_vec());
+    }
+    if let Some(hex) = t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")) {
+        return Some(u32::from_str_radix(hex, 16).ok()?.to_le_bytes().to_vec());
+    }
+    if let Some(hex) = t.strip_prefix('$') {
+        return Some(u32::from_str_radix(hex, 16).ok()?.to_le_bytes().to_vec());
+    }
+    // Bare hex without prefix (CE-AA accepts both `1234` decimal and
+    // `0x1234` hex; for `dd` the canonical is decimal unless the user
+    // wrote a prefix, matching `dq`'s rule above).
+    Some(t.parse::<u32>().ok()?.to_le_bytes().to_vec())
+}
+
+/// `dw N` — single 16-bit literal. Same shape as `dd` but `u16`.
+pub(super) fn parse_dw(operand: &str, symbols: &HashMap<String, u64>) -> Option<Vec<u8>> {
+    let t = operand.trim();
+    if let Some(addr) = symbols.get(t) {
+        return Some((*addr as u16).to_le_bytes().to_vec());
+    }
+    if let Some(hex) = t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")) {
+        return Some(u16::from_str_radix(hex, 16).ok()?.to_le_bytes().to_vec());
+    }
+    if let Some(hex) = t.strip_prefix('$') {
+        return Some(u16::from_str_radix(hex, 16).ok()?.to_le_bytes().to_vec());
+    }
+    Some(t.parse::<u16>().ok()?.to_le_bytes().to_vec())
 }
 
 pub(super) fn readmem_bytes<B: Backend>(

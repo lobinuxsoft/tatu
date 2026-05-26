@@ -30,6 +30,12 @@ pub(super) fn estimate_raw_length(
     if trimmed.starts_with("dq ") || trimmed.starts_with("dq\t") {
         return Some(8);
     }
+    if trimmed.starts_with("dd ") || trimmed.starts_with("dd\t") {
+        return Some(4);
+    }
+    if trimmed.starts_with("dw ") || trimmed.starts_with("dw\t") {
+        return Some(2);
+    }
     if let Some(rest) = trimmed
         .strip_prefix("nop ")
         .or_else(|| trimmed.strip_prefix("nop\t"))
@@ -102,7 +108,10 @@ mod tests {
             estimate_raw_length("cmp byte ptr [foo], 1", &empty, 0),
             Some(8)
         );
-        assert_eq!(estimate_raw_length("imul rax, rbx, 4", &empty, 0), None);
+        // imul now supported via Tier-3 misc.rs — 3-arg with imm8 form.
+        assert_eq!(estimate_raw_length("imul rax, rbx, 4", &empty, 0), Some(4));
+        // Pin a truly fake mnemonic for the unsupported-path coverage.
+        assert_eq!(estimate_raw_length("fizzbuzz rax, rbx", &empty, 0), None);
         assert_eq!(estimate_raw_length("lea rax, [rbx+8]", &empty, 0), Some(4));
     }
 

@@ -29,11 +29,11 @@
 
 use std::collections::HashMap;
 
-use iced_x86::code_asm::{CodeAssembler, dword_ptr, qword_ptr};
+use iced_x86::code_asm::{CodeAssembler, dword_ptr, qword_ptr, xmmword_ptr};
 
 use super::AsmError;
 use super::operands::{
-    MemSize, TypedReg, parse_register, parse_xmm_register, split_two_operands,
+    MemSize, TypedReg, parse_immediate, parse_register, parse_xmm_register, split_two_operands,
     try_parse_memory_operand,
 };
 
@@ -123,6 +123,12 @@ fn dispatch_sse_arith(
         "ucomisd" => a.ucomisd(lhs, rhs)?,
         "cvtsd2ss" => a.cvtsd2ss(lhs, rhs)?,
         "cvtss2sd" => a.cvtss2sd(lhs, rhs)?,
+        "maxss" => a.maxss(lhs, rhs)?,
+        "maxsd" => a.maxsd(lhs, rhs)?,
+        "minss" => a.minss(lhs, rhs)?,
+        "minsd" => a.minsd(lhs, rhs)?,
+        "sqrtss" => a.sqrtss(lhs, rhs)?,
+        "sqrtsd" => a.sqrtsd(lhs, rhs)?,
         other => {
             return Err(AsmError::Unsupported(format!(
                 "{other}: unknown SSE arith mnemonic"
@@ -155,6 +161,12 @@ fn dispatch_sse_arith_mem(
         "ucomisd" => a.ucomisd(lhs, mem)?,
         "cvtsd2ss" => a.cvtsd2ss(lhs, mem)?,
         "cvtss2sd" => a.cvtss2sd(lhs, mem)?,
+        "maxss" => a.maxss(lhs, mem)?,
+        "maxsd" => a.maxsd(lhs, mem)?,
+        "minss" => a.minss(lhs, mem)?,
+        "minsd" => a.minsd(lhs, mem)?,
+        "sqrtss" => a.sqrtss(lhs, mem)?,
+        "sqrtsd" => a.sqrtsd(lhs, mem)?,
         other => {
             return Err(AsmError::Unsupported(format!(
                 "{other}: unknown SSE arith mnemonic"
@@ -300,8 +312,9 @@ fn emit_sse_cvt_int(
                 )));
             }
         }
-        // cvtss2si/cvtsd2si: dst = r32|r64, src = xmm|mem
-        "cvtss2si" | "cvtsd2si" => {
+        // cvtss2si/cvtsd2si + cvttss2si/cvttsd2si: dst = r32|r64, src = xmm|mem.
+        // The `cvtt*` variants truncate toward zero instead of rounding.
+        "cvtss2si" | "cvtsd2si" | "cvttss2si" | "cvttsd2si" => {
             let lhs = parse_register(lhs_text).ok_or_else(|| {
                 AsmError::Unsupported(format!(
                     "{mnem} {lhs_text:?}: dst must be a 32/64-bit register"
@@ -313,6 +326,10 @@ fn emit_sse_cvt_int(
                     ("cvtss2si", TypedReg::R32(d)) => a.cvtss2si(d, rhs)?,
                     ("cvtsd2si", TypedReg::R64(d)) => a.cvtsd2si(d, rhs)?,
                     ("cvtsd2si", TypedReg::R32(d)) => a.cvtsd2si(d, rhs)?,
+                    ("cvttss2si", TypedReg::R64(d)) => a.cvttss2si(d, rhs)?,
+                    ("cvttss2si", TypedReg::R32(d)) => a.cvttss2si(d, rhs)?,
+                    ("cvttsd2si", TypedReg::R64(d)) => a.cvttsd2si(d, rhs)?,
+                    ("cvttsd2si", TypedReg::R32(d)) => a.cvttsd2si(d, rhs)?,
                     _ => {
                         return Err(AsmError::Unsupported(format!(
                             "{mnem} {lhs_text}, {rhs_text}: dst must be a 32/64-bit register"
@@ -321,8 +338,8 @@ fn emit_sse_cvt_int(
                 };
             } else if let Some((size_opt, mem)) = try_parse_memory_operand(rhs_text, syms)? {
                 let size = size_opt.unwrap_or(match mnem {
-                    "cvtss2si" => MemSize::Dword,
-                    "cvtsd2si" => MemSize::Qword,
+                    "cvtss2si" | "cvttss2si" => MemSize::Dword,
+                    "cvtsd2si" | "cvttsd2si" => MemSize::Qword,
                     _ => unreachable!(),
                 });
                 let mem = match size {
@@ -339,6 +356,10 @@ fn emit_sse_cvt_int(
                     ("cvtss2si", TypedReg::R32(d)) => a.cvtss2si(d, mem)?,
                     ("cvtsd2si", TypedReg::R64(d)) => a.cvtsd2si(d, mem)?,
                     ("cvtsd2si", TypedReg::R32(d)) => a.cvtsd2si(d, mem)?,
+                    ("cvttss2si", TypedReg::R64(d)) => a.cvttss2si(d, mem)?,
+                    ("cvttss2si", TypedReg::R32(d)) => a.cvttss2si(d, mem)?,
+                    ("cvttsd2si", TypedReg::R64(d)) => a.cvttsd2si(d, mem)?,
+                    ("cvttsd2si", TypedReg::R32(d)) => a.cvttsd2si(d, mem)?,
                     _ => {
                         return Err(AsmError::Unsupported(format!(
                             "{mnem} {lhs_text}, [mem]: dst must be a 32/64-bit register"
@@ -360,9 +381,147 @@ fn emit_sse_cvt_int(
     Ok(a.assemble(base)?)
 }
 
-/// Map a Tier-2 mnemonic to its dispatch helper. Used by [`super::compile_line`]
-/// so the top-level mnemonic match doesn't have to enumerate every SSE2
-/// op individually.
+/// Pattern E (Tier-3): packed move `mnem xmm/mem128, xmm/mem128`.
+/// Used by `movups`, `movupd`, `movaps`, `movapd`, `movdqa`, `movdqu`.
+/// 128-bit (xmmword) memory width regardless of which sub-mnemonic. The
+/// `aligned` variants (`movaps`/`movapd`/`movdqa`) fault on misaligned
+/// memory at runtime, but the encoder doesn't care — same job here.
+fn emit_sse_packed_mov(
+    rest: &str,
+    syms: &HashMap<String, u64>,
+    base: u64,
+    mnem: &str,
+) -> Result<Vec<u8>, AsmError> {
+    let (lhs_text, rhs_text) = split_two_operands(rest)?;
+    let mut a = CodeAssembler::new(64)?;
+
+    // Memory destination: `movups [mem], xmm`.
+    if let Some((_, mem)) = try_parse_memory_operand(lhs_text, syms)? {
+        let rhs = parse_xmm_register(rhs_text).ok_or_else(|| {
+            AsmError::Unsupported(format!(
+                "{mnem} [mem], {rhs_text:?}: rhs must be an xmm register"
+            ))
+        })?;
+        let mem = xmmword_ptr(mem);
+        match mnem {
+            "movups" => a.movups(mem, rhs)?,
+            "movupd" => a.movupd(mem, rhs)?,
+            "movaps" => a.movaps(mem, rhs)?,
+            "movapd" => a.movapd(mem, rhs)?,
+            "movdqa" => a.movdqa(mem, rhs)?,
+            "movdqu" => a.movdqu(mem, rhs)?,
+            other => {
+                return Err(AsmError::Unsupported(format!(
+                    "{other}: unknown packed mov mnemonic"
+                )));
+            }
+        };
+        return Ok(a.assemble(base)?);
+    }
+
+    let lhs = parse_xmm_register(lhs_text).ok_or_else(|| {
+        AsmError::Unsupported(format!("{mnem} {lhs_text:?}: lhs must be an xmm register"))
+    })?;
+    if let Some(rhs) = parse_xmm_register(rhs_text) {
+        match mnem {
+            "movups" => a.movups(lhs, rhs)?,
+            "movupd" => a.movupd(lhs, rhs)?,
+            "movaps" => a.movaps(lhs, rhs)?,
+            "movapd" => a.movapd(lhs, rhs)?,
+            "movdqa" => a.movdqa(lhs, rhs)?,
+            "movdqu" => a.movdqu(lhs, rhs)?,
+            other => {
+                return Err(AsmError::Unsupported(format!(
+                    "{other}: unknown packed mov mnemonic"
+                )));
+            }
+        };
+    } else if let Some((_, mem)) = try_parse_memory_operand(rhs_text, syms)? {
+        let mem = xmmword_ptr(mem);
+        match mnem {
+            "movups" => a.movups(lhs, mem)?,
+            "movupd" => a.movupd(lhs, mem)?,
+            "movaps" => a.movaps(lhs, mem)?,
+            "movapd" => a.movapd(lhs, mem)?,
+            "movdqa" => a.movdqa(lhs, mem)?,
+            "movdqu" => a.movdqu(lhs, mem)?,
+            other => {
+                return Err(AsmError::Unsupported(format!(
+                    "{other}: unknown packed mov mnemonic"
+                )));
+            }
+        };
+    } else {
+        return Err(AsmError::Unsupported(format!(
+            "{mnem} {lhs_text}, {rhs_text:?}: rhs must be xmm or memory"
+        )));
+    }
+    Ok(a.assemble(base)?)
+}
+
+/// Pattern F (Tier-3): three-operand shuffle with imm8 selector. Used by
+/// `shufps` and `shufpd`. Shape: `mnem xmm, xmm|mem, imm8`.
+fn emit_sse_shuffle(
+    rest: &str,
+    syms: &HashMap<String, u64>,
+    base: u64,
+    mnem: &str,
+) -> Result<Vec<u8>, AsmError> {
+    // The 3-operand split needs different handling than the 2-op case:
+    // `shufps xmm0, xmm1, 0xE4` has TWO commas. Split rightmost to peel
+    // off the imm, then re-use split_two_operands on the head.
+    let trimmed = rest.trim();
+    let imm_idx = trimmed.rfind(',').ok_or_else(|| {
+        AsmError::Unsupported(format!(
+            "{mnem} {rest:?}: expected 3 comma-separated operands"
+        ))
+    })?;
+    let (head, imm_text) = trimmed.split_at(imm_idx);
+    let imm_text = imm_text[1..].trim();
+    let (lhs_text, rhs_text) = split_two_operands(head)?;
+    let imm = parse_immediate(imm_text, syms).ok_or_else(|| {
+        AsmError::Unsupported(format!("{mnem}: imm8 operand {imm_text:?} not numeric"))
+    })?;
+    if !(0..=0xFF).contains(&imm) {
+        return Err(AsmError::Unsupported(format!(
+            "{mnem}: imm operand {imm:#x} doesn't fit in 8 bits"
+        )));
+    }
+    let lhs = parse_xmm_register(lhs_text)
+        .ok_or_else(|| AsmError::Unsupported(format!("{mnem} {lhs_text:?}: lhs must be xmm")))?;
+    let mut a = CodeAssembler::new(64)?;
+    if let Some(rhs) = parse_xmm_register(rhs_text) {
+        match mnem {
+            "shufps" => a.shufps(lhs, rhs, imm as u32)?,
+            "shufpd" => a.shufpd(lhs, rhs, imm as u32)?,
+            other => {
+                return Err(AsmError::Unsupported(format!(
+                    "{other}: unknown shuffle mnemonic"
+                )));
+            }
+        };
+    } else if let Some((_, mem)) = try_parse_memory_operand(rhs_text, syms)? {
+        let mem = xmmword_ptr(mem);
+        match mnem {
+            "shufps" => a.shufps(lhs, mem, imm as u32)?,
+            "shufpd" => a.shufpd(lhs, mem, imm as u32)?,
+            other => {
+                return Err(AsmError::Unsupported(format!(
+                    "{other}: unknown shuffle mnemonic"
+                )));
+            }
+        };
+    } else {
+        return Err(AsmError::Unsupported(format!(
+            "{mnem} {lhs_text}, {rhs_text:?}: middle operand must be xmm or memory"
+        )));
+    }
+    Ok(a.assemble(base)?)
+}
+
+/// Map a Tier-2/3 mnemonic to its dispatch helper. Used by
+/// [`super::compile_line`] so the top-level mnemonic match doesn't have
+/// to enumerate every SSE op individually.
 pub(super) fn dispatch_sse_mnemonic(
     mnem: &str,
     rest: &str,
@@ -370,20 +529,36 @@ pub(super) fn dispatch_sse_mnemonic(
     base: u64,
 ) -> Result<Option<Vec<u8>>, AsmError> {
     match mnem {
-        // Pattern A — arith / compare / scalar-scalar convert
-        "addss" | "subss" | "mulss" | "divss" | "xorps" | "comiss" | "ucomiss" | "cvtss2sd" => Ok(
-            Some(emit_sse_arith(rest, syms, base, mnem, Scalar::Single)?),
-        ),
-        "addsd" | "subsd" | "mulsd" | "divsd" | "xorpd" | "comisd" | "ucomisd" | "cvtsd2ss" => Ok(
-            Some(emit_sse_arith(rest, syms, base, mnem, Scalar::Double)?),
-        ),
-        // Pattern B — scalar move
+        // Pattern A — arith / compare / scalar-scalar convert (Tier-2/3)
+        "addss" | "subss" | "mulss" | "divss" | "xorps" | "comiss" | "ucomiss" | "cvtss2sd"
+        | "maxss" | "minss" | "sqrtss" => Ok(Some(emit_sse_arith(
+            rest,
+            syms,
+            base,
+            mnem,
+            Scalar::Single,
+        )?)),
+        "addsd" | "subsd" | "mulsd" | "divsd" | "xorpd" | "comisd" | "ucomisd" | "cvtsd2ss"
+        | "maxsd" | "minsd" | "sqrtsd" => Ok(Some(emit_sse_arith(
+            rest,
+            syms,
+            base,
+            mnem,
+            Scalar::Double,
+        )?)),
+        // Pattern B — scalar move (Tier-2)
         "movss" => Ok(Some(emit_sse_mov(rest, syms, base, mnem, Scalar::Single)?)),
         "movsd" => Ok(Some(emit_sse_mov(rest, syms, base, mnem, Scalar::Double)?)),
-        // Pattern C — int↔float convert
-        "cvtsi2ss" | "cvtsi2sd" | "cvtss2si" | "cvtsd2si" => {
+        // Pattern C — int↔float convert (Tier-2/3 incl. truncating cvtt*)
+        "cvtsi2ss" | "cvtsi2sd" | "cvtss2si" | "cvtsd2si" | "cvttss2si" | "cvttsd2si" => {
             Ok(Some(emit_sse_cvt_int(rest, syms, base, mnem)?))
         }
+        // Pattern E — packed mov (Tier-3)
+        "movups" | "movupd" | "movaps" | "movapd" | "movdqa" | "movdqu" => {
+            Ok(Some(emit_sse_packed_mov(rest, syms, base, mnem)?))
+        }
+        // Pattern F — shuffle with imm8 (Tier-3)
+        "shufps" | "shufpd" => Ok(Some(emit_sse_shuffle(rest, syms, base, mnem)?)),
         _ => Ok(None),
     }
 }
@@ -510,6 +685,57 @@ mod tests {
             .unwrap();
         // F3 0F 2D C0 — cvtss2si eax, xmm0
         assert_eq!(bytes, vec![0xF3, 0x0F, 0x2D, 0xC0]);
+    }
+
+    // --- Pattern E — packed move (Tier-3) ---
+
+    #[test]
+    fn movups_reg_reg() {
+        let bytes = compile_line("movups xmm0, xmm1", &empty(), 0)
+            .unwrap()
+            .unwrap();
+        // 0F 10 C1 — movups xmm0, xmm1
+        assert_eq!(bytes, vec![0x0F, 0x10, 0xC1]);
+    }
+
+    #[test]
+    fn movaps_mem_reg() {
+        let bytes = compile_line("movaps [rax], xmm0", &empty(), 0)
+            .unwrap()
+            .unwrap();
+        // 0F 29 00 — movaps xmmword ptr [rax], xmm0
+        assert_eq!(bytes, vec![0x0F, 0x29, 0x00]);
+    }
+
+    #[test]
+    fn movdqu_reg_mem_with_disp() {
+        let bytes = compile_line("movdqu xmm1, [rdx+10]", &empty(), 0)
+            .unwrap()
+            .unwrap();
+        // F3 0F 6F 4A 10 — movdqu xmm1, xmmword ptr [rdx+0x10]
+        assert_eq!(bytes, vec![0xF3, 0x0F, 0x6F, 0x4A, 0x10]);
+    }
+
+    // --- Pattern F — shuffle with imm8 (Tier-3) ---
+
+    #[test]
+    fn shufps_reg_reg_imm() {
+        // shufps xmm0, xmm1, 0xE4 — identity-ish shuffle, the most common
+        // imm8 in CE-AA tables (every lane comes from itself).
+        let bytes = compile_line("shufps xmm0, xmm1, 0xE4", &empty(), 0)
+            .unwrap()
+            .unwrap();
+        // 0F C6 C1 E4
+        assert_eq!(bytes, vec![0x0F, 0xC6, 0xC1, 0xE4]);
+    }
+
+    #[test]
+    fn shufpd_reg_reg_imm() {
+        let bytes = compile_line("shufpd xmm0, xmm1, 1", &empty(), 0)
+            .unwrap()
+            .unwrap();
+        // 66 0F C6 C1 01
+        assert_eq!(bytes, vec![0x66, 0x0F, 0xC6, 0xC1, 0x01]);
     }
 
     /// End-to-end of Enigma of Fear's `healthnodamage aob` injection
