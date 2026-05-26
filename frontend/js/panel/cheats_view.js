@@ -73,6 +73,7 @@ function renderTablesSection(gameId, tables) {
           `<div class="ce-table-meta">${esc(fmtKB(t.size_bytes))}</div>` +
         `</div>` +
         `<button class="ce-open-btn" data-table="${esc(t.name)}">Open CE</button>` +
+        `<button class="ce-remove-btn" data-table="${esc(t.name)}" title="Delete this .CT and its manifest">✗</button>` +
       `</li>`;
   }
   html += `</ul></div>`;
@@ -115,6 +116,7 @@ function wireTables(panel, gameId) {
     refresh.addEventListener("click", () => loadCheats(gameId));
   }
   wireImportButton(panel, gameId);
+  wireRemoveTableButtons(panel, gameId);
   panel.querySelectorAll(".ce-open-btn").forEach(btn => {
     btn.addEventListener("click", async () => {
       const tableName = btn.dataset.table;
@@ -421,6 +423,40 @@ function wireValueRows(panel, gameId) {
   });
 }
 
+/// Wire the per-row "✗" remove button: confirm + invoke backend + refresh
+/// panel. Lets the user prune minimalist / superseded / broken tables
+/// without leaving the app — counterpart to the Import .CT button.
+function wireRemoveTableButtons(panel, gameId) {
+  panel.querySelectorAll(".ce-remove-btn").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const tableName = btn.dataset.table;
+      // confirm() is intentionally simple here — the action is reversible
+      // (the user can re-import the same .CT) but the in-app deletion is
+      // immediate, so a single yes/no prompt strikes the right balance.
+      if (!confirm(`Delete "${tableName}" and its converted manifest?`)) return;
+      btn.disabled = true;
+      const original = btn.textContent;
+      btn.textContent = "…";
+      try {
+        await invoke("cheat_runtime_remove_ct", {
+          appId: String(gameId),
+          fileName: tableName,
+        });
+        loadCheats(gameId);
+      } catch (e) {
+        btn.textContent = "✗";
+        btn.title = String(e);
+        btn.disabled = false;
+        setTimeout(() => btn.removeAttribute("title"), 3000);
+      } finally {
+        // loadCheats re-renders the panel so the button reference is gone
+        // anyway, but reset textContent in case the call errored.
+        btn.textContent = original;
+      }
+    });
+  });
+}
+
 /// Wire the "Import .CT" button: trigger hidden <input type="file">, read
 /// the picked file as bytes, hand off to the backend command which copies
 /// into `cheat-tables/<app_id>/` and runs `auto_import_for_app` so the new
@@ -451,10 +487,11 @@ function wireImportButton(panel, gameId) {
       const skipped = (summary.skipped || []).length;
       const failed = (summary.failed || []).length;
       let msg;
+      let isError = false;
       if (failed > 0) {
         const [name, err] = summary.failed[0];
         msg = `✗ ${name}: ${err}`;
-        btn.title = msg;
+        isError = true;
       } else if (created > 0) {
         msg = `✓ Imported (${created} new)`;
       } else if (skipped > 0) {
@@ -463,12 +500,26 @@ function wireImportButton(panel, gameId) {
         msg = `✓ Done`;
       }
       btn.textContent = msg;
+      btn.title = msg; // full text in tooltip in case the button truncates
       loadCheats(gameId);
-      setTimeout(() => {
-        btn.textContent = original;
-        btn.removeAttribute("title");
+      if (isError) {
+        // Keep the failure message visible until the user clicks the button
+        // again — 3 seconds disappears too fast to read a NoExeBinding-class
+        // error and decide what to do next.
         btn.disabled = false;
-      }, 3000);
+        const dismiss = () => {
+          btn.textContent = original;
+          btn.removeAttribute("title");
+          btn.removeEventListener("click", dismiss, true);
+        };
+        btn.addEventListener("click", dismiss, true);
+      } else {
+        setTimeout(() => {
+          btn.textContent = original;
+          btn.removeAttribute("title");
+          btn.disabled = false;
+        }, 3000);
+      }
     } catch (e) {
       btn.textContent = "✗ Error";
       btn.title = String(e);
