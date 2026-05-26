@@ -51,10 +51,11 @@ What it covers today:
 - ✅ Manifest loader (`~/.config/backlog-tracker/trainers/<app_id>/*.json`)
 - ✅ PID lookup by exe name (handles 15-byte `comm` truncation + Wine paths)
 - ✅ Aurora SD Tool / CheatHappens JSON loader (shape-based, no obfuscation map)
+- ✅ Remote `mmap` / `munmap` (Phase A — battle-tested against a live Proton
+  game, see `tests/alloc_remote_smoke.rs` / issue #130)
 
 What's still **out of scope** (issue #64 documents it):
 
-- ❌ `alloc` / `dealloc` (needs ptrace-mediated remote `mmap`)
 - ❌ Inline assembly (`push`, `mov`, `jmp`, …) — needs `iced-x86`
 - ❌ Code-injection hooks (overwriting game code with `jmp` to allocated page)
 - ❌ Windows port (the abstraction is in place; no impl yet)
