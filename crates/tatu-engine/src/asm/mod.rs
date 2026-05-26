@@ -37,12 +37,14 @@ mod arith;
 mod control_flow;
 mod data_move;
 mod operands;
+mod sse;
 
 use std::collections::HashMap;
 
 use self::arith::{Arith, emit_arith, emit_cmp, emit_test};
 use self::control_flow::{Mnemonic, emit_jcc, emit_ret, emit_unary_target, is_conditional_jump};
 use self::data_move::{emit_lea, emit_mov, emit_pop, emit_push};
+use self::sse::dispatch_sse_mnemonic;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AsmError {
@@ -100,7 +102,10 @@ pub fn compile_line(
         // the same token.
         "nop" if rest.is_empty() => Ok(Some(vec![0x90])),
         m if is_conditional_jump(m) => Ok(Some(emit_jcc(m, rest, symbols, base_addr)?)),
-        _ => Ok(None),
+        // SSE / SSE2 scalar — Tier-2. Single dispatcher returning Ok(None)
+        // when the mnemonic isn't in the SSE set, so callers fall through
+        // to the final `_ => Ok(None)` catch-all unchanged.
+        m => dispatch_sse_mnemonic(m, rest, symbols, base_addr),
     }
 }
 

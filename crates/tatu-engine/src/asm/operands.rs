@@ -3,8 +3,8 @@
 use std::collections::HashMap;
 
 use iced_x86::code_asm::{
-    AsmMemoryOperand, AsmRegister8, AsmRegister16, AsmRegister32, AsmRegister64, byte_ptr,
-    dword_ptr, qword_ptr, registers as r, word_ptr,
+    AsmMemoryOperand, AsmRegister8, AsmRegister16, AsmRegister32, AsmRegister64, AsmRegisterXmm,
+    byte_ptr, dword_ptr, qword_ptr, registers as r, word_ptr,
 };
 
 use super::AsmError;
@@ -112,6 +112,35 @@ pub(super) enum MemSize {
     Word,
     Dword,
     Qword,
+}
+
+/// Parse an SSE/SSE2 XMM register name (`xmm0`..`xmm15`). Returns the
+/// iced-x86 typed register constant or `None` when the text isn't a
+/// recognised XMM name. Companion to [`parse_register`] (general-purpose
+/// integer regs); kept separate because SSE callers know they want XMM
+/// specifically and the integer fallback would silently match `r0`-style
+/// invalid text.
+pub(super) fn parse_xmm_register(name: &str) -> Option<AsmRegisterXmm> {
+    let n = name.trim().to_ascii_lowercase();
+    Some(match n.as_str() {
+        "xmm0" => r::xmm0,
+        "xmm1" => r::xmm1,
+        "xmm2" => r::xmm2,
+        "xmm3" => r::xmm3,
+        "xmm4" => r::xmm4,
+        "xmm5" => r::xmm5,
+        "xmm6" => r::xmm6,
+        "xmm7" => r::xmm7,
+        "xmm8" => r::xmm8,
+        "xmm9" => r::xmm9,
+        "xmm10" => r::xmm10,
+        "xmm11" => r::xmm11,
+        "xmm12" => r::xmm12,
+        "xmm13" => r::xmm13,
+        "xmm14" => r::xmm14,
+        "xmm15" => r::xmm15,
+        _ => return None,
+    })
 }
 
 /// Parse a CE-AA memory operand like `dword ptr [r13+13C]` or
