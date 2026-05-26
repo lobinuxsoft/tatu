@@ -85,7 +85,12 @@ pub type PtraceResult = Result<i64, PtraceError>;
 ///
 /// Safety: caller is responsible for `addr` / `data` pointing at
 /// memory the kernel can safely read/write per the specific request
-/// semantics. CE's port has the same contract.
+/// semantics. CE's port has the same contract — clippy's
+/// `not_unsafe_ptr_arg_deref` lint is allowed here because the safe
+/// wrappers ([`attach_and_wait`] etc.) hide the raw pointer surface
+/// from typical consumers, mirroring CE's pattern of "one low-level
+/// `safe_ptrace` + many typed helpers on top".
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub fn safe_ptrace(
     request: libc::c_uint,
     pid: Pid,
