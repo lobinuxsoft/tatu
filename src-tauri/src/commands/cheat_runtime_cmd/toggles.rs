@@ -124,23 +124,24 @@ pub fn cheat_runtime_disable(
 pub(super) fn locate_feature_script(app_id: &str, uuid: &str) -> Result<(String, String), String> {
     let manifests = load_manifests_for(app_id).map_err(|e| e.to_string())?;
     for m in manifests {
-        for f in m.features {
-            if f.uuid != uuid {
-                continue;
-            }
-            return match (f.kind, f.script) {
-                (FeatureKind::Header, _) => Err(format!(
-                    "feature {uuid:?} is a Header (visual-only) — not toggleable"
-                )),
-                (FeatureKind::Value, _) => Err(format!(
-                    "feature {uuid:?} is a Value — use cheat_runtime_value_read / write / freeze"
-                )),
-                (FeatureKind::Toggle, Some(script)) => Ok((m.exe, script)),
-                (FeatureKind::Toggle, None) => Err(format!(
-                    "feature {uuid:?} is a Toggle but has no script — the manifest is malformed"
-                )),
-            };
-        }
+        // features_recursive walks Header → child Toggle subtrees so a UUID
+        // buried 5 levels deep (real-world CE table shape, see #133 audit)
+        // still resolves to its owning manifest's exe + script.
+        let Some(f) = m.features_recursive().find(|f| f.uuid == uuid) else {
+            continue;
+        };
+        return match (f.kind, f.script.as_ref()) {
+            (FeatureKind::Header, _) => Err(format!(
+                "feature {uuid:?} is a Header (visual-only) — not toggleable"
+            )),
+            (FeatureKind::Value, _) => Err(format!(
+                "feature {uuid:?} is a Value — use cheat_runtime_value_read / write / freeze"
+            )),
+            (FeatureKind::Toggle, Some(script)) => Ok((m.exe.clone(), script.clone())),
+            (FeatureKind::Toggle, None) => Err(format!(
+                "feature {uuid:?} is a Toggle but has no script — the manifest is malformed"
+            )),
+        };
     }
     Err(format!("feature {uuid} not found for app {app_id}"))
 }
