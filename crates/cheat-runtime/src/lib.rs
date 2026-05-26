@@ -60,6 +60,7 @@ pub mod ptrace_helpers;
 pub mod regions;
 pub mod scanner;
 pub mod thread_context;
+pub mod thread_control;
 pub mod threads;
 
 // parser + asm live in tatu-engine since Phase 7A1 — re-exported
@@ -111,3 +112,4 @@ pub use thread_context::{
     ContextFlags, ThreadContext, get_thread_context, read_debug_register, set_thread_context,
     write_debug_register,
 };
+pub use thread_control::{find_paused_thread, resume_thread, suspend_count, suspend_thread};
