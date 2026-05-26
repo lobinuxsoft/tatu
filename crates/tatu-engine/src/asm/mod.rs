@@ -40,7 +40,7 @@ mod operands;
 
 use std::collections::HashMap;
 
-use self::arith::{Arith, emit_arith, emit_cmp};
+use self::arith::{Arith, emit_arith, emit_cmp, emit_test};
 use self::control_flow::{Mnemonic, emit_jcc, emit_ret, emit_unary_target, is_conditional_jump};
 use self::data_move::{emit_lea, emit_mov, emit_pop, emit_push};
 
@@ -88,10 +88,17 @@ pub fn compile_line(
         "pop" => Ok(Some(emit_pop(rest, base_addr)?)),
         "mov" => Ok(Some(emit_mov(rest, symbols, base_addr)?)),
         "cmp" => Ok(Some(emit_cmp(rest, symbols, base_addr)?)),
+        "test" => Ok(Some(emit_test(rest, symbols, base_addr)?)),
         "lea" => Ok(Some(emit_lea(rest, symbols, base_addr)?)),
         "add" => Ok(Some(emit_arith(rest, symbols, base_addr, Arith::Add)?)),
         "sub" => Ok(Some(emit_arith(rest, symbols, base_addr, Arith::Sub)?)),
         "xor" => Ok(Some(emit_arith(rest, symbols, base_addr, Arith::Xor)?)),
+        // Bare `nop` — single 0x90 byte. `nop N` (multi-byte padding) is
+        // handled by the length estimator before we reach asm, but the
+        // compile path also needs the trivial single-byte form for raw
+        // asm lines in label bodies. `length.rs` already returns 1 for
+        // the same token.
+        "nop" if rest.is_empty() => Ok(Some(vec![0x90])),
         m if is_conditional_jump(m) => Ok(Some(emit_jcc(m, rest, symbols, base_addr)?)),
         _ => Ok(None),
     }

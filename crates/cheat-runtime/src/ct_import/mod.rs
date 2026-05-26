@@ -49,7 +49,8 @@ use self::heuristics::derive_exe;
 use self::xml_walker::walk_entries;
 
 pub use self::disk::{
-    auto_import_default_dirs, auto_import_for_app, ct_tables_dir_for, import_dirs,
+    auto_import_default_dirs, auto_import_for_app, auto_import_for_app_with_exe_hint,
+    ct_tables_dir_for, import_dirs, import_dirs_with_exe_hint,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -90,7 +91,27 @@ pub struct ImportReport {
 }
 
 /// Convert a single `.ct` file into an in-memory [`Manifest`].
+///
+/// Errors with `NoExeBinding` if neither the AA scripts (`aobscanmodule`,
+/// `{ Game : X.exe }` comment block) nor the caller supply an exe name.
+/// Use [`convert_ct_file_with_exe_hint`] from the Tauri import command
+/// where Steam already knows the installed game's exe.
 pub fn convert_ct_file(path: &Path) -> Result<Manifest, CtImportError> {
+    convert_ct_file_with_exe_hint(path, None)
+}
+
+/// Same as [`convert_ct_file`] but accepts a final-resort `exe_hint`.
+/// CE tables authored without an `aobscanmodule` line and without the
+/// `{ Game : X.exe }` template comment (notably Mono / minimalist
+/// FearLess uploads) can't infer the binding from their own contents.
+/// When the caller knows the game's exe via another channel (e.g.
+/// Steam's `appmanifest`), pass it here so the import still succeeds
+/// — the resulting manifest renders in the UI even if specific cheats
+/// later fail because the hard-coded addresses don't match.
+pub fn convert_ct_file_with_exe_hint(
+    path: &Path,
+    exe_hint: Option<&str>,
+) -> Result<Manifest, CtImportError> {
     let text = fs::read_to_string(path).map_err(|source| CtImportError::Io {
         path: path.to_path_buf(),
         source,
@@ -113,9 +134,11 @@ pub fn convert_ct_file(path: &Path) -> Result<Manifest, CtImportError> {
         });
     }
 
-    let exe = derive_exe(&features).ok_or_else(|| CtImportError::NoExeBinding {
-        path: path.to_path_buf(),
-    })?;
+    let exe = derive_exe(&features)
+        .or_else(|| exe_hint.map(str::to_owned))
+        .ok_or_else(|| CtImportError::NoExeBinding {
+            path: path.to_path_buf(),
+        })?;
 
     Ok(Manifest {
         exe,

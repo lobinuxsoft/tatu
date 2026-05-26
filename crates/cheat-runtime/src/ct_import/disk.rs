@@ -6,7 +6,7 @@ use std::path::Path;
 
 use crate::manifest::Manifest;
 
-use super::{CtImportError, ImportReport, convert_ct_file};
+use super::{CtImportError, ImportReport, convert_ct_file_with_exe_hint};
 
 const CT_SUBDIR: &str = "backlog-tracker/cheat-tables";
 const MANIFEST_SUBDIR: &str = "backlog-tracker/trainers";
@@ -26,10 +26,21 @@ pub fn ct_tables_dir_for(app_id: &str) -> Result<std::path::PathBuf, CtImportErr
 /// `skipped`. Per-file errors don't abort the pass — they accumulate in
 /// `failed` so callers can log them.
 pub fn auto_import_for_app(app_id: &str) -> Result<ImportReport, CtImportError> {
+    auto_import_for_app_with_exe_hint(app_id, None)
+}
+
+/// Variant that takes a fallback exe hint — see
+/// [`crate::ct_import::convert_ct_file_with_exe_hint`]. The Tauri import
+/// command passes Steam's detected exe so tables that authored without
+/// `aobscanmodule` or `{ Game : X.exe }` still convert.
+pub fn auto_import_for_app_with_exe_hint(
+    app_id: &str,
+    exe_hint: Option<&str>,
+) -> Result<ImportReport, CtImportError> {
     let config = dirs::config_dir().ok_or(CtImportError::NoConfigDir)?;
     let src_dir = config.join(CT_SUBDIR).join(app_id);
     let dst_dir = config.join(MANIFEST_SUBDIR).join(app_id);
-    import_dirs(&src_dir, &dst_dir)
+    import_dirs_with_exe_hint(&src_dir, &dst_dir, exe_hint)
 }
 
 /// Auto-import every `<app_id>/` subdirectory under `cheat-tables/`. Used
@@ -68,6 +79,15 @@ pub fn auto_import_default_dirs() -> Result<ImportReport, CtImportError> {
 /// Internal entry point taking explicit src/dst dirs — keeps the integration
 /// tests self-contained without touching `$XDG_CONFIG_HOME`.
 pub fn import_dirs(src: &Path, dst: &Path) -> Result<ImportReport, CtImportError> {
+    import_dirs_with_exe_hint(src, dst, None)
+}
+
+/// Variant accepting a fallback exe hint applied to every `.ct` in `src`.
+pub fn import_dirs_with_exe_hint(
+    src: &Path,
+    dst: &Path,
+    exe_hint: Option<&str>,
+) -> Result<ImportReport, CtImportError> {
     let mut report = ImportReport::default();
     if !src.is_dir() {
         return Ok(report);
@@ -94,7 +114,7 @@ pub fn import_dirs(src: &Path, dst: &Path) -> Result<ImportReport, CtImportError
             report.skipped.push(ct);
             continue;
         }
-        match convert_ct_file(&ct) {
+        match convert_ct_file_with_exe_hint(&ct, exe_hint) {
             Ok(manifest) => {
                 if let Err(e) = write_manifest(&target, &manifest) {
                     report.failed.push((ct, e));
