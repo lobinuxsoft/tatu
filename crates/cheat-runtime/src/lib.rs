@@ -54,6 +54,7 @@ pub mod manifest;
 pub mod maps;
 pub mod memory;
 pub mod memory_access;
+pub mod memory_debug;
 pub mod migrate;
 pub mod persisted_hook;
 pub mod process;
@@ -90,6 +91,7 @@ pub use manifest::{
 };
 pub use maps::{MemoryRegion, Perms, parse_maps, read_maps};
 pub use memory::{RuntimeError, read_bytes, write_bytes};
+pub use memory_debug::{read_via_ptrace, write_via_ptrace};
 pub use migrate::{MigrateError, MigrateReport, migrate_default_dirs, migrate_dirs};
 pub use nix::unistd::Pid;
 pub use parser::{ParseError as ScriptParseError, Script, Statement, parse as parse_script};
