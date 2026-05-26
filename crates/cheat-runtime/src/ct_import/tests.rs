@@ -381,6 +381,53 @@ fn is_meaningful_header_filters_ornament_but_keeps_real_sections() {
 }
 
 #[test]
+fn derive_exe_falls_back_to_comment_block_for_mono_tables() {
+    // Real-world shape from the Enigma of Fear table (Mono game): no
+    // `aobscanmodule(_, exe, _)` line — only `aobscan(INJECT, ...)`
+    // because Mono targets aren't module-scoped. The exe name lives in
+    // the convention comment block CE inserts at the top of generated
+    // scripts. Without this fallback the import errors with
+    // `NoExeBinding` and the user sees a cryptic failure.
+    let tmp = TempDir::new().unwrap();
+    let ct = write_fixture(
+        tmp.path(),
+        "Mono.ct",
+        r#"<?xml version="1.0"?>
+<CheatTable>
+  <CheatEntries>
+    <CheatEntry>
+      <ID>1</ID>
+      <Description>"healthnodamage aob"</Description>
+      <VariableType>Auto Assembler Script</VariableType>
+      <AssemblerScript>{ Game   : Enigma.exe
+  Version: 1.1
+  Date   : 2024-12-09
+  Author : User
+}
+
+[ENABLE]
+aobscan(INJECT, F2 0F 5C C1 F2 0F 5A E8)
+alloc(newmem,$1000)
+label(code)
+label(return)
+newmem:
+code:
+  jmp return
+INJECT:
+  jmp newmem
+return:
+[DISABLE]
+</AssemblerScript>
+    </CheatEntry>
+  </CheatEntries>
+</CheatTable>"#,
+    );
+    let manifest =
+        convert_ct_file(&ct).expect("Mono table with `Game : X.exe` comment must import");
+    assert_eq!(manifest.exe, "Enigma.exe");
+}
+
+#[test]
 fn description_strips_only_balanced_outer_quotes() {
     assert_eq!(strip_quotes("\"Hello\"".to_string()), "Hello");
     assert_eq!(strip_quotes("Hello".to_string()), "Hello");
