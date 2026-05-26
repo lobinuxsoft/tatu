@@ -152,11 +152,10 @@ pub fn attach_and_wait(pid: Pid) -> Result<Pid, PtraceError> {
                     other_sig as i32 as *mut c_void,
                 );
             }
-            WaitStatus::Exited(exited_pid, _) | WaitStatus::Signaled(exited_pid, _, _) => {
-                if exited_pid == pid {
-                    return Err(PtraceError::TraceeExited(pid));
-                }
-                // Some unrelated child of ours exited; keep waiting.
+            WaitStatus::Exited(exited_pid, _) | WaitStatus::Signaled(exited_pid, _, _)
+                if exited_pid == pid =>
+            {
+                return Err(PtraceError::TraceeExited(pid));
             }
             WaitStatus::Continued(_) => {
                 // CE logs "It already continued?" and loops; us too.
