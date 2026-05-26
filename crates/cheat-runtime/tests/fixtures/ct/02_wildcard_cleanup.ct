@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<CheatTable CheatEngineTableVersion="45">
+  <CheatEntries>
+    <CheatEntry>
+      <ID>2</ID>
+      <Description>"Wildcard cleanup — unregistersymbol(*) and dealloc(*) in DISABLE"</Description>
+      <VariableType>Auto Assembler Script</VariableType>
+      <AssemblerScript>[ENABLE]
+aobscanmodule(injectA,fixture.exe,11 22 33 44)
+aobscanmodule(injectB,fixture.exe,55 66 77 88)
+alloc(newmem1,1024,injectA)
+alloc(newmem2,1024,injectB)
+registersymbol(injectA)
+registersymbol(injectB)
+label(returnA)
+label(returnB)
+
+newmem1:
+  nop 4
+  jmp returnA
+newmem2:
+  nop 4
+  jmp returnB
+
+injectA:
+  jmp newmem1
+returnA:
+
+injectB:
+  jmp newmem2
+returnB:
+
+[DISABLE]
+injectA:
+  db 11 22 33 44
+injectB:
+  db 55 66 77 88
+
+unregistersymbol(*)
+dealloc(*)
+</AssemblerScript>
+    </CheatEntry>
+  </CheatEntries>
+</CheatTable>
