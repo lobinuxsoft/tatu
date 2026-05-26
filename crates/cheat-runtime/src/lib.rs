@@ -87,8 +87,8 @@ pub use elfsym::{ElfSymError, find_libc_symbol, find_module_base, find_module_sy
 pub use executor::{ActiveCheat, Engine, ExecError};
 pub use freeze::{FreezeError, FreezeHandle, FreezeKey, FreezeRegistry, FreezeTarget};
 pub use manifest::{
-    FeatureKind, Manifest, ManifestError, ManifestFeature, VType, ValueSpec, load_manifests_for,
-    manifests_dir_for,
+    FeatureKind, Manifest, ManifestError, ManifestFeature, RecursiveFeatureIter, VType, ValueSpec,
+    load_manifests_for, manifests_dir_for,
 };
 pub use maps::{MemoryRegion, Perms, parse_maps, read_maps};
 pub use memory::{RuntimeError, read_bytes, write_bytes};

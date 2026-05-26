@@ -127,6 +127,25 @@
 .cheat-runtime-header-row { list-style: none; padding: 0.8rem 0 0.3rem; border-bottom: 1px solid var(--border-subtle); }
 .cheat-runtime-header-text { font-family: var(--font-display); font-size: 0.7rem; font-weight: 700; text-transform: var(--display-transform); letter-spacing: var(--display-tracking); color: var(--fg-muted); }
 
+/* CE-style hierarchical tree view (#133). Mirrors `<CheatEntries>` nesting
+   recovered from real .CT files — depth 5+ is common (Ender Magnolia,
+   Elden Ring). Indentation comes from natural <ul> nesting; expand state
+   is controlled by `data-expanded` on the header row. */
+.cheat-tree { list-style: none; padding: 0; margin: 0; }
+.cheat-tree-node { list-style: none; }
+.cheat-tree-children { list-style: none; padding-left: 1.1rem; margin: 0; border-left: 1px solid var(--border-subtle); }
+.cheat-tree-row { display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0; border-bottom: 1px solid var(--border-subtle); }
+.cheat-tree-header { cursor: default; }
+.cheat-tree-header[data-has-children="true"] { cursor: pointer; user-select: none; transition: background var(--t-fast); }
+.cheat-tree-header[data-has-children="true"]:hover { background: var(--bg-2); }
+.cheat-tree-header[data-expanded="false"] + .cheat-tree-children { display: none; }
+.cheat-tree-caret { display: inline-block; width: 0.9rem; flex-shrink: 0; text-align: center; font-size: 0.65rem; color: var(--fg-muted); }
+.cheat-tree-caret-empty { visibility: hidden; }
+.cheat-tree-header .cheat-tree-name { font-family: var(--font-display); font-size: 0.72rem; font-weight: 700; text-transform: var(--display-transform); letter-spacing: var(--display-tracking); color: var(--fg-muted); }
+.cheat-refresh-all { margin-left: auto; background: var(--bg-3); color: var(--fg); border: 1px solid var(--border); padding: 0.25rem 0.6rem; border-radius: var(--r); font-family: var(--font-display); font-size: 0.65rem; font-weight: 700; text-transform: var(--display-transform); letter-spacing: var(--display-tracking); cursor: pointer; transition: background var(--t-fast), border-color var(--t-fast); }
+.cheat-refresh-all:hover:not(:disabled) { background: var(--accent); color: var(--bg-panel); border-color: var(--accent); }
+.cheat-refresh-all:disabled { opacity: 0.5; cursor: not-allowed; }
+
 /* Orphan-hooks banner: appears at the top of the cheats panel when the
    tracker finds persisted hook records whose game PID is still alive. */
 .orphans-banner { background: rgba(255, 180, 80, 0.08); border: 1px solid rgba(255, 180, 80, 0.35); border-radius: var(--r); padding: 0.6rem 0.8rem; margin-bottom: 0.8rem; }

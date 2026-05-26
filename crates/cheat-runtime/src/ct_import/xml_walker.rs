@@ -5,16 +5,60 @@ use crate::manifest::{FeatureKind, ManifestFeature, VType, ValueSpec};
 
 use super::heuristics::{is_meaningful_header, is_real_aa_script, strip_quotes};
 
-/// Walk all `<CheatEntry>` nodes (recursively, including those nested inside
-/// other `<CheatEntry><CheatEntries>...`). CE's authoring tool exposes the
-/// nesting as a visual tree but neither the manifest nor our UI represent
-/// nested cheats — we flatten preserving document order.
+/// Walk the direct `<CheatEntry>` children of `node` and project each into a
+/// [`ManifestFeature`], recursively descending into nested `<CheatEntries>`
+/// blocks to preserve CE's tree structure as `ManifestFeature::children`.
+///
+/// CE tables routinely group cheats under [`FeatureKind::Header`] entries
+/// (sometimes 5+ levels deep — see `ender_magnolia_v11.ct` and the Elden
+/// Ring tables for depth ≥ 7). The UI relies on this nesting to render a
+/// collapsible tree; flattening here would force the UI to invent a
+/// grouping after-the-fact, losing fidelity (a Toggle that owns child
+/// Toggles is a CE pattern that can't be expressed by Header-as-divider).
 pub(super) fn walk_entries(node: roxmltree::Node, stem: &str, out: &mut Vec<ManifestFeature>) {
-    for entry in node.descendants().filter(|n| n.has_tag_name("CheatEntry")) {
-        if let Some(feature) = entry_to_feature(entry, stem) {
-            out.push(feature);
+    // The CT document layout is `<CheatTable> ⤳ <CheatEntries> ⤳ <CheatEntry>+ ⤳ <CheatEntries> ⤳ ...`.
+    // Callers pass us either a `<CheatTable>` root (top-level entry) or a
+    // `<CheatEntries>` block (recursive call). Find the bag of entries to
+    // iterate accordingly: a CheatEntries' direct children ARE the
+    // `<CheatEntry>` elements; for CheatTable / CheatEntry roots, descend
+    // through the inner `<CheatEntries>` block first.
+    let entries_root = if node.has_tag_name("CheatEntries") {
+        node
+    } else {
+        match node.children().find(|c| c.has_tag_name("CheatEntries")) {
+            Some(block) => block,
+            None => return,
+        }
+    };
+
+    for entry in entries_root
+        .children()
+        .filter(|n| n.has_tag_name("CheatEntry"))
+    {
+        match entry_to_feature(entry, stem) {
+            Some(mut feature) => {
+                feature.children = child_features(entry, stem);
+                out.push(feature);
+            }
+            None => {
+                // Parent entry was skipped (Lua-only script, decorative
+                // header, unsupported VType). Promote its surviving
+                // children to this level so they don't get orphaned —
+                // CE's authoring tool nests aggressively for visual
+                // organisation, a missing parent shouldn't make the
+                // user's god-mode disappear from the table.
+                out.extend(child_features(entry, stem));
+            }
         }
     }
+}
+
+/// Walk the nested `<CheatEntries>` block of a `<CheatEntry>` (if any) and
+/// return its children projected as [`ManifestFeature`]s.
+fn child_features(entry: roxmltree::Node, stem: &str) -> Vec<ManifestFeature> {
+    let mut out = Vec::new();
+    walk_entries(entry, stem, &mut out);
+    out
 }
 
 fn entry_to_feature(entry: roxmltree::Node, stem: &str) -> Option<ManifestFeature> {
@@ -36,6 +80,7 @@ fn entry_to_feature(entry: roxmltree::Node, stem: &str) -> Option<ManifestFeatur
             kind: FeatureKind::Header,
             script: None,
             value: None,
+            children: Vec::new(),
         });
     }
 
@@ -54,6 +99,7 @@ fn entry_to_feature(entry: roxmltree::Node, stem: &str) -> Option<ManifestFeatur
             kind: FeatureKind::Toggle,
             script: Some(script),
             value: None,
+            children: Vec::new(),
         });
     }
 
@@ -75,6 +121,7 @@ fn entry_to_feature(entry: roxmltree::Node, stem: &str) -> Option<ManifestFeatur
             offsets,
             vtype,
         }),
+        children: Vec::new(),
     })
 }
 

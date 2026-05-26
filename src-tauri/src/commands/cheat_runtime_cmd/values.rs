@@ -27,23 +27,21 @@ use crate::state::AppState;
 fn locate_value_feature(app_id: &str, uuid: &str) -> Result<(String, ValueSpec, AddrExpr), String> {
     let manifests = load_manifests_for(app_id).map_err(|e| e.to_string())?;
     for m in manifests {
-        for f in m.features {
-            if f.uuid != uuid {
-                continue;
+        let Some(f) = m.features_recursive().find(|f| f.uuid == uuid) else {
+            continue;
+        };
+        return match (f.kind, f.value.as_ref()) {
+            (FeatureKind::Value, Some(spec)) => {
+                let expr = parse_addr_expr(&spec.base_expr).map_err(|e| e.to_string())?;
+                Ok((m.exe.clone(), spec.clone(), expr))
             }
-            return match (f.kind, f.value) {
-                (FeatureKind::Value, Some(spec)) => {
-                    let expr = parse_addr_expr(&spec.base_expr).map_err(|e| e.to_string())?;
-                    Ok((m.exe, spec, expr))
-                }
-                (FeatureKind::Value, None) => Err(format!(
-                    "feature {uuid:?} is a Value but has no value-spec — the manifest is malformed"
-                )),
-                (other, _) => Err(format!(
-                    "feature {uuid:?} is a {other:?}, not a Value — use cheat_runtime_enable / disable"
-                )),
-            };
-        }
+            (FeatureKind::Value, None) => Err(format!(
+                "feature {uuid:?} is a Value but has no value-spec — the manifest is malformed"
+            )),
+            (other, _) => Err(format!(
+                "feature {uuid:?} is a {other:?}, not a Value — use cheat_runtime_enable / disable"
+            )),
+        };
     }
     Err(format!("feature {uuid} not found for app {app_id}"))
 }

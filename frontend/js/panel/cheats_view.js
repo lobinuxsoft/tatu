@@ -125,7 +125,7 @@ function wireTables(panel, gameId) {
   });
 }
 
-function renderRuntimeSection(features) {
+function renderRuntimeSection(features, gameId) {
   if (!features.length) {
     return (
       `<div class="cheat-runtime-section">` +
@@ -139,54 +139,134 @@ function renderRuntimeSection(features) {
       `</div>`
     );
   }
-  const anyRunning = features.some(f => f.game_running);
+  // Liveness pill: at least one feature reports the game running.
+  // Walk the tree because the flag rides on every node, not just roots.
+  const anyRunning = anyNodeRunning(features);
   const pillCls = anyRunning ? "cheat-pill-on" : "cheat-pill-off";
   const pillTxt = anyRunning ? "\u{1F7E2} Game running" : "\u{1F534} Game not running";
 
+  // Global "Refresh all values" button — clicks every Value row's per-row
+  // read button in sequence. Required by #133 acceptance; the per-row ↻
+  // covers individual reads but a 50+ entry table (Dragon's Dogma 2) makes
+  // that impractical for an "I just enabled the master cheat, refresh
+  // everything" workflow.
   let html =
     `<div class="cheat-runtime-section">` +
       `<div class="cheat-runtime-header">` +
         `Trainer features <span class="cheat-pill ${pillCls}">${pillTxt}</span>` +
+        `<button class="cheat-refresh-all" data-action="refresh-all" title="Read every Value row's current value">Refresh all values</button>` +
       `</div>` +
-      `<ul class="cheat-runtime-list">`;
+      `<ul class="cheat-tree" data-game-id="${esc(String(gameId))}">`;
   for (const f of features) {
-    if (f.kind === "header") {
-      // Visual-only divider: no switch, no toggle. Renders as a small caps
-      // title above the next batch of features. Mirrors CE's `<GroupHeader>`
-      // entries — see MemoryRecordUnit.pas:148.
-      html +=
-        `<li class="cheat-runtime-header-row">` +
-          `<div class="cheat-runtime-header-text">${esc(f.name)}</div>` +
-        `</li>`;
-      continue;
-    }
-    if (f.kind === "value") {
-      html += renderValueRow(f);
-      continue;
-    }
-    const dis = f.game_running ? "" : "disabled";
-    const ch = f.active ? "checked" : "";
-    const cat = f.category ? `${esc(f.category)} • ` : "";
-    html +=
-      `<li class="cheat-runtime-item">` +
-        `<div class="cheat-runtime-info">` +
-          `<div class="cheat-runtime-name">${esc(f.name)}</div>` +
-          `<div class="cheat-runtime-meta">${cat}${esc(f.manifest_exe)}</div>` +
-        `</div>` +
-        `<label class="cheat-switch" title="${dis ? 'Launch the game first' : 'Toggle'}">` +
-          `<input type="checkbox" data-feature-uuid="${esc(f.uuid)}" ${ch} ${dis}>` +
-          `<span class="cheat-switch-slider"></span>` +
-        `</label>` +
-      `</li>`;
+    html += renderTreeNode(f, gameId, 0);
   }
   html += `</ul></div>`;
   return html;
 }
 
+function anyNodeRunning(features) {
+  for (const f of features) {
+    if (f.game_running) return true;
+    if (f.children && anyNodeRunning(f.children)) return true;
+  }
+  return false;
+}
+
+/// Render one node and its subtree. CE tables nest up to 7 levels in the
+/// wild (Dragon's Dogma 2 v6, Elden Ring All-in-One); the renderer doesn't
+/// cap depth — CSS handles indentation by natural <ul> nesting.
+function renderTreeNode(f, gameId, depth) {
+  const hasChildren = Array.isArray(f.children) && f.children.length > 0;
+  const expanded = isExpanded(gameId, f.uuid);
+  const expandedAttr = expanded ? "true" : "false";
+
+  let rowHtml;
+  if (f.kind === "header") {
+    // Headers with children are interactive (caret + click expands).
+    // Childless Headers stay as visual dividers — mirrors CE's
+    // GroupHeader semantics (MemoryRecordUnit.pas:148).
+    const caret = hasChildren
+      ? `<span class="cheat-tree-caret">${expanded ? "▼" : "▶"}</span>`
+      : `<span class="cheat-tree-caret cheat-tree-caret-empty"></span>`;
+    rowHtml =
+      `<div class="cheat-tree-row cheat-tree-header" data-expanded="${expandedAttr}"` +
+        ` data-uuid="${esc(f.uuid)}" data-has-children="${hasChildren ? 'true' : 'false'}">` +
+        caret +
+        `<div class="cheat-tree-name">${esc(f.name)}</div>` +
+      `</div>`;
+  } else if (f.kind === "value") {
+    rowHtml = renderValueRow(f);
+  } else {
+    rowHtml = renderToggleRow(f);
+  }
+
+  // Wrap each node in <li> so semantic structure is preserved
+  // (assistive tech, keyboard tabbing). Children render as a nested
+  // <ul> the caret toggles via the `data-expanded` attribute on the
+  // parent row; CSS hides the <ul> when collapsed.
+  let html = `<li class="cheat-tree-node" data-depth="${depth}">${rowHtml}`;
+  if (hasChildren) {
+    html += `<ul class="cheat-tree-children">`;
+    for (const child of f.children) {
+      html += renderTreeNode(child, gameId, depth + 1);
+    }
+    html += `</ul>`;
+  }
+  html += `</li>`;
+  return html;
+}
+
+function renderToggleRow(f) {
+  const dis = f.game_running ? "" : "disabled";
+  const ch = f.active ? "checked" : "";
+  const cat = f.category ? `${esc(f.category)} • ` : "";
+  return (
+    `<div class="cheat-tree-row cheat-runtime-item">` +
+      `<div class="cheat-runtime-info">` +
+        `<div class="cheat-runtime-name">${esc(f.name)}</div>` +
+        `<div class="cheat-runtime-meta">${cat}${esc(f.manifest_exe)}</div>` +
+      `</div>` +
+      `<label class="cheat-switch" title="${dis ? 'Launch the game first' : 'Toggle'}">` +
+        `<input type="checkbox" data-feature-uuid="${esc(f.uuid)}" ${ch} ${dis}>` +
+        `<span class="cheat-switch-slider"></span>` +
+      `</label>` +
+    `</div>`
+  );
+}
+
+// --- expand/collapse state (LocalStorage, scoped by gameId + uuid) ---
+//
+// Default: expanded on first encounter. Once the user collapses a node we
+// remember it forever (across reloads, across sessions). Stored as a flat
+// key-per-uuid rather than a JSON blob so we don't need to load + parse
+// the whole tree state to read a single node, and so multiple game panels
+// open simultaneously don't trample each other's writes.
+
+function expandKey(gameId, uuid) {
+  return `tatu.cheats.exp.${gameId}.${uuid}`;
+}
+
+function isExpanded(gameId, uuid) {
+  try {
+    const v = localStorage.getItem(expandKey(gameId, uuid));
+    return v === null ? true : v === "1";
+  } catch (_) {
+    return true; // localStorage unavailable (private mode): default open.
+  }
+}
+
+function setExpanded(gameId, uuid, expanded) {
+  try {
+    localStorage.setItem(expandKey(gameId, uuid), expanded ? "1" : "0");
+  } catch (_) { /* ignore */ }
+}
+
 /// Render one Value-kind row: typed numeric input + Set + Freeze. Dimmed
 /// (with reason) when the game isn't running OR the master scaffold cheat
 /// hasn't been enabled — the backend flags both via `game_running` and
-/// `symbol_ready` in the FeatureView.
+/// `symbol_ready` in the FeatureView. The wrapper `<div>` substitutes
+/// for the old `<li>` because tree rows now compose into `cheat-tree-node`
+/// `<li>` parents.
 function renderValueRow(f) {
   const cat = f.category ? `${esc(f.category)} • ` : "";
   const spec = f.value_spec || {};
@@ -204,7 +284,7 @@ function renderValueRow(f) {
   const isFloat = vt === "f32" || vt === "f64";
   const step = isFloat ? "any" : "1";
   return (
-    `<li class="cheat-runtime-item cheat-runtime-value ${blocked ? 'cheat-runtime-value-blocked' : ''}" data-feature-uuid="${esc(f.uuid)}" data-vtype="${esc(vt)}">` +
+    `<div class="cheat-tree-row cheat-runtime-item cheat-runtime-value ${blocked ? 'cheat-runtime-value-blocked' : ''}" data-feature-uuid="${esc(f.uuid)}" data-vtype="${esc(vt)}">` +
       `<div class="cheat-runtime-info">` +
         `<div class="cheat-runtime-name">${esc(f.name)} <span class="cheat-runtime-vtype">${esc(vt)}</span></div>` +
         `<div class="cheat-runtime-meta">${cat}${addrSummary}</div>` +
@@ -218,7 +298,7 @@ function renderValueRow(f) {
           `<span class="cheat-switch-slider"></span>` +
         `</label>` +
       `</div>` +
-    `</li>`
+    `</div>`
   );
 }
 
@@ -329,6 +409,56 @@ function wireValueRows(panel, gameId) {
         }
       });
     }
+  });
+}
+
+/// Wire the global "Refresh all values" button — clicks every Value row's
+/// per-row ↻ in sequence. Sequenced, not parallel: parallel reads against
+/// the same ptrace target serialize at the kernel anyway and would race
+/// the master toggle's symbol table; one-at-a-time is both safer and the
+/// user-perceived performance hit is negligible.
+function wireRefreshAll(panel) {
+  const btn = panel.querySelector(".cheat-refresh-all");
+  if (!btn) return;
+  btn.addEventListener("click", async () => {
+    const reads = panel.querySelectorAll(".cheat-runtime-value:not(.cheat-runtime-value-blocked) .cheat-value-read");
+    if (!reads.length) return;
+    btn.disabled = true;
+    const original = btn.textContent;
+    btn.textContent = `Reading 0 / ${reads.length}…`;
+    let done = 0;
+    for (const r of reads) {
+      // Reuse the per-row handler's behaviour — a synthetic click fires
+      // the same async invoke + input update + flash sequence already
+      // wired in wireValueRows, so refresh-all stays a single source of
+      // truth for what a "read" actually does.
+      r.click();
+      done += 1;
+      btn.textContent = `Reading ${done} / ${reads.length}…`;
+      // Small yield so the UI repaints; per-row invokes themselves are
+      // already async and don't block here.
+      await new Promise(r => setTimeout(r, 16));
+    }
+    btn.textContent = original;
+    btn.disabled = false;
+  });
+}
+
+/// Wire expand/collapse on every Header row that owns children. Click
+/// toggles the row's `data-expanded` attribute, which CSS keys off to hide
+/// the sibling `.cheat-tree-children` <ul>. State persists in
+/// LocalStorage scoped by gameId so a closed group stays closed across
+/// reloads (matters for the 100+ entry tables in the FearLess audit).
+function wireTreeCarets(panel, gameId) {
+  panel.querySelectorAll('.cheat-tree-header[data-has-children="true"]').forEach(row => {
+    row.addEventListener("click", () => {
+      const expanded = row.dataset.expanded === "true";
+      const next = !expanded;
+      row.dataset.expanded = next ? "true" : "false";
+      const caret = row.querySelector(".cheat-tree-caret");
+      if (caret) caret.textContent = next ? "▼" : "▶";
+      setExpanded(gameId, row.dataset.uuid, next);
+    });
   });
 }
 
@@ -463,7 +593,7 @@ export async function loadCheats(gameId) {
     if (state.panelGameId !== gameId) return;
 
     const banner = renderCeBanner(ceStatus);
-    const runtimeSection = renderRuntimeSection(runtimeFeatures);
+    const runtimeSection = renderRuntimeSection(runtimeFeatures, gameId);
     const tablesSection = renderTablesSection(gameId, tables);
     const searchBar = renderSearchBar(gameId);
 
@@ -472,8 +602,10 @@ export async function loadCheats(gameId) {
 
     wireBanner(panel, gameId);
     wireOrphansBanner(panel, gameId);
+    wireTreeCarets(panel, gameId);
     wireRuntimeSwitches(panel, gameId);
     wireValueRows(panel, gameId);
+    wireRefreshAll(panel);
     wireTables(panel, gameId);
     wireSearchButton(panel);
   } catch (e) {

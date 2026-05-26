@@ -60,9 +60,18 @@ pub(super) fn is_real_aa_script(body: &str) -> bool {
 /// to the launcher.
 pub(super) fn derive_exe(features: &[ManifestFeature]) -> Option<String> {
     for f in features {
-        let Some(script) = &f.script else {
-            continue;
-        };
+        if let Some(found) = derive_exe_from_feature(f) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+/// Recursive helper — walks `feature` + `feature.children`. Post-#133
+/// manifests are trees, so the first AA toggle anchoring the exe name
+/// may sit several levels below the root.
+fn derive_exe_from_feature(feature: &ManifestFeature) -> Option<String> {
+    if let Some(script) = &feature.script {
         for line in script.lines() {
             let trimmed = line.trim();
             let Some(rest) = trimmed.strip_prefix("aobscanmodule(") else {
@@ -76,6 +85,11 @@ pub(super) fn derive_exe(features: &[ManifestFeature]) -> Option<String> {
             if !exe.is_empty() {
                 return Some(exe.to_string());
             }
+        }
+    }
+    for child in &feature.children {
+        if let Some(found) = derive_exe_from_feature(child) {
+            return Some(found);
         }
     }
     None

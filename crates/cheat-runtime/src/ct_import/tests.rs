@@ -234,7 +234,11 @@ shellExecute("https://example.com")
 }
 
 #[test]
-fn nested_cheatentries_flatten_in_document_order() {
+fn nested_cheatentries_become_tree_children() {
+    // CE wraps a CheatEntry's children in a single `<CheatEntries>` block.
+    // Post-#133 the importer preserves that as `ManifestFeature::children`
+    // instead of flattening it — the UI renders depth as a collapsible
+    // tree.
     let tmp = TempDir::new().unwrap();
     let ct = write_fixture(
         tmp.path(),
@@ -262,11 +266,95 @@ aobscanmodule(INJECT,Game.exe,90 90 90)
 </CheatTable>"#,
     );
     let manifest = convert_ct_file(&ct).unwrap();
-    assert_eq!(manifest.features.len(), 2);
-    assert_eq!(manifest.features[0].kind, FeatureKind::Header);
-    assert_eq!(manifest.features[0].name, "=== Outer ===");
-    assert_eq!(manifest.features[1].kind, FeatureKind::Toggle);
-    assert_eq!(manifest.features[1].name, "Inner Cheat");
+    assert_eq!(manifest.features.len(), 1, "outer Header is the sole root");
+    let outer = &manifest.features[0];
+    assert_eq!(outer.kind, FeatureKind::Header);
+    assert_eq!(outer.name, "=== Outer ===");
+    assert_eq!(
+        outer.children.len(),
+        1,
+        "outer must own the inner Toggle as child"
+    );
+    assert_eq!(outer.children[0].kind, FeatureKind::Toggle);
+    assert_eq!(outer.children[0].name, "Inner Cheat");
+}
+
+#[test]
+fn deep_nesting_preserves_full_tree() {
+    // Depth-3 case (Header → Header → Toggle). Mirrors the FearLess
+    // tables `crimson_desert_p6.ct` (depth 4) and `ender_magnolia_v11.ct`
+    // (depth 5) at a tractable size.
+    let tmp = TempDir::new().unwrap();
+    let ct = write_fixture(
+        tmp.path(),
+        "Deep.ct",
+        r#"<?xml version="1.0"?>
+<CheatTable>
+  <CheatEntries>
+    <CheatEntry>
+      <ID>1</ID><Description>"Player"</Description><GroupHeader>1</GroupHeader>
+      <CheatEntries>
+        <CheatEntry>
+          <ID>2</ID><Description>"Combat"</Description><GroupHeader>1</GroupHeader>
+          <CheatEntries>
+            <CheatEntry>
+              <ID>3</ID><Description>"God Mode"</Description>
+              <VariableType>Auto Assembler Script</VariableType>
+              <AssemblerScript>[ENABLE]
+aobscanmodule(INJECT,Game.exe,90 90 90)
+[DISABLE]
+</AssemblerScript>
+            </CheatEntry>
+          </CheatEntries>
+        </CheatEntry>
+      </CheatEntries>
+    </CheatEntry>
+  </CheatEntries>
+</CheatTable>"#,
+    );
+    let manifest = convert_ct_file(&ct).unwrap();
+    assert_eq!(manifest.features.len(), 1);
+    let leaf = &manifest.features[0].children[0].children[0];
+    assert_eq!(leaf.kind, FeatureKind::Toggle);
+    assert_eq!(leaf.name, "God Mode");
+}
+
+#[test]
+fn skipped_parent_promotes_its_surviving_children() {
+    // The outer Description is decorative ornament — `is_meaningful_header`
+    // drops it. Without child-promotion the inner Toggle would be deleted
+    // from the manifest too, which would baffle a user staring at a CE
+    // table that visibly has the cheat.
+    let tmp = TempDir::new().unwrap();
+    let ct = write_fixture(
+        tmp.path(),
+        "Promote.ct",
+        r#"<?xml version="1.0"?>
+<CheatTable>
+  <CheatEntries>
+    <CheatEntry>
+      <ID>1</ID>
+      <Description>"-"</Description>
+      <GroupHeader>1</GroupHeader>
+      <CheatEntries>
+        <CheatEntry>
+          <ID>2</ID>
+          <Description>"Real Cheat"</Description>
+          <VariableType>Auto Assembler Script</VariableType>
+          <AssemblerScript>[ENABLE]
+aobscanmodule(INJECT,Game.exe,90 90 90)
+[DISABLE]
+</AssemblerScript>
+        </CheatEntry>
+      </CheatEntries>
+    </CheatEntry>
+  </CheatEntries>
+</CheatTable>"#,
+    );
+    let manifest = convert_ct_file(&ct).unwrap();
+    assert_eq!(manifest.features.len(), 1);
+    assert_eq!(manifest.features[0].kind, FeatureKind::Toggle);
+    assert_eq!(manifest.features[0].name, "Real Cheat");
 }
 
 #[test]

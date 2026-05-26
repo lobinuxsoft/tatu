@@ -34,6 +34,11 @@ pub struct FeatureView {
     /// active cheat (or the value has no symbol dep). The UI uses this to
     /// gate the read/write/freeze controls on a per-feature basis.
     pub symbol_ready: bool,
+    /// Nested feature subtree. Mirrors `ManifestFeature::children` —
+    /// see #133. Empty for leaves; omitted from JSON when empty so the
+    /// payload stays compact for flat manifests.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub children: Vec<FeatureView>,
 }
 
 #[tauri::command]
@@ -66,29 +71,51 @@ pub fn cheat_runtime_list_features(
     let mut out = Vec::new();
     for m in manifests {
         let game_running = find_pid_by_exe(&m.exe).is_some();
-        for f in m.features {
-            let required_symbol = master_symbol_for_value(&f);
-            let symbol_ready = match &required_symbol {
-                Some(name) => registered_symbols.contains(name),
-                None => true,
-            };
-            let value_spec = f.value.clone();
-            out.push(FeatureView {
-                manifest_title: m.title.clone(),
-                manifest_exe: m.exe.clone(),
-                active: active_keys.contains(&f.uuid),
-                uuid: f.uuid,
-                name: f.name,
-                category: f.category,
-                kind: f.kind,
-                value_spec,
-                required_symbol,
-                symbol_ready,
-                game_running,
-            });
+        let ctx = ViewCtx {
+            manifest_title: &m.title,
+            manifest_exe: &m.exe,
+            active_keys: &active_keys,
+            registered_symbols: &registered_symbols,
+            game_running,
+        };
+        for f in &m.features {
+            out.push(build_view(f, &ctx));
         }
     }
     Ok(out)
+}
+
+/// Per-manifest context handed to the recursive view builder so each call
+/// site picks up the same liveness + symbol-readiness flags.
+struct ViewCtx<'a> {
+    manifest_title: &'a str,
+    manifest_exe: &'a str,
+    active_keys: &'a std::collections::HashSet<String>,
+    registered_symbols: &'a std::collections::HashSet<String>,
+    game_running: bool,
+}
+
+fn build_view(f: &ManifestFeature, ctx: &ViewCtx<'_>) -> FeatureView {
+    let required_symbol = master_symbol_for_value(f);
+    let symbol_ready = match &required_symbol {
+        Some(name) => ctx.registered_symbols.contains(name),
+        None => true,
+    };
+    let children = f.children.iter().map(|c| build_view(c, ctx)).collect();
+    FeatureView {
+        manifest_title: ctx.manifest_title.to_string(),
+        manifest_exe: ctx.manifest_exe.to_string(),
+        active: ctx.active_keys.contains(&f.uuid),
+        uuid: f.uuid.clone(),
+        name: f.name.clone(),
+        category: f.category.clone(),
+        kind: f.kind,
+        value_spec: f.value.clone(),
+        required_symbol,
+        symbol_ready,
+        game_running: ctx.game_running,
+        children,
+    }
 }
 
 /// For a Value feature, return the name of the symbol its `base_expr`
