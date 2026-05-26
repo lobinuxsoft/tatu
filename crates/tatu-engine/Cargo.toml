@@ -9,3 +9,10 @@ description = "Backend-agnostic CE Auto-Assembler engine — parser, x86_64 asse
 iced-x86 = { version = "1", default-features = false, features = ["std", "decoder", "encoder", "code_asm"] }
 tatu-mem = { path = "../tatu-mem" }
 thiserror = "1"
+
+[dev-dependencies]
+roxmltree = "0.20"
+
+[[example]]
+name = "ct_audit"
+path = "examples/ct_audit.rs"

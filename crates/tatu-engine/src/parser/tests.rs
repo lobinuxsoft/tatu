@@ -20,19 +20,115 @@ fn parse_aobscanmodule_with_pattern() {
 fn parse_registersymbol_and_friends() {
     assert_eq!(
         classify("registersymbol(foo)").unwrap(),
-        Statement::RegisterSymbol("foo".into())
+        Statement::RegisterSymbol(NameList::single("foo"))
     );
     assert_eq!(
         classify("unregistersymbol(foo)").unwrap(),
-        Statement::UnregisterSymbol("foo".into())
+        Statement::UnregisterSymbol(NameList::single("foo"))
     );
     assert_eq!(
         classify("label(foo)").unwrap(),
-        Statement::Label("foo".into())
+        Statement::Label(NameList::single("foo"))
     );
     assert_eq!(
         classify("dealloc(foo)").unwrap(),
-        Statement::Dealloc("foo".into())
+        Statement::Dealloc(NameList::single("foo"))
+    );
+}
+
+#[test]
+fn parse_name_list_wildcard() {
+    // `(*)` — emitted by FearLess `.CT` authors at the top of [DISABLE]
+    // blocks to "release everything this script registered/allocated".
+    assert_eq!(
+        classify("unregistersymbol(*)").unwrap(),
+        Statement::UnregisterSymbol(NameList::Wildcard)
+    );
+    assert_eq!(
+        classify("dealloc(*)").unwrap(),
+        Statement::Dealloc(NameList::Wildcard)
+    );
+    // Trim around the `*` is OK too — `unregistersymbol( * )` is in the
+    // wild (Crimson Desert tables).
+    assert_eq!(
+        classify("unregistersymbol( * )").unwrap(),
+        Statement::UnregisterSymbol(NameList::Wildcard)
+    );
+}
+
+#[test]
+fn parse_name_list_comma_separated() {
+    assert_eq!(
+        classify("registersymbol(a,b,c)").unwrap(),
+        Statement::RegisterSymbol(NameList::Names(vec!["a".into(), "b".into(), "c".into()]))
+    );
+}
+
+#[test]
+fn parse_name_list_space_separated() {
+    // Space-separated lists are the dominant multi-name shape in the
+    // FearLess corpus (e.g. Dragon's Dogma 2 / Crimson Desert tables).
+    assert_eq!(
+        classify("label(pStamina pHealth bMaxStamina)").unwrap(),
+        Statement::Label(NameList::Names(vec![
+            "pStamina".into(),
+            "pHealth".into(),
+            "bMaxStamina".into(),
+        ]))
+    );
+    assert_eq!(
+        classify("unregistersymbol(pPlayer originalcode_playerBaseReadAOB)").unwrap(),
+        Statement::UnregisterSymbol(NameList::Names(vec![
+            "pPlayer".into(),
+            "originalcode_playerBaseReadAOB".into(),
+        ]))
+    );
+}
+
+#[test]
+fn parse_globalalloc_and_define() {
+    assert_eq!(
+        classify("globalalloc(newmem,0x100)").unwrap(),
+        Statement::GlobalAlloc {
+            symbol: "newmem".into(),
+            size: 0x100,
+        }
+    );
+    assert_eq!(
+        classify("define(injectOffset, eldenring.exe+CD2FC1)").unwrap(),
+        Statement::Define {
+            name: "injectOffset".into(),
+            value: "eldenring.exe+CD2FC1".into(),
+        }
+    );
+    // A numeric `define` is something the executor can resolve eagerly.
+    assert_eq!(
+        classify("define(slot, 0x40)").unwrap(),
+        Statement::Define {
+            name: "slot".into(),
+            value: "0x40".into(),
+        }
+    );
+}
+
+#[test]
+fn parse_lua_only_script_does_not_error() {
+    // CE scripts whose entire body is `{$lua}` have no `[ENABLE]`
+    // header. Tatu can't run them but must not break the surrounding
+    // table — the script surfaces as `lua_only = true` with empty
+    // enable/disable blocks instead of `MissingEnable`.
+    let s = parse("{$lua}\npause()\n").expect("lua-only script must parse");
+    assert!(s.lua_only);
+    assert!(s.enable.is_empty());
+    assert!(s.disable.is_empty());
+}
+
+#[test]
+fn parse_marks_enable_with_lua_directive_as_lua_only() {
+    let s = parse("[ENABLE]\n{$lua}\nautoAssemble([[ ... ]])\n[DISABLE]\n").expect("must parse");
+    assert!(
+        s.lua_only,
+        "{{$lua}} inside an ENABLE block means the script is functionally lua-only"
     );
 }
 
@@ -137,11 +233,14 @@ fn unknown_line_becomes_raw() {
 #[test]
 fn comment_stripping() {
     let stmt = classify(strip_comment("registersymbol(x) //note here").trim()).unwrap();
-    assert_eq!(stmt, Statement::RegisterSymbol("x".into()));
+    assert_eq!(stmt, Statement::RegisterSymbol(NameList::single("x")));
 }
 
 #[test]
 fn missing_enable_block_errors() {
+    // Truly malformed input (no [ENABLE] AND no `{$lua}`) still errors —
+    // we only soften the case where the source is a recognisable Lua
+    // payload (see [`parse_lua_only_script_does_not_error`]).
     assert_eq!(
         parse("just some noise\n[DISABLE]\n"),
         Err(ParseError::MissingEnable)
@@ -152,8 +251,14 @@ fn missing_enable_block_errors() {
 fn parse_minimal_script() {
     let src = "[ENABLE]\nregistersymbol(foo)\n\n[DISABLE]\nunregistersymbol(foo)\n";
     let s = parse(src).unwrap();
-    assert_eq!(s.enable, vec![Statement::RegisterSymbol("foo".into())]);
-    assert_eq!(s.disable, vec![Statement::UnregisterSymbol("foo".into())]);
+    assert_eq!(
+        s.enable,
+        vec![Statement::RegisterSymbol(NameList::single("foo"))]
+    );
+    assert_eq!(
+        s.disable,
+        vec![Statement::UnregisterSymbol(NameList::single("foo"))]
+    );
 }
 
 #[test]
@@ -167,9 +272,9 @@ fn parse_aurora_em_unlharvestflag_fixture() {
         .iter()
         .filter_map(|s| match s {
             Statement::AobScanModule { symbol, .. } => Some(("aob", symbol.as_str())),
-            Statement::RegisterSymbol(s) => Some(("reg", s.as_str())),
+            Statement::RegisterSymbol(list) => list.names().first().map(|n| ("reg", n.as_str())),
             Statement::Alloc { symbol, .. } => Some(("alloc", symbol.as_str())),
-            Statement::Label(s) => Some(("label", s.as_str())),
+            Statement::Label(list) => list.names().first().map(|n| ("label", n.as_str())),
             Statement::LabelSite(s) => Some(("site", s.as_str())),
             Statement::Directive(_) => Some(("dir", "_")),
             _ => None,
@@ -205,10 +310,13 @@ fn parse_aurora_em_unlharvestflag_fixture() {
     );
 
     // DISABLE block must unregister and dealloc.
-    let has_dealloc = script
-        .disable
-        .iter()
-        .any(|s| matches!(s, Statement::Dealloc(name) if name == "codecave"));
+    let has_dealloc = script.disable.iter().any(|s| {
+        matches!(
+            s,
+            Statement::Dealloc(NameList::Names(names))
+                if names.iter().any(|n| n == "codecave")
+        )
+    });
     assert!(has_dealloc, "DISABLE must contain dealloc(codecave)");
     let unreg_count = script
         .disable
