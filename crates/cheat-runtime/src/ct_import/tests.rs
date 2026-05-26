@@ -10,7 +10,7 @@ use tempfile::TempDir;
 use crate::manifest::{FeatureKind, VType};
 
 use super::heuristics::{is_meaningful_header, strip_quotes};
-use super::{CtImportError, convert_ct_file, import_dirs};
+use super::{CtImportError, convert_ct_file, convert_ct_file_with_exe_hint, import_dirs};
 
 const FIXTURE: &str = r#"<?xml version="1.0" encoding="utf-8"?>
 <CheatTable CheatEngineTableVersion="45">
@@ -199,6 +199,59 @@ dealloc(buf)
     );
     let err = convert_ct_file(&ct).unwrap_err();
     assert!(matches!(err, CtImportError::NoExeBinding { .. }));
+}
+
+#[test]
+fn exe_hint_resolves_no_exe_binding_failure() {
+    // Real-world shape (FearLess `pragmata_walk_78071.ct`, `Enigma1.1.ct`
+    // post-AA-fix, minimalist Mono tables): has AA scripts with real
+    // primitives (alloc/registersymbol) but neither aobscanmodule nor
+    // `{ Game : X.exe }`. Without an exe hint the importer rejects with
+    // NoExeBinding; with the hint it produces a usable manifest the UI
+    // can render.
+    let tmp = TempDir::new().unwrap();
+    let ct = write_fixture(
+        tmp.path(),
+        "MonoNoHint.ct",
+        r#"<?xml version="1.0"?>
+<CheatTable>
+  <CheatEntries>
+    <CheatEntry>
+      <ID>1</ID>
+      <Description>"walk key"</Description>
+      <VariableType>Auto Assembler Script</VariableType>
+      <AssemblerScript>[ENABLE]
+alloc(newmem,2048)
+label(bWalkKey)
+registersymbol(bWalkKey)
+newmem:
+push rax
+[DISABLE]
+unregistersymbol(bWalkKey)
+dealloc(newmem)
+</AssemblerScript>
+    </CheatEntry>
+  </CheatEntries>
+</CheatTable>"#,
+    );
+    // Without hint → NoExeBinding (existing contract).
+    let err = convert_ct_file(&ct).unwrap_err();
+    assert!(matches!(err, CtImportError::NoExeBinding { .. }));
+    // With hint → manifest carries the hint's exe verbatim.
+    let m = convert_ct_file_with_exe_hint(&ct, Some("PRAGMATA.exe"))
+        .expect("exe hint must rescue the import");
+    assert_eq!(m.exe, "PRAGMATA.exe");
+    assert_eq!(m.features.len(), 1);
+}
+
+#[test]
+fn exe_hint_does_not_override_real_aobscanmodule() {
+    // When the .ct can infer its own exe via aobscanmodule, the hint is a
+    // no-op — the table's own self-declared exe wins.
+    let tmp = TempDir::new().unwrap();
+    let ct = write_fixture(tmp.path(), "Self.ct", FIXTURE);
+    let m = convert_ct_file_with_exe_hint(&ct, Some("Wrong.exe")).unwrap();
+    assert_eq!(m.exe, "Game.exe");
 }
 
 #[test]

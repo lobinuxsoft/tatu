@@ -79,8 +79,9 @@ pub use chain::{
     walk_chain, write_chain, write_value,
 };
 pub use ct_import::{
-    CtImportError, ImportReport, auto_import_default_dirs, auto_import_for_app, convert_ct_file,
-    ct_tables_dir_for, import_dirs as ct_import_dirs,
+    CtImportError, ImportReport, auto_import_default_dirs, auto_import_for_app,
+    auto_import_for_app_with_exe_hint, convert_ct_file, ct_tables_dir_for,
+    import_dirs as ct_import_dirs,
 };
 pub use debug::{BpSize, BpType, DebugError, DebugEvent, DebugEventKind, Debugger};
 pub use elfsym::{ElfSymError, find_libc_symbol, find_module_base, find_module_symbol};
