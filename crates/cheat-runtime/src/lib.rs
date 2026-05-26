@@ -56,6 +56,7 @@ pub mod memory_access;
 pub mod migrate;
 pub mod persisted_hook;
 pub mod process;
+pub mod ptrace_helpers;
 pub mod regions;
 pub mod scanner;
 pub mod threads;
@@ -93,6 +94,10 @@ pub use persisted_hook::{
     PersistedWrite, load_all as load_all_persisted_hooks, persist_dir,
 };
 pub use process::{find_pid_by_exe, find_pids_by_exe};
+pub use ptrace_helpers::{
+    PtraceError, PtraceResult, attach_and_wait, install_sigchld_handler, safe_ptrace,
+    wait_for_debug_event,
+};
 pub use regions::{
     MEM_MAPPED, MEM_PRIVATE, PAGE_EXECUTE, PAGE_EXECUTE_READ, PAGE_EXECUTE_READWRITE,
     PAGE_NOACCESS, PAGE_READONLY, PAGE_READWRITE, RegionCache, RegionInfo, VQE_DIRTYONLY,
