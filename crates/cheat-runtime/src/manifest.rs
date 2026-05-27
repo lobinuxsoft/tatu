@@ -28,11 +28,13 @@
 //! the feature→script binding, which is documented in personal memory as a
 //! still-open problem.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
 const MANIFEST_SUBDIR: &str = "backlog-tracker/trainers";
+const CT_SUBDIR: &str = "backlog-tracker/cheat-tables";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Manifest {
@@ -209,26 +211,107 @@ pub fn manifests_dir_for(app_id: &str) -> Result<PathBuf, ManifestError> {
         .join(app_id))
 }
 
-/// Load every `*.json` file under `$XDG_CONFIG_HOME/backlog-tracker/trainers/<app_id>/`.
+/// Resolve `$XDG_CONFIG_HOME/backlog-tracker/cheat-tables/<app_id>/`. Pre-#134
+/// this lived in `ct_import::disk`; the loader now consumes the `.ct` files
+/// directly so the dir helper moves next to its primary caller.
+pub fn ct_tables_dir_for(app_id: &str) -> Result<PathBuf, ManifestError> {
+    Ok(dirs::config_dir()
+        .ok_or(ManifestError::NoConfigDir)?
+        .join(CT_SUBDIR)
+        .join(app_id))
+}
+
+/// Load every per-game manifest, parsing `.ct` source files directly.
 ///
-/// Missing directory is not an error — returns an empty vec, so a UI can call
-/// this on a game with no manifests and render an empty state cleanly.
-pub fn load_manifests_for(app_id: &str) -> Result<Vec<Manifest>, ManifestError> {
-    let dir = manifests_dir_for(app_id)?;
-    if !dir.is_dir() {
-        return Ok(Vec::new());
-    }
+/// Order of precedence (#134 — JSON intermediate dropped as canonical):
+///
+/// 1. `cheat-tables/<app_id>/*.ct` — primary source. Each `.ct` is parsed +
+///    converted via [`crate::ct_import::convert_ct_file_with_exe_hint`] on
+///    every call. Per-file conversion failures are logged to stderr and
+///    skipped so one malformed table doesn't blank the user's library.
+/// 2. `trainers/<app_id>/*.json` — legacy fallback for stems with no
+///    matching `.ct` (e.g. the synthetic `legacy.json` produced by the
+///    cheat-core migrator, or manifests authored by hand). A `.ct` of the
+///    same stem always wins.
+///
+/// `exe_hint` is forwarded to the importer for tables that lack both an
+/// `aobscanmodule(_, exe, _)` line and a `{ Game : X.exe }` template
+/// comment (notably hand-rolled Mono / Unity tables). Pass
+/// `Some(detect_game_exe(app_id).ok())` from the Tauri layer — `None` is
+/// fine when the caller has no Steam binding available and the table is
+/// expected to carry its own exe info.
+///
+/// Missing directories are not errors — an empty vec is returned so a UI
+/// can call this on a game with no tables and render an empty state.
+pub fn load_manifests_for(
+    app_id: &str,
+    exe_hint: Option<&str>,
+) -> Result<Vec<Manifest>, ManifestError> {
+    let ct_dir = ct_tables_dir_for(app_id)?;
+    let legacy_dir = manifests_dir_for(app_id)?;
+    load_manifests_from_roots(&ct_dir, &legacy_dir, exe_hint)
+}
+
+/// Test-friendly variant of [`load_manifests_for`] that takes the two
+/// source directories explicitly. Lets the unit tests build a self-
+/// contained tree under `TempDir` without poisoning the process-wide
+/// `XDG_CONFIG_HOME`. Same semantics as the public entry point: `.ct`
+/// primary, `.json` legacy, dedupe by file stem, sort by title.
+pub fn load_manifests_from_roots(
+    ct_dir: &Path,
+    legacy_dir: &Path,
+    exe_hint: Option<&str>,
+) -> Result<Vec<Manifest>, ManifestError> {
     let mut out = Vec::new();
-    for entry in std::fs::read_dir(&dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if path
-            .extension()
-            .is_some_and(|e| e.eq_ignore_ascii_case("json"))
-        {
+    let mut seen_stems: HashSet<String> = HashSet::new();
+
+    if ct_dir.is_dir() {
+        for entry in std::fs::read_dir(ct_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if !path
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("ct"))
+            {
+                continue;
+            }
+            let stem = match path.file_stem() {
+                Some(s) => s.to_string_lossy().into_owned(),
+                None => continue,
+            };
+            match crate::ct_import::convert_ct_file_with_exe_hint(&path, exe_hint) {
+                Ok(manifest) => {
+                    seen_stems.insert(stem);
+                    out.push(manifest);
+                }
+                Err(e) => {
+                    eprintln!("[cheat-runtime load] skipping {}: {e}", path.display());
+                }
+            }
+        }
+    }
+
+    if legacy_dir.is_dir() {
+        for entry in std::fs::read_dir(legacy_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if !path
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("json"))
+            {
+                continue;
+            }
+            let stem = match path.file_stem() {
+                Some(s) => s.to_string_lossy().into_owned(),
+                None => continue,
+            };
+            if seen_stems.contains(&stem) {
+                continue;
+            }
             out.push(load_one(&path)?);
         }
     }
+
     out.sort_by_key(|m| m.title.to_lowercase());
     Ok(out)
 }
@@ -513,5 +596,99 @@ mod tests {
             ManifestError::Json { path, .. } => assert_eq!(path, bad),
             other => panic!("unexpected error: {other:?}"),
         }
+    }
+
+    const BASIC_CT: &str = include_str!("../tests/fixtures/ct/01_basic_toggle.ct");
+
+    #[test]
+    fn loads_ct_directly_when_no_legacy_json_present() {
+        let tmp = TempDir::new().unwrap();
+        let ct_dir = tmp.path().join("ct");
+        let json_dir = tmp.path().join("json");
+        std::fs::create_dir_all(&ct_dir).unwrap();
+
+        std::fs::write(ct_dir.join("alpha.ct"), BASIC_CT).unwrap();
+
+        let manifests = load_manifests_from_roots(&ct_dir, &json_dir, None).unwrap();
+        assert_eq!(manifests.len(), 1);
+        assert_eq!(manifests[0].title, "alpha");
+        // The fixture's aobscanmodule line pins fixture.exe.
+        assert_eq!(manifests[0].exe, "fixture.exe");
+        assert_eq!(manifests[0].features.len(), 1);
+    }
+
+    #[test]
+    fn ct_takes_precedence_over_matching_legacy_json() {
+        // Dedupe is by file stem. A user that imported `mytable.ct` once
+        // (back when imports also wrote `mytable.json`) and then re-edited
+        // the `.ct` upstream should see the fresh `.ct` parse, not the
+        // stale JSON snapshot.
+        let tmp = TempDir::new().unwrap();
+        let ct_dir = tmp.path().join("ct");
+        let json_dir = tmp.path().join("json");
+        std::fs::create_dir_all(&ct_dir).unwrap();
+        std::fs::create_dir_all(&json_dir).unwrap();
+
+        std::fs::write(ct_dir.join("alpha.ct"), BASIC_CT).unwrap();
+        std::fs::write(
+            json_dir.join("alpha.json"),
+            r#"{"exe":"stale.exe","title":"Stale","features":[]}"#,
+        )
+        .unwrap();
+
+        let manifests = load_manifests_from_roots(&ct_dir, &json_dir, None).unwrap();
+        assert_eq!(manifests.len(), 1);
+        assert_eq!(manifests[0].title, "alpha");
+        assert_eq!(manifests[0].exe, "fixture.exe");
+    }
+
+    #[test]
+    fn legacy_json_loads_when_no_matching_ct() {
+        // The cheat-core migrator writes synthetic `legacy.json` manifests
+        // with no `.ct` companion — those must still surface. Likewise any
+        // hand-curated manifest the user dropped into trainers/ pre-#134.
+        let tmp = TempDir::new().unwrap();
+        let ct_dir = tmp.path().join("ct");
+        let json_dir = tmp.path().join("json");
+        std::fs::create_dir_all(&json_dir).unwrap();
+
+        std::fs::write(
+            json_dir.join("legacy.json"),
+            r#"{"exe":"old.exe","title":"Old","features":[]}"#,
+        )
+        .unwrap();
+
+        let manifests = load_manifests_from_roots(&ct_dir, &json_dir, None).unwrap();
+        assert_eq!(manifests.len(), 1);
+        assert_eq!(manifests[0].title, "Old");
+    }
+
+    #[test]
+    fn malformed_ct_is_skipped_not_fatal() {
+        // A single broken `.ct` must not blank the library — the loader
+        // logs and moves on so a typo in one table doesn't hide the rest.
+        let tmp = TempDir::new().unwrap();
+        let ct_dir = tmp.path().join("ct");
+        let json_dir = tmp.path().join("json");
+        std::fs::create_dir_all(&ct_dir).unwrap();
+
+        std::fs::write(ct_dir.join("good.ct"), BASIC_CT).unwrap();
+        std::fs::write(ct_dir.join("bad.ct"), "<not really xml").unwrap();
+
+        let manifests = load_manifests_from_roots(&ct_dir, &json_dir, None).unwrap();
+        assert_eq!(manifests.len(), 1);
+        assert_eq!(manifests[0].title, "good");
+    }
+
+    #[test]
+    fn missing_dirs_return_empty_not_error() {
+        let tmp = TempDir::new().unwrap();
+        let manifests = load_manifests_from_roots(
+            &tmp.path().join("nope-ct"),
+            &tmp.path().join("nope-json"),
+            None,
+        )
+        .unwrap();
+        assert!(manifests.is_empty());
     }
 }

@@ -9,6 +9,7 @@ use serde::Serialize;
 use tauri::State;
 
 use super::{ActiveCheats, purge_stale_cheats};
+use crate::steam::detect_game_exe;
 
 #[derive(Debug, Serialize)]
 pub struct FeatureView {
@@ -53,7 +54,8 @@ pub fn cheat_runtime_list_features(
     // on the same feature_uuid so the frontend's frozen-value
     // indicators clear at the same time.
     purge_stale_cheats(&active, Some(&freezes))?;
-    let manifests = load_manifests_for(&app_id).map_err(|e| e.to_string())?;
+    let exe_hint = detect_game_exe(&app_id).ok();
+    let manifests = load_manifests_for(&app_id, exe_hint.as_deref()).map_err(|e| e.to_string())?;
     let (active_keys, registered_symbols) = {
         let guard = active
             .lock()
