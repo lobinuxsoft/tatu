@@ -229,6 +229,11 @@ fn migrate_one(
             table.game_name
         },
         features,
+        // Legacy cheat-core tables predate the prereqs concept (#98) and
+        // never targeted RE Engine games in practice (cheat-core only
+        // handled Absolute/Static/PointerChain, RE Engine cheats need
+        // aobscanmodule). Empty vec is correct here.
+        prereqs: Vec::new(),
     };
 
     std::fs::create_dir_all(&target_dir)?;

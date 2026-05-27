@@ -4,6 +4,7 @@ mod disk;
 mod drm;
 mod hltb;
 mod inventory;
+mod prereqs;
 mod shortcuts;
 mod state;
 mod steam;
@@ -80,6 +81,8 @@ pub fn run() {
             commands::cheat_runtime_cmd::values::cheat_runtime_value_freeze,
             commands::cheat_runtime_cmd::import::cheat_runtime_import_ct,
             commands::cheat_runtime_cmd::import::cheat_runtime_remove_ct,
+            commands::cheat_runtime_cmd::prereqs::cheat_runtime_prereqs_check,
+            commands::cheat_runtime_cmd::prereqs::cheat_runtime_prereqs_install,
             commands::cheat_search_cmd::open_fearless_search,
         ])
         .run(tauri::generate_context!())

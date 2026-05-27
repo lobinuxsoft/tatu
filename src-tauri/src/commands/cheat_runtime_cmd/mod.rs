@@ -27,6 +27,7 @@
 pub mod features;
 pub mod import;
 pub mod orphans;
+pub mod prereqs;
 pub mod toggles;
 pub mod values;
 

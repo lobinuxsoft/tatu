@@ -127,6 +127,13 @@
 .ce-remove-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .cheat-runtime-section { margin-bottom: 1rem; }
+/* #98 — runtime section dims when a prereq (REFramework) is missing. */
+.cheat-runtime-section[data-prereq-blocked="true"] .cheat-tree { opacity: 0.5; pointer-events: none; }
+.cheat-runtime-section[data-prereq-blocked="true"] .cheat-refresh-all { opacity: 0.5; pointer-events: none; }
+/* #98 — install button styling, sits inside the warn / err banner row. */
+.ce-prereq-install-btn { margin-left: 0.5rem; background: var(--accent); color: var(--bg-panel); border: 1px solid var(--accent); padding: 0.3rem 0.7rem; border-radius: var(--r); font-family: var(--font-display); font-size: 0.7rem; font-weight: 700; text-transform: var(--display-transform); letter-spacing: var(--display-tracking); cursor: pointer; transition: opacity var(--t-fast); }
+.ce-prereq-install-btn:hover:not(:disabled) { opacity: 0.85; }
+.ce-prereq-install-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 .cheat-runtime-header { display: flex; align-items: center; gap: 0.5rem; font-family: var(--font-display); font-size: 0.72rem; font-weight: 700; text-transform: var(--display-transform); letter-spacing: var(--display-tracking); color: var(--fg-muted); margin-bottom: 0.4rem; }
 .cheat-runtime-list { list-style: none; padding: 0; margin: 0; }
 .cheat-runtime-item { display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0; border-bottom: 1px solid var(--border-subtle); }
