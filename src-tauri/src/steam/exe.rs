@@ -91,7 +91,11 @@ fn cache_detection(app_id: &str, exe_name: &str) -> std::io::Result<()> {
     fs::write(&path, exe_name)
 }
 
-fn find_install_path(app_id: &str) -> Result<PathBuf, String> {
+/// Resolve the Steam install directory for an appid. Used by
+/// [`detect_game_exe`] to enumerate `.exe` candidates and by
+/// `tatu-tracker::prereqs` (#98) to place / inspect REFramework's
+/// `dinput8.dll` next to the game exe.
+pub fn find_install_path(app_id: &str) -> Result<PathBuf, String> {
     for lib in library_paths() {
         let manifest = lib
             .join("steamapps")

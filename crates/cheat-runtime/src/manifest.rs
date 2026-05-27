@@ -42,6 +42,29 @@ pub struct Manifest {
     #[serde(default)]
     pub title: String,
     pub features: Vec<ManifestFeature>,
+    /// Per-game prerequisites the runtime must satisfy before any feature in
+    /// this manifest can be enabled. Populated by the CT importer when it
+    /// recognises the game family (e.g. RE Engine exes get a
+    /// [`Prereq::Reframework`] auto-attached — see #98). Empty for the
+    /// common case; the UI hides the prereq banner when the vec is empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub prereqs: Vec<Prereq>,
+}
+
+/// External dependency the runtime needs in place before its scripts can
+/// run safely. Tagged enum so future variants (EAC bypass, Denuvo offline
+/// patches, BepInEx for IL2CPP Mono games, …) can join without breaking
+/// existing manifests.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Prereq {
+    /// praydog's REFramework `dinput8.dll` proxy — required by every RE
+    /// Engine game (RE2/3/4, MHW, DD2, SF6, PRAGMATA, …) to neutralise
+    /// Capcom Anti-Tamper's periodic page-integrity scans + anti-debug
+    /// syscalls. Without it, AOB scans + trampolines crash the game within
+    /// seconds. The installer side lives in `tatu-tracker::prereqs` (the
+    /// runtime crate is filesystem-free for portability).
+    Reframework,
 }
 
 /// Visual / behavioural category of a [`ManifestFeature`].
@@ -406,6 +429,7 @@ mod tests {
                     children: Vec::new(),
                 },
             ],
+            prereqs: Vec::new(),
         };
         let text = serde_json::to_string(&m).unwrap();
         let back: Manifest = serde_json::from_str(&text).unwrap();
@@ -482,6 +506,7 @@ mod tests {
                 value: None,
                 children: vec![sub_header],
             }],
+            prereqs: Vec::new(),
         };
         let text = serde_json::to_string(&m).unwrap();
         let back: Manifest = serde_json::from_str(&text).unwrap();
@@ -524,9 +549,14 @@ mod tests {
                 value: None,
                 children: Vec::new(),
             }],
+            prereqs: Vec::new(),
         };
         let json = serde_json::to_string(&m).unwrap();
         assert!(!json.contains("\"children\""));
+        // Same omission guarantee for prereqs — the 99% of manifests
+        // without any RE Engine / Mono / etc. dependency should serialise
+        // clean. See #98 (Prereq enum) for the schema.
+        assert!(!json.contains("\"prereqs\""));
     }
 
     #[test]
@@ -678,6 +708,39 @@ mod tests {
         let manifests = load_manifests_from_roots(&ct_dir, &json_dir, None).unwrap();
         assert_eq!(manifests.len(), 1);
         assert_eq!(manifests[0].title, "good");
+    }
+
+    #[test]
+    fn manifest_without_prereqs_field_defaults_to_empty() {
+        // Existing on-disk JSON manifests (every legacy manifest written
+        // before #98) lack the `prereqs` array. `#[serde(default)]` must
+        // populate it as empty so they keep loading without a one-shot
+        // migration. Same contract as `children` field (post-#133).
+        let m: Manifest = serde_json::from_str(
+            r#"{
+                "exe": "Game.exe",
+                "features": [{"uuid":"u","name":"X","script":"[ENABLE]\n[DISABLE]\n"}]
+            }"#,
+        )
+        .unwrap();
+        assert!(m.prereqs.is_empty());
+    }
+
+    #[test]
+    fn reframework_prereq_round_trips_with_kind_tag() {
+        // External `kind` tag (`#[serde(tag = "kind")]`) means the JSON
+        // shape is `{"kind":"reframework"}`, not a bare string. Future
+        // variants (BepInEx, EAC bypass, …) extend the same envelope.
+        let json = r#"{
+            "exe": "PRAGMATA.exe",
+            "title": "Pragmata",
+            "features": [],
+            "prereqs": [{"kind":"reframework"}]
+        }"#;
+        let m: Manifest = serde_json::from_str(json).unwrap();
+        assert_eq!(m.prereqs, vec![Prereq::Reframework]);
+        let back = serde_json::to_string(&m).unwrap();
+        assert!(back.contains("\"kind\":\"reframework\""));
     }
 
     #[test]

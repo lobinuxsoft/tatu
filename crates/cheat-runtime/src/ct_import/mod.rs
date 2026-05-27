@@ -55,7 +55,7 @@ use std::path::{Path, PathBuf};
 
 use crate::manifest::Manifest;
 
-use self::heuristics::derive_exe;
+use self::heuristics::{derive_exe, derive_prereqs};
 use self::xml_walker::walk_entries;
 
 #[derive(Debug, thiserror::Error)]
@@ -128,10 +128,13 @@ pub fn convert_ct_file_with_exe_hint(
             path: path.to_path_buf(),
         })?;
 
+    let prereqs = derive_prereqs(&exe);
+
     Ok(Manifest {
         exe,
         title: stem,
         features,
+        prereqs,
     })
 }
 

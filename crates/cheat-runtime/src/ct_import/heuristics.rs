@@ -1,6 +1,7 @@
-//! Cheat-table heuristics: header-vs-ornament, Lua-vs-AA, exe recovery.
+//! Cheat-table heuristics: header-vs-ornament, Lua-vs-AA, exe recovery,
+//! known-engine prereq derivation.
 
-use crate::manifest::ManifestFeature;
+use crate::manifest::{ManifestFeature, Prereq};
 
 /// Drop CE `<GroupHeader>` entries that are pure visual ornament: ASCII
 /// separators (`---------`), runic dividers (`◣⫘⫘⫘…◢`), info notes prefixed
@@ -119,6 +120,57 @@ fn parse_aobscanmodule_exe(script: &str) -> Option<String> {
 /// block at the top of a script. The block can carry multiple fields
 /// (`Game`, `Version`, `Date`, `Author`, …); we only need `Game` and we
 /// look for any `.exe` token to stay forgiving of formatting.
+/// Map a recovered exe name to its required runtime prereqs (#98).
+///
+/// Today the only auto-derived prereq is REFramework for RE Engine titles.
+/// Capcom's RE Engine games all carry the same anti-tamper layer (periodic
+/// page-integrity scans + anti-debug syscalls) that crashes the game
+/// within seconds of a vanilla AOB scan / trampoline jmp. praydog's
+/// REFramework `dinput8.dll` proxy neutralises both, and the cheat-table
+/// authors on FearLess uniformly note it as a hard prerequisite.
+///
+/// The recognised exe list is conservative — adding a false positive here
+/// would surface an install banner on a game that doesn't need it, which
+/// is annoying but recoverable. Adding a false negative just means the
+/// user installs REFramework manually (or we add the exe in a follow-up).
+pub(super) fn derive_prereqs(exe: &str) -> Vec<Prereq> {
+    if is_re_engine_exe(exe) {
+        return vec![Prereq::Reframework];
+    }
+    Vec::new()
+}
+
+/// Conservative RE Engine exe matcher. Each entry is the canonical
+/// Steam shipping exe (case-insensitive) from publicly documented Capcom
+/// releases. Order doesn't matter — `iter().any` short-circuits.
+fn is_re_engine_exe(exe: &str) -> bool {
+    const RE_ENGINE_EXES: &[&str] = &[
+        // Resident Evil remakes / remasters
+        "re2.exe",
+        "re3.exe",
+        "re4.exe",
+        "re7.exe",
+        "re8.exe",
+        "rerev2.exe",
+        // Monster Hunter family
+        "monsterhunterrise.exe",
+        "mhrise.exe",
+        "mhwilds.exe",
+        // Devil May Cry 5 / Dragon's Dogma 2
+        "dmc5.exe",
+        "dd2.exe",
+        // Street Fighter 6 / Pragmata
+        "streetfighter6.exe",
+        "sf6.exe",
+        "pragmata.exe",
+        // Kunitsu-Gami, Exoprimal, Dragon's Dogma: Dark Arisen
+        "kunitsu-gami.exe",
+        "exoprimal.exe",
+    ];
+    let lower = exe.to_ascii_lowercase();
+    RE_ENGINE_EXES.iter().any(|name| *name == lower)
+}
+
 fn parse_comment_block_exe(script: &str) -> Option<String> {
     // CE's comment block is `{ ... }` spanning multiple lines. Find the
     // opening brace, then scan inside it for `Game` followed by `:`

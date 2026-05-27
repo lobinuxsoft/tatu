@@ -470,3 +470,54 @@ fn description_strips_only_balanced_outer_quotes() {
     assert_eq!(strip_quotes("\"".to_string()), "\"");
     assert_eq!(strip_quotes("\"a\"b\"".to_string()), "a\"b");
 }
+
+#[test]
+fn re_engine_exe_gets_reframework_prereq_auto_attached() {
+    // PRAGMATA is the canonical case from #98: Capcom RE Engine ships
+    // anti-tamper that crashes any aobscan + jmp trampoline within
+    // seconds. The importer must flag it so the UI surfaces the
+    // REFramework install banner BEFORE the user toggles a cheat and
+    // hangs the game.
+    let tmp = TempDir::new().unwrap();
+    let ct = write_fixture(
+        tmp.path(),
+        "Pragmata.ct",
+        r#"<?xml version="1.0"?>
+<CheatTable>
+  <CheatEntries>
+    <CheatEntry>
+      <ID>1</ID>
+      <Description>"God Mode"</Description>
+      <VariableType>Auto Assembler Script</VariableType>
+      <AssemblerScript>[ENABLE]
+aobscanmodule(INJECT,pragmata.exe,90 90 90)
+alloc(newmem,$1000,INJECT)
+[DISABLE]
+INJECT:
+db 90 90 90
+dealloc(newmem)
+</AssemblerScript>
+    </CheatEntry>
+  </CheatEntries>
+</CheatTable>"#,
+    );
+    let m = convert_ct_file(&ct).unwrap();
+    assert_eq!(m.exe, "pragmata.exe");
+    assert_eq!(
+        m.prereqs,
+        vec![crate::manifest::Prereq::Reframework],
+        "RE Engine exe must auto-attach Reframework prereq"
+    );
+}
+
+#[test]
+fn non_re_engine_exe_gets_no_prereqs() {
+    let tmp = TempDir::new().unwrap();
+    let ct = write_fixture(tmp.path(), "EM.ct", FIXTURE);
+    let m = convert_ct_file(&ct).unwrap();
+    assert_eq!(m.exe, "Game.exe");
+    assert!(
+        m.prereqs.is_empty(),
+        "vanilla UE / Mono exe must not flag any prereqs"
+    );
+}

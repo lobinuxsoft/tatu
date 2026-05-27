@@ -1,5 +1,5 @@
 mod collections;
-mod exe;
+pub(crate) mod exe;
 mod games;
 mod install;
 

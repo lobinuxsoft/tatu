@@ -57,6 +57,7 @@ pub mod memory_access;
 pub mod memory_debug;
 pub mod migrate;
 pub mod persisted_hook;
+pub mod prereqs;
 pub mod process;
 pub mod ptrace_helpers;
 pub mod regions;
@@ -84,8 +85,8 @@ pub use elfsym::{ElfSymError, find_libc_symbol, find_module_base, find_module_sy
 pub use executor::{ActiveCheat, Engine, ExecError};
 pub use freeze::{FreezeError, FreezeHandle, FreezeKey, FreezeRegistry, FreezeTarget};
 pub use manifest::{
-    FeatureKind, Manifest, ManifestError, ManifestFeature, RecursiveFeatureIter, VType, ValueSpec,
-    ct_tables_dir_for, load_manifests_for, load_manifests_from_roots, manifests_dir_for,
+    FeatureKind, Manifest, ManifestError, ManifestFeature, Prereq, RecursiveFeatureIter, VType,
+    ValueSpec, ct_tables_dir_for, load_manifests_for, load_manifests_from_roots, manifests_dir_for,
 };
 pub use maps::{MemoryRegion, Perms, parse_maps, read_maps};
 pub use memory::{RuntimeError, read_bytes, write_bytes};
@@ -97,6 +98,7 @@ pub use persisted_hook::{
     LoadAllReport as PersistedLoadAllReport, PersistError, PersistedAlloc, PersistedHook,
     PersistedWrite, load_all as load_all_persisted_hooks, persist_dir,
 };
+pub use prereqs::{PrereqStatus, detect_reframework};
 pub use process::{find_pid_by_exe, find_pids_by_exe};
 pub use ptrace_helpers::{
     PtraceError, PtraceResult, attach_and_wait, install_sigchld_handler, safe_ptrace,

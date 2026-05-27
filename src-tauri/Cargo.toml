@@ -17,6 +17,10 @@ cheat-runtime = { path = "../crates/cheat-runtime" }
 ce-launcher = { path = "../crates/ce-launcher" }
 thiserror = "2"
 urlencoding = "2"
+# REFramework installer (#98) extracts dinput8.dll from praydog's release
+# zip. ce-launcher already pulls the same crate at the same major version
+# — keep them aligned to avoid two copies in the dep tree.
+zip = "8"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

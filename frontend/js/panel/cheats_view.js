@@ -136,7 +136,85 @@ function wireTables(panel, gameId) {
   });
 }
 
-function renderRuntimeSection(features, gameId) {
+// #98 — surface REFramework / other prereqs above the runtime section.
+// The backend returns one PrereqReport per distinct prereq declared by
+// any manifest of this game; an empty array means nothing to install
+// (the common case for vanilla UE / Mono / native titles).
+function renderPrereqBanner(prereqs) {
+  if (!Array.isArray(prereqs) || !prereqs.length) return "";
+  const rows = [];
+  for (const p of prereqs) {
+    const label = prereqLabel(p.kind);
+    if (p.status === "installed") {
+      rows.push(
+        `<div class="ce-banner ce-banner-ok">${esc(label)} installed at <code>${esc(p.game_dir)}</code></div>`
+      );
+      continue;
+    }
+    const reason = p.status === "corrupt"
+      ? `${esc(label)} install looks corrupt — reinstall to recover`
+      : `${esc(label)} required by this game's cheats`;
+    const btnText = p.status === "corrupt" ? `Reinstall ${esc(label)}` : `Install ${esc(label)}`;
+    rows.push(
+      `<div class="ce-banner ce-banner-warn">` +
+        `${reason} ` +
+        `<button class="ce-prereq-install-btn" data-kind="${esc(p.kind)}">${btnText}</button>` +
+      `</div>`
+    );
+  }
+  return rows.join("");
+}
+
+function prereqLabel(kind) {
+  if (kind === "reframework") return "REFramework";
+  return kind;
+}
+
+// True iff at least one prereq is in `missing` or `corrupt` state — the
+// runtime section dims its toggles in that case. The user can still
+// expand the tree (so they see what the game offers) but cannot enable
+// cheats until the prereq is in place.
+function anyPrereqBlocking(prereqs) {
+  if (!Array.isArray(prereqs)) return false;
+  return prereqs.some(p => p.status === "missing" || p.status === "corrupt");
+}
+
+// Click handler for `Install REFramework` (and future prereq variants).
+// The install command is synchronous on the backend (downloads + extracts
+// + atomic rename within a single call) — the UI shows a spinner via the
+// button label so the user knows something's happening during the ~10 s
+// download. On success we re-load the panel so the banner re-renders
+// against the now-installed prereq and the runtime section un-dims.
+function wirePrereqBanner(panel, gameId) {
+  const buttons = panel.querySelectorAll(".ce-prereq-install-btn");
+  buttons.forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const kind = btn.getAttribute("data-kind") || "";
+      const original = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = "Installing…";
+      try {
+        const result = await invoke("cheat_runtime_prereqs_install", {
+          appId: String(gameId),
+          kind,
+        });
+        const sizeMB = (result.size_bytes / (1024 * 1024)).toFixed(1);
+        const tag = result.release_tag || "latest";
+        btn.textContent = `✓ Installed ${prereqLabel(kind)} ${esc(tag)} (${sizeMB} MB)`;
+        // Re-render so the banner flips to the success state + runtime
+        // section un-dims. Brief delay so the user reads the success
+        // text on the button before the panel re-renders.
+        setTimeout(() => loadCheats(gameId), 800);
+      } catch (e) {
+        btn.disabled = false;
+        btn.textContent = `✗ ${original} — ${String(e)}`;
+        btn.title = String(e);
+      }
+    });
+  });
+}
+
+function renderRuntimeSection(features, gameId, prereqsBlocked) {
   if (!features.length) {
     return (
       `<div class="cheat-runtime-section">` +
@@ -161,8 +239,9 @@ function renderRuntimeSection(features, gameId) {
   // covers individual reads but a 50+ entry table (Dragon's Dogma 2) makes
   // that impractical for an "I just enabled the master cheat, refresh
   // everything" workflow.
+  const blockedAttr = prereqsBlocked ? ' data-prereq-blocked="true"' : "";
   let html =
-    `<div class="cheat-runtime-section">` +
+    `<div class="cheat-runtime-section"${blockedAttr}>` +
       `<div class="cheat-runtime-header">` +
         `Trainer features <span class="cheat-pill ${pillCls}">${pillTxt}</span>` +
         `<button class="cheat-refresh-all" data-action="refresh-all" title="Read every Value row's current value">Refresh all values</button>` +
@@ -707,25 +786,32 @@ export async function loadCheats(gameId) {
   if (!panel) return;
 
   try {
-    const [ceStatus, tables, runtimeFeatures, orphans] = await Promise.all([
+    const [ceStatus, tables, runtimeFeatures, orphans, prereqs] = await Promise.all([
       invoke("ce_install_status").catch(() => ({ kind: "not_installed" })),
       invoke("ce_list_tables_for_game", { appId: String(gameId) }).catch(() => []),
       invoke("cheat_runtime_list_features", { appId: String(gameId) }).catch(() => []),
       invoke("cheat_runtime_orphans_list").catch(() => []),
+      // #98 prereqs check. Surface failure as empty list (no banner)
+      // rather than blocking the whole panel — same defensive pattern
+      // as the other four calls above.
+      invoke("cheat_runtime_prereqs_check", { appId: String(gameId) }).catch(() => []),
     ]);
 
     if (state.panelGameId !== gameId) return;
 
     const banner = renderCeBanner(ceStatus);
-    const runtimeSection = renderRuntimeSection(runtimeFeatures, gameId);
+    const prereqBanner = renderPrereqBanner(prereqs);
+    const blocked = anyPrereqBlocking(prereqs);
+    const runtimeSection = renderRuntimeSection(runtimeFeatures, gameId, blocked);
     const tablesSection = renderTablesSection(gameId, tables);
     const searchBar = renderSearchBar(gameId);
 
     const orphansBanner = renderOrphansBanner(orphans, gameId);
-    panel.innerHTML = banner + orphansBanner + runtimeSection + tablesSection + searchBar;
+    panel.innerHTML = banner + orphansBanner + prereqBanner + runtimeSection + tablesSection + searchBar;
 
     wireBanner(panel, gameId);
     wireOrphansBanner(panel, gameId);
+    wirePrereqBanner(panel, gameId);
     wireTreeCarets(panel, gameId);
     wireRuntimeSwitches(panel, gameId);
     wireValueRows(panel, gameId);
