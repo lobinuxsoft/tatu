@@ -146,10 +146,13 @@ pub fn cheat_runtime_orphans_dismiss(app_id: String, feature_uuid: String) -> Re
 /// names in the recovery banner.
 fn build_name_index(app_id: &str) -> HashMap<String, String> {
     let mut out = HashMap::new();
-    if let Ok(manifests) = load_manifests_for(app_id) {
+    let exe_hint = crate::steam::detect_game_exe(app_id).ok();
+    if let Ok(manifests) = load_manifests_for(app_id, exe_hint.as_deref()) {
         for m in manifests {
-            for f in m.features {
-                out.insert(f.uuid, f.name);
+            // features_recursive so headers/children-deep UUIDs also map
+            // — matches the resolution path in toggles / values.
+            for f in m.features_recursive() {
+                out.insert(f.uuid.clone(), f.name.clone());
             }
         }
     }

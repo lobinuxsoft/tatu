@@ -78,18 +78,14 @@ pub use chain::{
     AddrExpr, ChainError, Value, parse_addr_expr, read_chain, read_value, resolve_addr_expr,
     walk_chain, write_chain, write_value,
 };
-pub use ct_import::{
-    CtImportError, ImportReport, auto_import_default_dirs, auto_import_for_app,
-    auto_import_for_app_with_exe_hint, convert_ct_file, ct_tables_dir_for,
-    import_dirs as ct_import_dirs,
-};
+pub use ct_import::{CtImportError, convert_ct_file, convert_ct_file_with_exe_hint};
 pub use debug::{BpSize, BpType, DebugError, DebugEvent, DebugEventKind, Debugger};
 pub use elfsym::{ElfSymError, find_libc_symbol, find_module_base, find_module_symbol};
 pub use executor::{ActiveCheat, Engine, ExecError};
 pub use freeze::{FreezeError, FreezeHandle, FreezeKey, FreezeRegistry, FreezeTarget};
 pub use manifest::{
     FeatureKind, Manifest, ManifestError, ManifestFeature, RecursiveFeatureIter, VType, ValueSpec,
-    load_manifests_for, manifests_dir_for,
+    ct_tables_dir_for, load_manifests_for, load_manifests_from_roots, manifests_dir_for,
 };
 pub use maps::{MemoryRegion, Perms, parse_maps, read_maps};
 pub use memory::{RuntimeError, read_bytes, write_bytes};

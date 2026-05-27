@@ -1,6 +1,8 @@
 //! Integration tests covering: end-to-end XML projection (header / toggle /
-//! value), pointer-chain offset preservation, idempotent disk writes,
-//! exe-binding failure modes, header-ornament filter, quote stripping.
+//! value), pointer-chain offset preservation, exe-binding failure modes,
+//! header-ornament filter, quote stripping. Disk-write helpers were removed
+//! in #134 (loader now parses `.ct` directly — no more JSON sidecars to
+//! round-trip through), so the legacy `import_dirs_*` test went with them.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -10,7 +12,7 @@ use tempfile::TempDir;
 use crate::manifest::{FeatureKind, VType};
 
 use super::heuristics::{is_meaningful_header, strip_quotes};
-use super::{CtImportError, convert_ct_file, convert_ct_file_with_exe_hint, import_dirs};
+use super::{CtImportError, convert_ct_file, convert_ct_file_with_exe_hint};
 
 const FIXTURE: &str = r#"<?xml version="1.0" encoding="utf-8"?>
 <CheatTable CheatEngineTableVersion="45">
@@ -154,25 +156,6 @@ alloc(base_address,8)
 
     assert_eq!(m.features[3].value.as_ref().unwrap().vtype, VType::F32);
     assert_eq!(m.features[4].value.as_ref().unwrap().vtype, VType::U64);
-}
-
-#[test]
-fn import_dirs_creates_then_skips_on_second_run() {
-    let tmp = TempDir::new().unwrap();
-    let src = tmp.path().join("cheat-tables/2725260");
-    let dst = tmp.path().join("trainers/2725260");
-    fs::create_dir_all(&src).unwrap();
-    write_fixture(&src, "Game.ct", FIXTURE);
-
-    let first = import_dirs(&src, &dst).unwrap();
-    assert_eq!(first.created.len(), 1);
-    assert_eq!(first.skipped.len(), 0);
-    assert!(first.failed.is_empty(), "{:?}", first.failed);
-    assert!(dst.join("Game.json").is_file());
-
-    let second = import_dirs(&src, &dst).unwrap();
-    assert_eq!(second.created.len(), 0);
-    assert_eq!(second.skipped.len(), 1);
 }
 
 #[test]

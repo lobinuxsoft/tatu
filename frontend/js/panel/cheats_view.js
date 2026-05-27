@@ -482,9 +482,11 @@ function wireImportButton(panel, gameId) {
         fileName: file.name,
         contents,
       });
-      // Summary fields: created[], skipped[], failed[][file, err], written_to
-      const created = (summary.created || []).length;
-      const skipped = (summary.skipped || []).length;
+      // Summary fields (post-#134, JSON sidecars dropped): imported[],
+      // failed[][file, err], written_to. The "skipped" bucket from the old
+      // shape went away — the importer no longer round-trips through a JSON
+      // cache, so there's nothing to deduplicate against.
+      const imported = (summary.imported || []).length;
       const failed = (summary.failed || []).length;
       let msg;
       let isError = false;
@@ -492,10 +494,8 @@ function wireImportButton(panel, gameId) {
         const [name, err] = summary.failed[0];
         msg = `✗ ${name}: ${err}`;
         isError = true;
-      } else if (created > 0) {
-        msg = `✓ Imported (${created} new)`;
-      } else if (skipped > 0) {
-        msg = `✓ Already imported`;
+      } else if (imported > 0) {
+        msg = `✓ Imported`;
       } else {
         msg = `✓ Done`;
       }

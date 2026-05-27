@@ -33,9 +33,19 @@
 //! - [`xml_walker`] — descent over `<CheatEntry>` nodes + projection to
 //!   [`crate::manifest::ManifestFeature`].
 //! - [`heuristics`] — header-vs-ornament / Lua-vs-AA / exe-recovery rules.
-//! - [`disk`] — directory traversal + idempotent on-disk writes.
+//!
+//! ### #134 — no more disk-side JSON cache
+//!
+//! Up to #163 the importer also persisted each converted manifest as a JSON
+//! sidecar under `trainers/<app_id>/`. The loader has since switched to
+//! parsing `.ct` files directly on every call (see
+//! [`crate::manifest::load_manifests_for`]), so the disk-writer helpers
+//! were removed: there is no longer a `.json` cache to keep in sync, and
+//! the round-trip degradation it caused (Lua bodies, comments and CE-only
+//! tweaks were thrown away) is gone. The single primitive callers still
+//! need is [`convert_ct_file_with_exe_hint`], used by both the loader and
+//! the import command (the latter for parse-time validation).
 
-mod disk;
 mod heuristics;
 mod xml_walker;
 
@@ -47,11 +57,6 @@ use crate::manifest::Manifest;
 
 use self::heuristics::derive_exe;
 use self::xml_walker::walk_entries;
-
-pub use self::disk::{
-    auto_import_default_dirs, auto_import_for_app, auto_import_for_app_with_exe_hint,
-    ct_tables_dir_for, import_dirs, import_dirs_with_exe_hint,
-};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CtImportError {
@@ -71,23 +76,6 @@ pub enum CtImportError {
     Empty { path: PathBuf },
     #[error("table at {path} has cheats but no aobscanmodule line to recover the module name from")]
     NoExeBinding { path: PathBuf },
-    #[error("could not resolve config dir (XDG_CONFIG_HOME / HOME unset?)")]
-    NoConfigDir,
-    #[error("manifest serialisation failed: {0}")]
-    Serde(#[from] serde_json::Error),
-}
-
-#[derive(Debug, Default)]
-pub struct ImportReport {
-    /// Manifest files that were just written.
-    pub created: Vec<PathBuf>,
-    /// `.ct` files that already had a matching manifest on disk, so the
-    /// importer left them alone.
-    pub skipped: Vec<PathBuf>,
-    /// `.ct` files the importer tried to convert but failed on. The errors
-    /// surface here instead of aborting the whole pass so one bad table
-    /// doesn't block the rest of the user's library.
-    pub failed: Vec<(PathBuf, CtImportError)>,
 }
 
 /// Convert a single `.ct` file into an in-memory [`Manifest`].

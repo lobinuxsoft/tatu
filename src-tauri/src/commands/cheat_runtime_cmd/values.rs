@@ -20,12 +20,14 @@ use tauri::State;
 
 use super::{ActiveCheats, merged_symbols};
 use crate::state::AppState;
+use crate::steam::detect_game_exe;
 
 /// Locate a Value feature: returns the owning manifest's `exe`, the
 /// resolved [`ValueSpec`], and the parsed [`AddrExpr`] — saving callers
 /// from re-parsing on every read/write/freeze invocation.
 fn locate_value_feature(app_id: &str, uuid: &str) -> Result<(String, ValueSpec, AddrExpr), String> {
-    let manifests = load_manifests_for(app_id).map_err(|e| e.to_string())?;
+    let exe_hint = detect_game_exe(app_id).ok();
+    let manifests = load_manifests_for(app_id, exe_hint.as_deref()).map_err(|e| e.to_string())?;
     for m in manifests {
         let Some(f) = m.features_recursive().find(|f| f.uuid == uuid) else {
             continue;

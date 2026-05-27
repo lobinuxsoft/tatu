@@ -14,6 +14,7 @@ use tauri::State;
 
 use super::{ActiveCheatEntry, ActiveCheats, purge_stale_cheats};
 use crate::state::AppState;
+use crate::steam::detect_game_exe;
 
 #[tauri::command]
 pub fn cheat_runtime_enable(
@@ -130,7 +131,8 @@ pub fn cheat_runtime_disable(
 }
 
 pub(super) fn locate_feature_script(app_id: &str, uuid: &str) -> Result<(String, String), String> {
-    let manifests = load_manifests_for(app_id).map_err(|e| e.to_string())?;
+    let exe_hint = detect_game_exe(app_id).ok();
+    let manifests = load_manifests_for(app_id, exe_hint.as_deref()).map_err(|e| e.to_string())?;
     for m in manifests {
         // features_recursive walks Header → child Toggle subtrees so a UUID
         // buried 5 levels deep (real-world CE table shape, see #133 audit)

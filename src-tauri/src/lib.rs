@@ -34,26 +34,11 @@ pub fn run() {
         Err(e) => eprintln!("[cheat-runtime migrate] failed: {e}"),
     }
 
-    // Auto-import every `.ct` table under `cheat-tables/<appid>/` into a
-    // manifest at `trainers/<appid>/`. Same idempotency guarantee: only
-    // tables without a matching manifest are written. Per-file failures are
-    // logged but don't abort startup — one malformed `.ct` mustn't keep the
-    // rest of the user's library from showing up.
-    match cheat_runtime::auto_import_default_dirs() {
-        Ok(report) if !report.created.is_empty() || !report.failed.is_empty() => {
-            eprintln!(
-                "[cheat-runtime ct-import] created={} skipped={} failed={}",
-                report.created.len(),
-                report.skipped.len(),
-                report.failed.len()
-            );
-            for (path, err) in &report.failed {
-                eprintln!("[cheat-runtime ct-import]   {} -> {err}", path.display());
-            }
-        }
-        Ok(_) => {}
-        Err(e) => eprintln!("[cheat-runtime ct-import] failed: {e}"),
-    }
+    // Post-#134: `.ct` files in `cheat-tables/<appid>/` are parsed on
+    // demand by `load_manifests_for` (no more JSON sidecars), so the
+    // startup auto-import pass was removed. Per-file parse failures now
+    // surface at list time via the loader's stderr log + the import
+    // command's validation toast.
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
