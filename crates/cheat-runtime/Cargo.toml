@@ -27,4 +27,6 @@ tatu-mem = { path = "../tatu-mem" }
 thiserror = "2"
 
 [dev-dependencies]
+# Raw-deflate decode for the embedded-module smoke (CE custom base85 → deflate).
+flate2 = "1"
 tempfile = "3"
