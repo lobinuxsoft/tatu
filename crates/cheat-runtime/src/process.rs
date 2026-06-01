@@ -24,7 +24,7 @@ pub fn find_pids_by_exe(exe_name: &str) -> Vec<Pid> {
     let Ok(rd) = fs::read_dir("/proc") else {
         return Vec::new();
     };
-    let mut hits = Vec::new();
+    let mut hits: Vec<(MatchKind, Pid)> = Vec::new();
     for entry in rd.flatten() {
         let name = entry.file_name();
         let Some(pid_str) = name.to_str() else {
@@ -33,11 +33,16 @@ pub fn find_pids_by_exe(exe_name: &str) -> Vec<Pid> {
         let Ok(pid_n) = pid_str.parse::<i32>() else {
             continue;
         };
-        if matches_pid(pid_n, &target, &trunc15) {
-            hits.push(Pid::from_raw(pid_n));
+        if let Some(kind) = match_kind(pid_n, &target, &trunc15) {
+            hits.push((kind, Pid::from_raw(pid_n)));
         }
     }
-    hits
+    // Comm matches first: the real game process (`comm == DD2.exe`) must
+    // outrank Proton launchers (`srt-bwrap`, `pv-adverb`, the Steam reaper)
+    // that only carry the exe path as a cmdline argument. Stable sort keeps
+    // /proc order within each tier.
+    hits.sort_by_key(|(kind, _)| *kind);
+    hits.into_iter().map(|(_, pid)| pid).collect()
 }
 
 /// First PID found via [`find_pids_by_exe`], or `None` if nothing matched.
@@ -45,19 +50,30 @@ pub fn find_pid_by_exe(exe_name: &str) -> Option<Pid> {
     find_pids_by_exe(exe_name).into_iter().next()
 }
 
-fn matches_pid(pid: i32, target_lower: &str, target_trunc15: &str) -> bool {
+/// How strongly a `/proc/<pid>` entry matches the target exe. `Comm` (the
+/// kernel process name equals the exe basename) is authoritative; `Cmdline`
+/// (the exe basename appears somewhere in argv) is weaker and also matches
+/// Proton's launch chain — `srt-bwrap`, `pv-adverb`, `steam.exe` — which all
+/// carry the game's `.exe` path as an argument. Ordered so `Comm < Cmdline`.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+enum MatchKind {
+    Comm,
+    Cmdline,
+}
+
+fn match_kind(pid: i32, target_lower: &str, target_trunc15: &str) -> Option<MatchKind> {
     if let Ok(comm) = fs::read_to_string(format!("/proc/{pid}/comm")) {
         let comm_l = comm.trim().to_lowercase();
         if comm_l == *target_lower || comm_l == target_trunc15 {
-            return true;
+            return Some(MatchKind::Comm);
         }
     }
     if let Ok(cmdline) = fs::read(format!("/proc/{pid}/cmdline"))
         && cmdline_basename_matches(&cmdline, target_lower)
     {
-        return true;
+        return Some(MatchKind::Cmdline);
     }
-    false
+    None
 }
 
 fn cmdline_basename_matches(cmdline: &[u8], target_lower: &str) -> bool {
@@ -108,6 +124,21 @@ mod tests {
     fn cmdline_basename_handles_wine_paths() {
         let cmdline = b"Z:\\home\\lobinux\\Aurora\\Aurora.exe\0-background\0";
         assert!(cmdline_basename_matches(cmdline, "aurora.exe"));
+    }
+
+    #[test]
+    fn comm_match_outranks_cmdline_match() {
+        // Proton launches DD2 as: srt-bwrap → … → DD2.exe. The wrapper's
+        // cmdline carries `.../DD2.exe`, so it matches by Cmdline; the real
+        // game process matches by Comm. find_pid_by_exe must land on the
+        // real process (4601 regions), not the wrapper (25 regions).
+        let mut hits = [
+            (MatchKind::Cmdline, Pid::from_raw(28649)), // srt-bwrap wrapper
+            (MatchKind::Comm, Pid::from_raw(28861)),    // real DD2.exe
+        ];
+        hits.sort_by_key(|(kind, _)| *kind);
+        assert_eq!(hits.first().map(|(_, p)| *p), Some(Pid::from_raw(28861)));
+        assert!(MatchKind::Comm < MatchKind::Cmdline);
     }
 
     #[test]

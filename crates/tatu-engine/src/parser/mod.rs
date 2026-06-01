@@ -155,6 +155,13 @@ pub enum Statement {
     /// captured as subsequent [`Statement::Raw`] entries, identical to the
     /// symbolic [`Statement::LabelSite`] semantics.
     AbsoluteSite(u64),
+    /// `symbol+N:` / `symbol-N:` at the start of a line. CE-AA's canonical
+    /// hook-injection site: a symbol bound earlier in the script (by
+    /// `aobscanmodule` / `registersymbol`) plus a byte offset. Distinct from
+    /// [`Statement::LabelSite`], which *defines* a new label at the cursor —
+    /// a `SymbolSite` only *resolves* an existing symbol and never creates
+    /// one. The body is captured as subsequent [`Statement::Raw`] entries.
+    SymbolSite { symbol: String, offset: i64 },
     /// `{$begin_obfuscate}`, `{$end_obfuscate}`, `{$lua}`, `{$asm}` and other
     /// CE compiler directives. Preserved with surrounding braces intact.
     Directive(String),
@@ -282,14 +289,20 @@ fn classify(line: &str) -> Result<Statement, ParseError> {
         if let Some(addr) = parse_size(name) {
             return Ok(Statement::AbsoluteSite(addr));
         }
+        if let Some((symbol, offset)) = parse_symbol_offset(name) {
+            return Ok(Statement::SymbolSite { symbol, offset });
+        }
     }
     // Function-call style commands: `name(args)`.
     if let Some(open) = line.find('(')
         && line.ends_with(')')
     {
-        let fn_name = line[..open].trim();
+        // CE-AA command names are case-insensitive (`aobScanModule`,
+        // `unregisterSymbol`, …). Normalise the dispatch name only — the
+        // args (symbol names, byte patterns) stay verbatim.
+        let fn_name = line[..open].trim().to_ascii_lowercase();
         let args = &line[open + 1..line.len() - 1];
-        match fn_name {
+        match fn_name.as_str() {
             "aobscanmodule" => return parse_aobscanmodule(args),
             "aobscan" => return parse_aobscan_global(args),
             "registersymbol" => {
@@ -465,6 +478,28 @@ fn parse_alloc(args: &str) -> Result<Statement, ParseError> {
         size,
         near,
     })
+}
+
+/// Parse a `symbol+N` / `symbol-N` site label (the part before the trailing
+/// `:`). The base must be a plain identifier — module-relative forms like
+/// `DD2.exe+X` carry a `.` and fall through to [`Statement::Raw`], matching
+/// prior behaviour. The offset follows the same `parse_size` convention as
+/// numeric sites (`0x`/`$` hex, otherwise decimal). Returns `None` for any
+/// other shape so the caller keeps falling through.
+fn parse_symbol_offset(name: &str) -> Option<(String, i64)> {
+    let idx = name.rfind(['+', '-'])?;
+    if idx == 0 {
+        return None;
+    }
+    let (sym, op_and_off) = name.split_at(idx);
+    let sym = sym.trim();
+    if !is_identifier(sym) {
+        return None;
+    }
+    let (op, off) = op_and_off.split_at(1);
+    let magnitude = parse_size(off.trim())? as i64;
+    let offset = if op == "-" { -magnitude } else { magnitude };
+    Some((sym.to_string(), offset))
 }
 
 fn parse_size(token: &str) -> Option<u64> {

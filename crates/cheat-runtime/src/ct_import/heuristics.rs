@@ -50,8 +50,12 @@ pub(super) fn strip_quotes(s: String) -> String {
 /// but still parses; that's a CE author error, not ours). Lua-only entries
 /// (`{$lua}` blocks, `luacall(...)`) lack all of these and get skipped.
 pub(super) fn is_real_aa_script(body: &str) -> bool {
+    // CE-AA command names are case-insensitive, so authors writing
+    // `aobScanModule` / `Alloc` must still classify as real AA. Lowercase
+    // once and probe the structural primitives.
+    let lower = body.to_ascii_lowercase();
     let needles = ["aobscanmodule", "alloc(", "registersymbol", "\ndb ", " db "];
-    needles.iter().any(|n| body.contains(n))
+    needles.iter().any(|n| lower.contains(n))
 }
 
 /// Scan every toggle's script for the first `aobscanmodule(name, exe, …)`
@@ -101,11 +105,18 @@ fn derive_exe_from_feature(feature: &ManifestFeature) -> Option<String> {
 }
 
 fn parse_aobscanmodule_exe(script: &str) -> Option<String> {
+    const PREFIX: &str = "aobscanmodule(";
     for line in script.lines() {
         let trimmed = line.trim();
-        let Some(rest) = trimmed.strip_prefix("aobscanmodule(") else {
+        // Case-insensitive prefix match (`aobScanModule(`), then take the
+        // exe verbatim from the second comma-separated arg.
+        let Some(head) = trimmed.get(..PREFIX.len()) else {
             continue;
         };
+        if !head.eq_ignore_ascii_case(PREFIX) {
+            continue;
+        }
+        let rest = &trimmed[PREFIX.len()..];
         let mut parts = rest.splitn(3, ',');
         let _name = parts.next();
         let exe = parts.next().map(str::trim)?;

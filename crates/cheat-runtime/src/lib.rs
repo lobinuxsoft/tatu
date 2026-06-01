@@ -70,7 +70,7 @@ pub mod threads;
 // parser + asm live in tatu-engine since Phase 7A1 — re-exported
 // here as `cheat_runtime::parser` / `cheat_runtime::asm` for the
 // existing call sites (executor, ce-launcher, tests, the tracker).
-pub use tatu_engine::{asm, parser};
+pub use tatu_engine::{analysis, asm, parser};
 
 pub use alloc::{AllocError, alloc_remote, dealloc_remote};
 pub use asm::{AsmError, compile_line as compile_asm_line};

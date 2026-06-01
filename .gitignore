@@ -3,3 +3,4 @@ src-tauri/gen/
 Cargo.lock
 dist/
 .tools/
+.local-ct/

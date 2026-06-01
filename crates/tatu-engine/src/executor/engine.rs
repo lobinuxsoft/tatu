@@ -165,6 +165,15 @@ impl<B: Backend> Engine<B> {
                 Statement::AbsoluteSite(addr) => {
                     cursor = Some(*addr);
                 }
+                Statement::SymbolSite { symbol, offset } => {
+                    // The base symbol is bound earlier this pass (aobscanmodule
+                    // / registersymbol). Unlike LabelSite we never *define* a
+                    // symbol here — an unresolved base just leaves the cursor
+                    // alone; write_pass surfaces UnknownSymbol if it never binds.
+                    if let Some(base) = self.symbols.get(symbol).copied() {
+                        cursor = Some(base.wrapping_add(*offset as u64));
+                    }
+                }
                 Statement::Raw(line) => {
                     if let Some(c) = cursor.as_mut() {
                         let len =
@@ -204,6 +213,13 @@ impl<B: Backend> Engine<B> {
                 }
                 Statement::AbsoluteSite(addr) => {
                     cursor = Some(*addr);
+                }
+                Statement::SymbolSite { symbol, offset } => {
+                    let base = *self
+                        .symbols
+                        .get(symbol)
+                        .ok_or_else(|| ExecError::UnknownSymbol(symbol.clone()))?;
+                    cursor = Some(base.wrapping_add(*offset as u64));
                 }
                 Statement::Raw(line) => {
                     let Some(base) = cursor else {
