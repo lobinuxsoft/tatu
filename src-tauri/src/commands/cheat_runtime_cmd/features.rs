@@ -2,8 +2,8 @@
 //! frontend renders, tagged with liveness + symbol-readiness flags.
 
 use cheat_runtime::{
-    AddrExpr, FeatureKind, FreezeRegistry, ManifestFeature, ValueSpec, find_pid_by_exe,
-    load_manifests_for, parse_addr_expr,
+    AddrExpr, FeatureKind, FreezeRegistry, Manifest, ManifestFeature, ValueSpec, analysis,
+    find_pid_by_exe, load_manifests_for, parse_addr_expr, parse_script,
 };
 use serde::Serialize;
 use tauri::State;
@@ -35,6 +35,13 @@ pub struct FeatureView {
     /// active cheat (or the value has no symbol dep). The UI uses this to
     /// gate the read/write/freeze controls on a per-feature basis.
     pub symbol_ready: bool,
+    /// `true` when this Toggle's script references a symbol no script in the
+    /// table binds — a pointer root resolved only by the CE Lua framework
+    /// (e.g. `CharacterManagerPtr`). Such cheats can't run in the native
+    /// executor; the UI surfaces them as "needs CE" instead of a toggle that
+    /// would fail at enable time. Always `false` for Headers / Values and for
+    /// self-contained Toggles.
+    pub needs_ce: bool,
     /// Nested feature subtree. Mirrors `ManifestFeature::children` —
     /// see #133. Empty for leaves; omitted from JSON when empty so the
     /// payload stays compact for flat manifests.
@@ -73,12 +80,14 @@ pub fn cheat_runtime_list_features(
     let mut out = Vec::new();
     for m in manifests {
         let game_running = find_pid_by_exe(&m.exe).is_some();
+        let provided_symbols = collect_provided_symbols(&m);
         let ctx = ViewCtx {
             manifest_title: &m.title,
             manifest_exe: &m.exe,
             active_keys: &active_keys,
             registered_symbols: &registered_symbols,
             game_running,
+            provided_symbols: &provided_symbols,
         };
         for f in &m.features {
             out.push(build_view(f, &ctx));
@@ -95,6 +104,10 @@ struct ViewCtx<'a> {
     active_keys: &'a std::collections::HashSet<String>,
     registered_symbols: &'a std::collections::HashSet<String>,
     game_running: bool,
+    /// Every symbol bound by *any* script in this manifest — the resolution
+    /// baseline for [`compute_needs_ce`]. Sibling scripts often register the
+    /// shared pointer roots one cheat dereferences.
+    provided_symbols: &'a std::collections::HashSet<String>,
 }
 
 fn build_view(f: &ManifestFeature, ctx: &ViewCtx<'_>) -> FeatureView {
@@ -104,6 +117,10 @@ fn build_view(f: &ManifestFeature, ctx: &ViewCtx<'_>) -> FeatureView {
         None => true,
     };
     let children = f.children.iter().map(|c| build_view(c, ctx)).collect();
+    let needs_ce = f
+        .script
+        .as_deref()
+        .is_some_and(|src| compute_needs_ce(src, ctx.provided_symbols));
     FeatureView {
         manifest_title: ctx.manifest_title.to_string(),
         manifest_exe: ctx.manifest_exe.to_string(),
@@ -116,7 +133,36 @@ fn build_view(f: &ManifestFeature, ctx: &ViewCtx<'_>) -> FeatureView {
         required_symbol,
         symbol_ready,
         game_running: ctx.game_running,
+        needs_ce,
         children,
+    }
+}
+
+/// Every symbol any script in the manifest binds. Built once per
+/// `list_features` call and shared across all `build_view` invocations as
+/// the resolution baseline (a cheat may reference a pointer root a sibling
+/// registers).
+fn collect_provided_symbols(manifest: &Manifest) -> std::collections::HashSet<String> {
+    let mut out = std::collections::HashSet::new();
+    for f in manifest.features_recursive() {
+        if let Some(src) = &f.script
+            && let Ok(script) = parse_script(src)
+        {
+            out.extend(analysis::provided_symbols(&script));
+        }
+    }
+    out
+}
+
+/// A Toggle needs CE delegation when its script is pure Lua, or references a
+/// symbol no script in the table binds (a Lua-resolved pointer root). An
+/// unparseable script returns `false` so enable surfaces the real error.
+fn compute_needs_ce(script_src: &str, provided: &std::collections::HashSet<String>) -> bool {
+    match parse_script(script_src) {
+        Ok(script) => {
+            script.lua_only || !analysis::unresolved_symbols(&script, provided).is_empty()
+        }
+        Err(_) => false,
     }
 }
 

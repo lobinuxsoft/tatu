@@ -214,7 +214,7 @@ function wirePrereqBanner(panel, gameId) {
   });
 }
 
-function renderRuntimeSection(features, gameId, prereqsBlocked) {
+function renderRuntimeSection(features, gameId, prereqsBlocked, ceTableName) {
   if (!features.length) {
     return (
       `<div class="cheat-runtime-section">` +
@@ -248,7 +248,7 @@ function renderRuntimeSection(features, gameId, prereqsBlocked) {
       `</div>` +
       `<ul class="cheat-tree" data-game-id="${esc(String(gameId))}">`;
   for (const f of features) {
-    html += renderTreeNode(f, gameId, 0);
+    html += renderTreeNode(f, gameId, 0, ceTableName);
   }
   html += `</ul></div>`;
   return html;
@@ -265,7 +265,7 @@ function anyNodeRunning(features) {
 /// Render one node and its subtree. CE tables nest up to 7 levels in the
 /// wild (Dragon's Dogma 2 v6, Elden Ring All-in-One); the renderer doesn't
 /// cap depth — CSS handles indentation by natural <ul> nesting.
-function renderTreeNode(f, gameId, depth) {
+function renderTreeNode(f, gameId, depth, ceTableName) {
   const hasChildren = Array.isArray(f.children) && f.children.length > 0;
   const expanded = isExpanded(gameId, f.uuid);
   const expandedAttr = expanded ? "true" : "false";
@@ -287,7 +287,7 @@ function renderTreeNode(f, gameId, depth) {
   } else if (f.kind === "value") {
     rowHtml = renderValueRow(f);
   } else {
-    rowHtml = renderToggleRow(f);
+    rowHtml = renderToggleRow(f, ceTableName);
   }
 
   // Wrap each node in <li> so semantic structure is preserved
@@ -298,7 +298,7 @@ function renderTreeNode(f, gameId, depth) {
   if (hasChildren) {
     html += `<ul class="cheat-tree-children">`;
     for (const child of f.children) {
-      html += renderTreeNode(child, gameId, depth + 1);
+      html += renderTreeNode(child, gameId, depth + 1, ceTableName);
     }
     html += `</ul>`;
   }
@@ -306,16 +306,40 @@ function renderTreeNode(f, gameId, depth) {
   return html;
 }
 
-function renderToggleRow(f) {
+function renderToggleRow(f, ceTableName) {
+  const cat = f.category ? `${esc(f.category)} • ` : "";
+  const info =
+    `<div class="cheat-runtime-info">` +
+      `<div class="cheat-runtime-name">${esc(f.name)}</div>` +
+      `<div class="cheat-runtime-meta">${cat}${esc(f.manifest_exe)}</div>` +
+    `</div>`;
+
+  // needs_ce: the script depends on a pointer root only CE's Lua framework
+  // binds (e.g. CharacterManagerPtr). The native executor can't run it, so
+  // we never show a toggle that would flip on and instantly fail. Surface a
+  // "needs CE" badge + an Open-in-CE shortcut (reuses the .ce-open-btn
+  // handler wired by wireTables) instead.
+  if (f.needs_ce) {
+    const open = ceTableName
+      ? `<button class="ce-open-btn cheat-needs-ce-open" data-table="${esc(ceTableName)}"` +
+          ` title="This cheat uses the table's Lua framework — run it in Cheat Engine">Open in CE</button>`
+      : "";
+    return (
+      `<div class="cheat-tree-row cheat-runtime-item cheat-runtime-needs-ce">` +
+        info +
+        `<div class="cheat-needs-ce">` +
+          `<span class="cheat-needs-ce-badge" title="Depends on a pointer root resolved by the table's Lua framework, which tatu can't run natively">🔒 Needs CE</span>` +
+          open +
+        `</div>` +
+      `</div>`
+    );
+  }
+
   const dis = f.game_running ? "" : "disabled";
   const ch = f.active ? "checked" : "";
-  const cat = f.category ? `${esc(f.category)} • ` : "";
   return (
     `<div class="cheat-tree-row cheat-runtime-item">` +
-      `<div class="cheat-runtime-info">` +
-        `<div class="cheat-runtime-name">${esc(f.name)}</div>` +
-        `<div class="cheat-runtime-meta">${cat}${esc(f.manifest_exe)}</div>` +
-      `</div>` +
+      info +
       `<label class="cheat-switch" title="${dis ? 'Launch the game first' : 'Toggle'}">` +
         `<input type="checkbox" data-feature-uuid="${esc(f.uuid)}" ${ch} ${dis}>` +
         `<span class="cheat-switch-slider"></span>` +
@@ -684,13 +708,63 @@ function wireRuntimeSwitches(panel, gameId) {
         loadCheats(gameId);
       } catch (e) {
         input.checked = !desired;
-        input.title = String(e);
-        setTimeout(() => input.removeAttribute("title"), 3000);
+        if (desired) {
+          // Enable failed. Most static "needs CE" cases are caught up front
+          // (the row renders as a badge, not a toggle), but a cheat can still
+          // fail at runtime — unsupported asm, an AOB that didn't match this
+          // build, a symbol bound only when a sibling is active. Surface a
+          // persistent reason instead of a 3s flash so the user understands
+          // the toggle didn't just bounce.
+          showRuntimeError(input, String(e));
+        } else {
+          input.title = String(e);
+          setTimeout(() => input.removeAttribute("title"), 3000);
+        }
       } finally {
         input.disabled = false;
       }
     });
   });
+}
+
+// Pin a persistent error reason under a toggle row whose enable failed.
+// Replaces the old 3s-tooltip flash. Cleared on the next loadCheats()
+// re-render (i.e. the next time the user interacts or refreshes).
+function showRuntimeError(input, raw) {
+  const row = input.closest(".cheat-runtime-item");
+  if (!row) {
+    input.title = raw;
+    setTimeout(() => input.removeAttribute("title"), 3000);
+    return;
+  }
+  row.classList.add("cheat-runtime-failed");
+  let msg = row.querySelector(".cheat-runtime-error-msg");
+  if (!msg) {
+    msg = document.createElement("div");
+    msg.className = "cheat-runtime-error-msg";
+    row.appendChild(msg);
+  }
+  msg.textContent = `⚠ ${friendlyEnableError(raw)}`;
+  msg.title = raw; // full error on hover
+}
+
+// Translate the executor's raw error into a short, actionable line. The
+// common runtime failures for framework tables all point the user at CE.
+function friendlyEnableError(raw) {
+  const e = raw.toLowerCase();
+  if (e.includes("no match")) {
+    return "pattern not found in memory — table may not match this game build";
+  }
+  if (e.includes("unknown symbol") || e.includes("outside any label")) {
+    return "unresolved symbol — likely needs CE (open the table in Cheat Engine)";
+  }
+  if (e.includes("unsupported") || e.includes("estimate length")) {
+    return "uses an instruction tatu can't assemble yet — open the table in CE";
+  }
+  if (e.includes("lua")) {
+    return "Lua-only script — open the table in Cheat Engine";
+  }
+  return raw.length > 120 ? `${raw.slice(0, 117)}…` : raw;
 }
 
 function wireSearchButton(panel) {
@@ -802,7 +876,12 @@ export async function loadCheats(gameId) {
     const banner = renderCeBanner(ceStatus);
     const prereqBanner = renderPrereqBanner(prereqs);
     const blocked = anyPrereqBlocking(prereqs);
-    const runtimeSection = renderRuntimeSection(runtimeFeatures, gameId, blocked);
+    // Pass the first .CT table name so "Needs CE" rows can offer a direct
+    // Open-in-CE shortcut. Most games have a single table; when several
+    // exist we point at the first (the user can still use the full list
+    // in the tables section below).
+    const ceTableName = Array.isArray(tables) && tables.length ? tables[0].name : null;
+    const runtimeSection = renderRuntimeSection(runtimeFeatures, gameId, blocked, ceTableName);
     const tablesSection = renderTablesSection(gameId, tables);
     const searchBar = renderSearchBar(gameId);
 
