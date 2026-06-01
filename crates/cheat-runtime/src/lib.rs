@@ -50,6 +50,7 @@ pub mod elfsym;
 pub mod executor;
 pub mod freeze;
 pub mod linux_backend;
+pub mod lua;
 pub mod manifest;
 pub mod maps;
 pub mod memory;
