@@ -184,7 +184,8 @@ fn tally(
                     *calls.entry(name).or_insert(0) += 1;
                 }
             }
-            Statement::LabelSite(_) | Statement::AbsoluteSite(_) => {}
+            Statement::LabelSite(_) | Statement::AbsoluteSite(_) | Statement::SymbolSite { .. } => {
+            }
         }
     }
 }

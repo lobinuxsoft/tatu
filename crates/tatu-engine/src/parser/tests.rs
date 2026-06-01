@@ -17,6 +17,66 @@ fn parse_aobscanmodule_with_pattern() {
 }
 
 #[test]
+fn parse_command_names_are_case_insensitive() {
+    // CE-AA authors (e.g. the Manifold framework on the DD2 table) write
+    // commands in camelCase. The dispatch must normalise case while leaving
+    // the symbol name and byte pattern untouched.
+    let stmt =
+        classify("aobScanModule(IsPlayerInvincibilityHook,DD2.exe,80 7F 15 ? 75 ? 48 8B)").unwrap();
+    assert_eq!(
+        stmt,
+        Statement::AobScanModule {
+            symbol: "IsPlayerInvincibilityHook".into(),
+            scope: "DD2.exe".into(),
+            pattern: "80 7F 15 ? 75 ? 48 8B".into(),
+        }
+    );
+    assert_eq!(
+        classify("unregisterSymbol(foo)").unwrap(),
+        Statement::UnregisterSymbol(NameList::single("foo"))
+    );
+    assert_eq!(
+        classify("AOBSCANMODULE(s,m.exe,90)").unwrap(),
+        Statement::AobScanModule {
+            symbol: "s".into(),
+            scope: "m.exe".into(),
+            pattern: "90".into(),
+        }
+    );
+}
+
+#[test]
+fn parse_symbol_offset_site() {
+    // CE-AA hook injection: `Symbol+N:` anchors writes at a scanned symbol
+    // plus a byte offset (the DD2 Player Invincibility 1-byte patch shape).
+    assert_eq!(
+        classify("IsPlayerInvincibilityHook+3:").unwrap(),
+        Statement::SymbolSite {
+            symbol: "IsPlayerInvincibilityHook".into(),
+            offset: 3,
+        }
+    );
+    assert_eq!(
+        classify("StaminaWorkHook-8:").unwrap(),
+        Statement::SymbolSite {
+            symbol: "StaminaWorkHook".into(),
+            offset: -8,
+        }
+    );
+    // Plain identifier stays a LabelSite (defines, not resolves).
+    assert_eq!(
+        classify("codecave:").unwrap(),
+        Statement::LabelSite("codecave".into())
+    );
+    // Module-relative (`.exe` carries a dot) is not an identifier base →
+    // falls through to Raw, unchanged from prior behaviour.
+    assert_eq!(
+        classify("DD2.exe+1062702:").unwrap(),
+        Statement::Raw("DD2.exe+1062702:".into())
+    );
+}
+
+#[test]
 fn parse_registersymbol_and_friends() {
     assert_eq!(
         classify("registersymbol(foo)").unwrap(),
