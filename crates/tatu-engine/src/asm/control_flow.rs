@@ -56,6 +56,18 @@ pub(super) fn emit_unary_target(
     base: u64,
     m: Mnemonic,
 ) -> Result<Vec<u8>, AsmError> {
+    // CE-AA `jmp far <target>` / `jmp near <target>` — distance hints the
+    // x86 assembler historically needed to pick the operand size. In long
+    // mode they are no-ops: iced already selects `rel32` (or an indirect
+    // trampoline) based on the resolved target, so strip the hint and treat
+    // the rest as the target. CE table authors emit `jmp far` to force the
+    // 5-byte hook form (DD2 RE Engine codecaves).
+    let rest = rest
+        .strip_prefix("far ")
+        .or_else(|| rest.strip_prefix("near "))
+        .map(str::trim_start)
+        .unwrap_or(rest);
+
     let mut a = CodeAssembler::new(64)?;
 
     // Indirect call/jmp through memory: `call qword ptr [rax+370]`. CE
@@ -158,6 +170,24 @@ mod tests {
         assert_eq!(bytes[0], 0xE9);
         let delta = i32::from_le_bytes(bytes[1..5].try_into().unwrap()) as i64;
         assert_eq!(delta, 0x10005 - 0x20005);
+    }
+
+    #[test]
+    fn jmp_far_and_near_hints_are_stripped() {
+        let syms = symtab(&[("codecave", 0x2000)]);
+        // `jmp far codecave` must encode identically to `jmp codecave` — the
+        // distance hint is a long-mode no-op (DD2 hook form).
+        let plain = compile_line("jmp codecave", &syms, 0x1000)
+            .unwrap()
+            .unwrap();
+        let far = compile_line("jmp far codecave", &syms, 0x1000)
+            .unwrap()
+            .unwrap();
+        let near = compile_line("jmp near codecave", &syms, 0x1000)
+            .unwrap()
+            .unwrap();
+        assert_eq!(far, plain);
+        assert_eq!(near, plain);
     }
 
     #[test]
