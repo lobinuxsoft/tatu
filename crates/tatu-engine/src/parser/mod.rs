@@ -162,6 +162,18 @@ pub enum Statement {
     /// a `SymbolSite` only *resolves* an existing symbol and never creates
     /// one. The body is captured as subsequent [`Statement::Raw`] entries.
     SymbolSite { symbol: String, offset: i64 },
+    /// `reassemble(address)` — CE-AA helper that reads the instruction
+    /// currently at `address` in the target, decodes it, and re-emits it at
+    /// the executor's cursor with rip-relative displacements and relative
+    /// branch targets fixed up for the new location. Used when a hook's `jmp`
+    /// overwrites a multi-byte instruction in the original code: the codecave
+    /// must replay that displaced instruction before jumping back. The operand
+    /// is stored verbatim (`symbol`, `symbol+N`, `0xADDR`, …) and resolved at
+    /// execution time, mirroring [`Statement::Define`]'s deferred-value rule.
+    /// Distinct from [`Statement::Raw`] because length is unknowable without
+    /// reading + decoding live target memory — the executor handles both
+    /// passes directly instead of routing through the static length estimator.
+    Reassemble(String),
     /// `{$begin_obfuscate}`, `{$end_obfuscate}`, `{$lua}`, `{$asm}` and other
     /// CE compiler directives. Preserved with surrounding braces intact.
     Directive(String),
@@ -316,6 +328,7 @@ fn classify(line: &str) -> Result<Statement, ParseError> {
             "globalalloc" => return parse_globalalloc(args),
             "dealloc" => return parse_name_list_call(args, "dealloc", Statement::Dealloc),
             "define" => return parse_define(args),
+            "reassemble" => return parse_reassemble(args),
             _ => {}
         }
     }
@@ -451,6 +464,20 @@ fn parse_define(args: &str) -> Result<Statement, ParseError> {
         name: parts[0].to_string(),
         value: parts[1].to_string(),
     })
+}
+
+/// `reassemble(address)`. The address expression is captured verbatim and
+/// resolved at execution time (it may reference a symbol the script binds
+/// later in the same block). Only emptiness is rejected here.
+fn parse_reassemble(args: &str) -> Result<Statement, ParseError> {
+    let operand = args.trim();
+    if operand.is_empty() {
+        return Err(ParseError::BadCall {
+            fn_name: "reassemble".into(),
+            detail: "empty address operand".into(),
+        });
+    }
+    Ok(Statement::Reassemble(operand.to_string()))
 }
 
 fn parse_alloc(args: &str) -> Result<Statement, ParseError> {

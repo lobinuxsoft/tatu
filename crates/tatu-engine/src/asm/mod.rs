@@ -39,8 +39,11 @@ mod control_flow;
 mod data_move;
 mod misc;
 mod operands;
+mod reassemble;
 mod sse;
 mod x87;
+
+pub use self::reassemble::reassemble_instruction;
 
 use std::collections::HashMap;
 
@@ -62,6 +65,14 @@ pub enum AsmError {
     IcedX86(#[from] iced_x86::IcedError),
     #[error("unsupported asm line: {0:?}")]
     Unsupported(String),
+}
+
+/// Resolve a CE-AA address expression (`symbol`, `symbol+N`, `symbol-N`,
+/// `0xADDR`, `$ADDR`, decimal) to an absolute address against `symbols`.
+/// Public so the executor can resolve `reassemble()` operands without
+/// duplicating the operand grammar.
+pub fn resolve_address(operand: &str, symbols: &HashMap<String, u64>) -> Result<u64, AsmError> {
+    self::operands::resolve_target(operand, symbols)
 }
 
 /// Compile a single CE-AA asm line to bytes. Returns `Ok(None)` if the line
