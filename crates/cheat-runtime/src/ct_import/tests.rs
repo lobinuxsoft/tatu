@@ -521,3 +521,24 @@ fn non_re_engine_exe_gets_no_prereqs() {
         "vanilla UE / Mono exe must not flag any prereqs"
     );
 }
+
+// Import-time framework detection against a real Manifold table. Gitignored
+// artefact, so skipped when absent (drop a .CT in .local-ct/ to exercise).
+//   cargo test -p cheat-runtime --lib import_detects_framework -- --ignored
+#[test]
+#[ignore = "needs a CE table in .local-ct/ (gitignored)"]
+fn import_detects_framework_table_and_lua_cheats() {
+    let ct = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.local-ct/DD2_v6.0.0_Full.ct");
+    if !ct.exists() {
+        eprintln!("SKIP: no CE table at {ct:?}");
+        return;
+    }
+    let m = convert_ct_file(&ct).unwrap();
+    assert!(m.framework, "DD2 must be detected as a framework table");
+    assert_eq!(m.exe, "DD2.exe", "exe derived from the framework header");
+    let lua_cheats = m.features_recursive().filter(|f| f.lua).count();
+    assert!(
+        lua_cheats > 0,
+        "framework table must expose {{$lua}} toggles"
+    );
+}

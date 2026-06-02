@@ -80,6 +80,12 @@ impl LuaRuntime {
         self.lua.load(chunk).eval()
     }
 
+    /// Set a global to a string value (no source interpolation, so arbitrary
+    /// bytes — e.g. a cheat description — are safe).
+    pub fn set_string(&self, name: &str, value: &str) -> LuaResult<()> {
+        self.lua.globals().set(name, value)
+    }
+
     /// Mount a table's embedded files so its bootstrap can load its modules.
     ///
     /// Framework headers pull their modules via CE's `findTableFile(name)` +

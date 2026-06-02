@@ -48,6 +48,7 @@ pub mod ct_import;
 pub mod debug;
 pub mod elfsym;
 pub mod executor;
+pub mod framework;
 pub mod freeze;
 pub mod linux_backend;
 pub mod lua;
@@ -84,6 +85,10 @@ pub use ct_import::{CtImportError, convert_ct_file, convert_ct_file_with_exe_hin
 pub use debug::{BpSize, BpType, DebugError, DebugEvent, DebugEventKind, Debugger};
 pub use elfsym::{ElfSymError, find_libc_symbol, find_module_base, find_module_symbol};
 pub use executor::{ActiveCheat, Engine, ExecError};
+pub use framework::{
+    FrameworkError, FrameworkRuntime, FrameworkTable, MemRec, framework_target_exe,
+    is_framework_table, is_lua_cheat, lua_enable_disable, parse_framework_table,
+};
 pub use freeze::{FreezeError, FreezeHandle, FreezeKey, FreezeRegistry, FreezeTarget};
 pub use manifest::{
     FeatureKind, Manifest, ManifestError, ManifestFeature, Prereq, RecursiveFeatureIter, VType,

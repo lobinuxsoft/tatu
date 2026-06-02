@@ -88,6 +88,7 @@ pub fn cheat_runtime_list_features(
             registered_symbols: &registered_symbols,
             game_running,
             provided_symbols: &provided_symbols,
+            framework: m.framework,
         };
         for f in &m.features {
             out.push(build_view(f, &ctx));
@@ -108,6 +109,9 @@ struct ViewCtx<'a> {
     /// baseline for [`compute_needs_ce`]. Sibling scripts often register the
     /// shared pointer roots one cheat dereferences.
     provided_symbols: &'a std::collections::HashSet<String>,
+    /// Whether this manifest is a Lua framework table — its `{$lua}` cheats run
+    /// in the framework runtime, so they aren't "needs CE".
+    framework: bool,
 }
 
 fn build_view(f: &ManifestFeature, ctx: &ViewCtx<'_>) -> FeatureView {
@@ -117,10 +121,17 @@ fn build_view(f: &ManifestFeature, ctx: &ViewCtx<'_>) -> FeatureView {
         None => true,
     };
     let children = f.children.iter().map(|c| build_view(c, ctx)).collect();
-    let needs_ce = f
-        .script
-        .as_deref()
-        .is_some_and(|src| compute_needs_ce(src, ctx.provided_symbols));
+    // A framework table's `{$lua}` cheat runs in the framework runtime, so it's
+    // not "needs CE" — a pointer-root-dependent one may still fail at enable
+    // time (until the pointer scanner lands), which surfaces as a runtime error
+    // rather than a pre-emptive badge.
+    let needs_ce = if f.lua && ctx.framework {
+        false
+    } else {
+        f.script
+            .as_deref()
+            .is_some_and(|src| compute_needs_ce(src, ctx.provided_symbols))
+    };
     FeatureView {
         manifest_title: ctx.manifest_title.to_string(),
         manifest_exe: ctx.manifest_exe.to_string(),

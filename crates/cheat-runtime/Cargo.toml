@@ -13,6 +13,9 @@ crate-type = ["rlib", "cdylib"]
 
 [dependencies]
 dirs = "6"
+# Raw-deflate decode for framework tables' embedded modules (custom base85 →
+# deflate). Used by the `framework` loader.
+flate2 = "1"
 goblin = { version = "0.10", default-features = false, features = ["std", "elf32", "elf64", "endian_fd"] }
 # Lua 5.4 interpreter, vendored (compiled from source — no system liblua, so
 # it cross-builds cleanly to the handheld targets). Hosts the CE-compatible
@@ -27,6 +30,4 @@ tatu-mem = { path = "../tatu-mem" }
 thiserror = "2"
 
 [dev-dependencies]
-# Raw-deflate decode for the embedded-module smoke (CE custom base85 → deflate).
-flate2 = "1"
 tempfile = "3"

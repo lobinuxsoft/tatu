@@ -49,6 +49,17 @@ pub struct Manifest {
     /// common case; the UI hides the prereq banner when the vec is empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub prereqs: Vec<Prereq>,
+    /// `true` when this table is driven by an embedded Lua framework
+    /// (Manifold-style): its `<LuaScript>` bootstraps modules from `<Files>`,
+    /// and its toggles are `{$lua}` cheats ([`ManifestFeature::lua`]) run
+    /// through [`crate::FrameworkRuntime`] rather than the AA executor.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub framework: bool,
+}
+
+/// serde `skip_serializing_if` helper for `bool` fields defaulting to `false`.
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 /// External dependency the runtime needs in place before its scripts can
@@ -162,6 +173,13 @@ pub struct ManifestFeature {
     /// Toggle and Header.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value: Option<ValueSpec>,
+    /// `true` when [`Self::script`] is a `{$lua}` framework cheat rather than
+    /// an Auto-Assembler script. Such toggles run through
+    /// [`crate::FrameworkRuntime`] (the table's bootstrapped Lua), not the AA
+    /// executor. Only set on [`FeatureKind::Toggle`] of a [`Manifest`] with
+    /// `framework == true`.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub lua: bool,
     /// Nested children. CE tables routinely group cheats under
     /// [`FeatureKind::Header`] entries, sometimes arbitrarily deep — the
     /// `ender_magnolia_v11.ct` import exposes 5 levels, `elden_ring`
@@ -404,6 +422,7 @@ mod tests {
                     kind: FeatureKind::Toggle,
                     script: Some("[ENABLE]\n[DISABLE]\n".into()),
                     value: None,
+                    lua: false,
                     children: Vec::new(),
                 },
                 ManifestFeature {
@@ -413,6 +432,7 @@ mod tests {
                     kind: FeatureKind::Header,
                     script: None,
                     value: None,
+                    lua: false,
                     children: Vec::new(),
                 },
                 ManifestFeature {
@@ -426,10 +446,12 @@ mod tests {
                         offsets: vec![0x13C, 0x8B8, 0x2D0],
                         vtype: VType::U32,
                     }),
+                    lua: false,
                     children: Vec::new(),
                 },
             ],
             prereqs: Vec::new(),
+            framework: false,
         };
         let text = serde_json::to_string(&m).unwrap();
         let back: Manifest = serde_json::from_str(&text).unwrap();
@@ -483,6 +505,7 @@ mod tests {
             kind: FeatureKind::Toggle,
             script: Some("[ENABLE]\n[DISABLE]\n".into()),
             value: None,
+            lua: false,
             children: Vec::new(),
         };
         let sub_header = ManifestFeature {
@@ -492,6 +515,7 @@ mod tests {
             kind: FeatureKind::Header,
             script: None,
             value: None,
+            lua: false,
             children: vec![leaf.clone()],
         };
         let m = Manifest {
@@ -504,9 +528,11 @@ mod tests {
                 kind: FeatureKind::Header,
                 script: None,
                 value: None,
+                lua: false,
                 children: vec![sub_header],
             }],
             prereqs: Vec::new(),
+            framework: false,
         };
         let text = serde_json::to_string(&m).unwrap();
         let back: Manifest = serde_json::from_str(&text).unwrap();
@@ -547,9 +573,11 @@ mod tests {
                 kind: FeatureKind::Toggle,
                 script: Some("[ENABLE]\n[DISABLE]\n".into()),
                 value: None,
+                lua: false,
                 children: Vec::new(),
             }],
             prereqs: Vec::new(),
+            framework: false,
         };
         let json = serde_json::to_string(&m).unwrap();
         assert!(!json.contains("\"children\""));
