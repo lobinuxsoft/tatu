@@ -113,6 +113,15 @@ impl<B: Backend> Engine<B> {
         outcome: &mut EnableOutcome,
     ) -> Result<(), ExecError> {
         let mut cursor: Option<u64> = None;
+        // Last address bound by an AOB scan this script — used as the default
+        // codecave locality when an `alloc` carries no explicit `near`. CE's
+        // allocator implicitly places codecaves close to the injection module;
+        // without this the kernel picks a high-half mapping that can land
+        // >2 GiB from the hook, forcing `jmp`/`reassemble` branches into
+        // indirect-trampoline forms that overflow the reserved hook space and
+        // crash the target (DD2 Fatal Fall Height: codecave 3.4 GiB away ⇒
+        // a relocated `jne` whose extension landed on an int3).
+        let mut last_scan: Option<u64> = None;
         for stmt in &script.enable {
             match stmt {
                 Statement::AobScanModule {
@@ -121,14 +130,18 @@ impl<B: Backend> Engine<B> {
                 | Statement::AobScan { symbol, pattern } => {
                     let addr = self.scan_unique(pattern, symbol)?;
                     self.symbols.insert(symbol.clone(), addr);
+                    last_scan = Some(addr);
                 }
                 Statement::Alloc { symbol, size, near } => {
-                    let hint = near.as_ref().and_then(|n| {
-                        self.symbols
-                            .get(n)
-                            .copied()
-                            .or_else(|| parse_numeric_token(n))
-                    });
+                    let hint = near
+                        .as_ref()
+                        .and_then(|n| {
+                            self.symbols
+                                .get(n)
+                                .copied()
+                                .or_else(|| parse_numeric_token(n))
+                        })
+                        .or(last_scan);
                     let addr = self.backend.alloc(*size as usize, hint)?;
                     self.symbols.insert(symbol.clone(), addr);
                     outcome
@@ -137,9 +150,10 @@ impl<B: Backend> Engine<B> {
                 }
                 Statement::GlobalAlloc { symbol, size } => {
                     // CE's `globalalloc` is process-global; tatu treats it
-                    // identically to `alloc` because per-toggle rollback
-                    // owns the lifetime anyway. No `near` hint by spec.
-                    let addr = self.backend.alloc(*size as usize, None)?;
+                    // identically to `alloc` because per-toggle rollback owns
+                    // the lifetime anyway. Same default-near locality as
+                    // `alloc` so global codecaves stay reachable too.
+                    let addr = self.backend.alloc(*size as usize, last_scan)?;
                     self.symbols.insert(symbol.clone(), addr);
                     outcome
                         .allocs
@@ -382,9 +396,10 @@ fn parse_numeric_token(token: &str) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::BackendError;
+    use crate::backend::{BackendError, RegionPerms};
     use crate::parser::parse;
     use std::collections::BTreeMap;
+    use std::path::PathBuf;
     use tatu_mem::MemoryAccess;
 
     /// Sparse byte-addressed memory mock. Unset bytes read as `0`; `alloc`
@@ -393,6 +408,8 @@ mod tests {
     struct MockBackend {
         mem: BTreeMap<u64, u8>,
         next_alloc: u64,
+        regions: Vec<ReadableRegion>,
+        last_alloc_hint: Option<u64>,
     }
 
     impl MockBackend {
@@ -400,12 +417,27 @@ mod tests {
             Self {
                 mem: BTreeMap::new(),
                 next_alloc: 0,
+                regions: Vec::new(),
+                last_alloc_hint: None,
             }
         }
         fn put(&mut self, addr: u64, bytes: &[u8]) {
             for (i, b) in bytes.iter().enumerate() {
                 self.mem.insert(addr + i as u64, *b);
             }
+        }
+        /// Register a readable+executable region so `scan_unique` will sweep it.
+        fn add_region(&mut self, start: u64, end: u64) {
+            self.regions.push(ReadableRegion {
+                start,
+                end,
+                perms: RegionPerms {
+                    read: true,
+                    write: false,
+                    execute: true,
+                },
+                path: PathBuf::from("mod"),
+            });
         }
     }
 
@@ -427,6 +459,7 @@ mod tests {
 
     impl Backend for MockBackend {
         fn alloc(&mut self, size: usize, near: Option<u64>) -> Result<u64, BackendError> {
+            self.last_alloc_hint = near;
             let base = near.unwrap_or(0x1_4000_0000).wrapping_add(0x10_0000);
             let addr = base + self.next_alloc;
             self.next_alloc += size as u64;
@@ -436,7 +469,7 @@ mod tests {
             Ok(())
         }
         fn readable_regions(&mut self) -> Result<Vec<ReadableRegion>, BackendError> {
-            Ok(Vec::new())
+            Ok(self.regions.clone())
         }
         fn attach(&mut self) -> bool {
             false
@@ -488,5 +521,30 @@ mod tests {
         );
         // The trailing `nop` proves the cursor advanced past the reassembly.
         assert_eq!(eng.backend_mut().read(cave + 6, 1).unwrap(), vec![0x90]);
+    }
+
+    /// An `alloc` with no explicit `near` must inherit the address of the most
+    /// recent AOB scan, so the backend can place the codecave within rel32
+    /// reach of the hook (CE's implicit codecave locality). Regression for the
+    /// DD2 crash where a >2 GiB codecave forced a malformed branch trampoline.
+    #[test]
+    fn alloc_without_near_defaults_to_last_scanned_address() {
+        let mut backend = MockBackend::new();
+        let hook = 0x1_4000_1000_u64;
+        // Distinctive pattern ⇒ the scan resolves to exactly one address.
+        backend.put(hook, &[0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE]);
+        backend.add_region(hook, hook + 0x40);
+        let mut eng = Engine::new(backend);
+
+        let script = parse(concat!(
+            "[ENABLE]\n",
+            "aobscanmodule(hook,mod,DE AD BE EF CA FE)\n",
+            "alloc(cave,0x100)\n",
+            "[DISABLE]\n",
+        ))
+        .unwrap();
+        eng.enable(&script).unwrap();
+
+        assert_eq!(eng.backend().last_alloc_hint, Some(hook));
     }
 }
