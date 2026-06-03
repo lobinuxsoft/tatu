@@ -56,15 +56,26 @@ pub(super) fn emit_unary_target(
     base: u64,
     m: Mnemonic,
 ) -> Result<Vec<u8>, AsmError> {
-    // CE-AA `jmp far <target>` / `jmp near <target>` — distance hints the
-    // x86 assembler historically needed to pick the operand size. In long
-    // mode they are no-ops: iced already selects `rel32` (or an indirect
-    // trampoline) based on the resolved target, so strip the hint and treat
-    // the rest as the target. CE table authors emit `jmp far` to force the
-    // 5-byte hook form (DD2 RE Engine codecaves).
+    // CE-AA `far` forces the 14-byte absolute indirect form (`FF /4 [rip+0]`
+    // for jmp, `FF /2` for call, followed by the 8-byte target). CE table
+    // authors rely on this fixed size so the script's resume label lands at a
+    // known offset past the hook, and on its absolute reach so the codecave is
+    // hit regardless of how far the allocator placed it. iced's typed builder
+    // would pick a 5-byte `rel32` instead, shifting the resume label into the
+    // middle of an instruction — emit the bytes directly to match CE.
+    if let Some(t) = rest.strip_prefix("far ") {
+        let target = resolve_target(t.trim(), syms)?;
+        let modrm = match m {
+            Mnemonic::Jmp => 0x25,  // FF /4, ModRM mod=00 reg=100 rm=101 ([rip+disp32])
+            Mnemonic::Call => 0x15, // FF /2, reg=010
+        };
+        let mut bytes = vec![0xFF, modrm, 0x00, 0x00, 0x00, 0x00];
+        bytes.extend_from_slice(&target.to_le_bytes());
+        return Ok(bytes);
+    }
+    // `near` is the long-mode default (rel32); drop the hint and continue.
     let rest = rest
-        .strip_prefix("far ")
-        .or_else(|| rest.strip_prefix("near "))
+        .strip_prefix("near ")
         .map(str::trim_start)
         .unwrap_or(rest);
 
@@ -173,21 +184,35 @@ mod tests {
     }
 
     #[test]
-    fn jmp_far_and_near_hints_are_stripped() {
-        let syms = symtab(&[("codecave", 0x2000)]);
-        // `jmp far codecave` must encode identically to `jmp codecave` — the
-        // distance hint is a long-mode no-op (DD2 hook form).
-        let plain = compile_line("jmp codecave", &syms, 0x1000)
+    fn jmp_far_emits_14_byte_absolute_indirect() {
+        let syms = symtab(&[("codecave", 0x1_4000_5000_u64)]);
+        // `jmp far` forces CE's fixed 14-byte `FF 25 00000000 <abs8>` form,
+        // reaching the codecave absolutely (DD2 hook).
+        let far = compile_line("jmp far codecave", &syms, 0x1000)
             .unwrap()
             .unwrap();
-        let far = compile_line("jmp far codecave", &syms, 0x1000)
+        assert_eq!(far.len(), 14);
+        assert_eq!(&far[..6], &[0xFF, 0x25, 0x00, 0x00, 0x00, 0x00]);
+        let abs = u64::from_le_bytes(far[6..14].try_into().unwrap());
+        assert_eq!(abs, 0x1_4000_5000);
+        // `call far` uses FF /2.
+        let call = compile_line("call far codecave", &syms, 0x1000)
+            .unwrap()
+            .unwrap();
+        assert_eq!(&call[..2], &[0xFF, 0x15]);
+    }
+
+    #[test]
+    fn jmp_near_hint_is_stripped_to_rel32() {
+        let syms = symtab(&[("codecave", 0x2000)]);
+        let plain = compile_line("jmp codecave", &syms, 0x1000)
             .unwrap()
             .unwrap();
         let near = compile_line("jmp near codecave", &syms, 0x1000)
             .unwrap()
             .unwrap();
-        assert_eq!(far, plain);
         assert_eq!(near, plain);
+        assert_eq!(near[0], 0xE9);
     }
 
     #[test]
