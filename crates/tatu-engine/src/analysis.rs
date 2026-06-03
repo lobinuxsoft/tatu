@@ -115,6 +115,13 @@ fn looks_like_symbol(tok: &str) -> bool {
     if !tok.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
         return false;
     }
+    // Bare hex literals start with a hex *letter* (`FF`, `DE`, `DEAD`), so they
+    // slip past the leading-digit check above. CE reads an all-hex token as a
+    // number unless it's a registered symbol — treat it as a literal here so a
+    // `db FF DE` byte run isn't mistaken for two unresolved symbols.
+    if tok.chars().all(|c| c.is_ascii_hexdigit()) {
+        return false;
+    }
     let low = tok.to_ascii_lowercase();
     !is_register(&low) && !is_keyword(&low)
 }
@@ -142,7 +149,7 @@ fn is_register(low: &str) -> bool {
 fn is_keyword(low: &str) -> bool {
     const KW: &[&str] = &[
         "byte", "word", "dword", "qword", "tbyte", "xmmword", "ptr", "short", "near", "far",
-        "float", "double",
+        "float", "double", "int", "int64", "single",
     ];
     KW.contains(&low)
 }
@@ -219,5 +226,26 @@ mod tests {
         .unwrap();
         // rdi, byte, ptr, xmm0 must not register as symbols; Hook is provided.
         assert!(unresolved_symbols(&s, &HashSet::new()).is_empty());
+    }
+
+    #[test]
+    fn hex_byte_literals_and_casts_are_not_symbols() {
+        // Real DD2 false-positive shapes: `db FF DE` byte runs and an `(int)`
+        // cast were reported as unresolved symbols, flagging self-contained AA
+        // cheats as "needs CE". Hex literals and type casts are not symbols.
+        let s = parse(
+            "[ENABLE]\n\
+             aobScanModule(Hook,DD2.exe,90)\n\
+             Hook:\n\
+             db FF DE AD BE\n\
+             mov [rax],(int)5\n\
+             mov rbx,DEAD\n\
+             [DISABLE]\n",
+        )
+        .unwrap();
+        assert!(
+            unresolved_symbols(&s, &HashSet::new()).is_empty(),
+            "hex bytes (FF/DE/AD/BE/DEAD) and the int cast must not count as symbols"
+        );
     }
 }

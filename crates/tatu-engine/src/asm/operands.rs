@@ -366,6 +366,36 @@ pub(super) fn resolve_target(
         .ok_or_else(|| AsmError::UnknownSymbol(t.to_string()))
 }
 
+/// `true` when `addr` fits a sign-extended 32-bit displacement — the only
+/// absolute-displacement width x86-64 encodes for a `[disp]` memory operand.
+/// Addresses outside this range must be reached RIP-relatively.
+pub(super) fn fits_i32(addr: u64) -> bool {
+    i64::from(i32::MIN) <= addr as i64 && addr as i64 <= i64::from(i32::MAX)
+}
+
+/// Resolve a bracket body that is a *bare absolute* address — a symbol or a
+/// numeric literal with no base/index register — to its address. Returns
+/// `None` for register-relative operands (`[rax]`, `[rax+8]`), which encode
+/// fine as-is, so the caller only takes the RIP-relative path for true
+/// absolutes. Symbol lookup wins over the hex-literal reading so codecave
+/// labels whose names happen to be all hex digits still resolve as symbols.
+pub(super) fn resolve_bare_absolute(inner: &str, syms: &HashMap<String, u64>) -> Option<u64> {
+    let t = inner.trim();
+    if parse_register(t).is_some() {
+        return None;
+    }
+    if let Some(idx) = t.rfind(['+', '-'])
+        && idx > 0
+        && parse_register(t[..idx].trim()).is_some()
+    {
+        return None;
+    }
+    syms.get(t)
+        .copied()
+        .or_else(|| u64::from_str_radix(t, 16).ok())
+        .or_else(|| parse_numeric(t))
+}
+
 pub(super) fn split_two_operands(rest: &str) -> Result<(&str, &str), AsmError> {
     let (lhs, rhs) = rest
         .split_once(',')

@@ -49,9 +49,11 @@ fn downstream_can_drive_full_enable_disable_via_public_root() {
                     .into(),
             ),
             value: None,
+            lua: false,
             children: Vec::new(),
         }],
         prereqs: Vec::new(),
+        framework: false,
     };
 
     let feature = manifest.features.into_iter().next().unwrap();

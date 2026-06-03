@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use cheat_runtime::FreezeRegistry;
-use commands::cheat_runtime_cmd::ActiveCheats;
+use commands::cheat_runtime_cmd::{ActiveCheats, FrameworkActor};
 use state::AppState;
 
 pub type SharedState = Mutex<AppState>;
@@ -46,6 +46,7 @@ pub fn run() {
         .manage(Mutex::new(app_state))
         .manage(FreezeRegistry::new())
         .manage(active_cheats)
+        .manage(FrameworkActor::spawn())
         .invoke_handler(tauri::generate_handler![
             commands::state_cmd::get_state,
             commands::state_cmd::get_settings,

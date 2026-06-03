@@ -80,6 +80,7 @@ fn entry_to_feature(entry: roxmltree::Node, stem: &str) -> Option<ManifestFeatur
             kind: FeatureKind::Header,
             script: None,
             value: None,
+            lua: false,
             children: Vec::new(),
         });
     }
@@ -89,7 +90,11 @@ fn entry_to_feature(entry: roxmltree::Node, stem: &str) -> Option<ManifestFeatur
 
     if vtype_text == "Auto Assembler Script" {
         let script = child_text(entry, "AssemblerScript").unwrap_or_default();
-        if !is_real_aa_script(&script) {
+        // Real AA → executed by the engine. A `{$lua}` framework cheat → a
+        // toggle run through the table's Lua runtime. Anything else (decorative
+        // Lua, empty) is skipped.
+        let lua = !is_real_aa_script(&script) && crate::framework::is_lua_cheat(&script);
+        if !is_real_aa_script(&script) && !lua {
             return None;
         }
         return Some(ManifestFeature {
@@ -99,6 +104,7 @@ fn entry_to_feature(entry: roxmltree::Node, stem: &str) -> Option<ManifestFeatur
             kind: FeatureKind::Toggle,
             script: Some(script),
             value: None,
+            lua,
             children: Vec::new(),
         });
     }
@@ -121,6 +127,7 @@ fn entry_to_feature(entry: roxmltree::Node, stem: &str) -> Option<ManifestFeatur
             offsets,
             vtype,
         }),
+        lua: false,
         children: Vec::new(),
     })
 }

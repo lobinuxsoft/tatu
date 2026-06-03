@@ -4,17 +4,29 @@
 //! a normal Linux process from the kernel's POV; ptrace +
 //! `process_vm_readv/writev` are the engine. Wine-side bridge dropped.
 
+use std::path::PathBuf;
 use std::sync::Mutex;
 
 use cheat_runtime::{
-    Engine, FeatureKind, FreezeRegistry, PersistedHook, find_pid_by_exe, load_manifests_for,
-    parse_script,
+    Engine, FeatureKind, FreezeRegistry, MemRec, PersistedHook, ct_tables_dir_for, find_pid_by_exe,
+    load_manifests_for, lua_enable_disable, parse_script,
 };
 use tauri::State;
 
-use super::{ActiveCheatEntry, ActiveCheats, purge_stale_cheats};
+use super::{ActiveCheatEntry, ActiveCheats, FrameworkActor, purge_stale_cheats};
 use crate::state::AppState;
 use crate::steam::detect_game_exe;
+
+/// A `{$lua}` framework cheat resolved from a manifest: where it lives and what
+/// to run.
+struct FrameworkCheat {
+    exe: String,
+    /// The `.CT` whose embedded framework bootstraps this cheat.
+    ct_path: PathBuf,
+    enable_src: String,
+    disable_src: String,
+    memrec: MemRec,
+}
 
 #[tauri::command]
 pub fn cheat_runtime_enable(
@@ -23,6 +35,7 @@ pub fn cheat_runtime_enable(
     _state: State<'_, Mutex<AppState>>,
     active: State<'_, ActiveCheats>,
     freezes: State<'_, FreezeRegistry>,
+    framework: State<'_, FrameworkActor>,
 ) -> Result<(), String> {
     purge_stale_cheats(&active, Some(&freezes))?;
     {
@@ -32,6 +45,24 @@ pub fn cheat_runtime_enable(
         if guard.contains_key(&feature_uuid) {
             return Ok(());
         }
+    }
+
+    // Framework `{$lua}` cheats run their Lua block in the table's bootstrapped
+    // runtime (owned by the actor thread), not the AA executor.
+    if let Some(cheat) = locate_framework_cheat(&app_id, &feature_uuid)? {
+        framework.toggle(
+            app_id,
+            cheat.exe.clone(),
+            cheat.ct_path,
+            cheat.memrec,
+            cheat.enable_src,
+            true,
+        )?;
+        let mut guard = active
+            .lock()
+            .map_err(|e| format!("active registry poisoned: {e}"))?;
+        guard.insert(feature_uuid, ActiveCheatEntry::Framework { exe: cheat.exe });
+        return Ok(());
     }
 
     let (exe, script_src) = locate_feature_script(&app_id, &feature_uuid).map_err(|e| {
@@ -100,6 +131,7 @@ pub fn cheat_runtime_disable(
     app_id: String,
     feature_uuid: String,
     active: State<'_, ActiveCheats>,
+    framework: State<'_, FrameworkActor>,
 ) -> Result<(), String> {
     let entry = {
         let mut guard = active
@@ -109,6 +141,20 @@ pub fn cheat_runtime_disable(
     };
     let result: Result<(), String> = match entry {
         Some(ActiveCheatEntry::Linux(c)) => c.disable().map_err(|e| format!("disable: {e}")),
+        Some(ActiveCheatEntry::Framework { exe }) => {
+            // Run the cheat's [DISABLE] block in the table's runtime.
+            match locate_framework_cheat(&app_id, &feature_uuid)? {
+                Some(cheat) => framework.toggle(
+                    app_id.clone(),
+                    exe,
+                    cheat.ct_path,
+                    cheat.memrec,
+                    cheat.disable_src,
+                    false,
+                ),
+                None => Ok(()),
+            }
+        }
         None => Ok(()),
     };
     // Whether the disable succeeded or not, the on-disk record is
@@ -128,6 +174,50 @@ pub fn cheat_runtime_disable(
         eprintln!("[disable {feature_uuid}] WARNING: failed to delete persisted record: {e}");
     }
     result
+}
+
+/// Resolve a `{$lua}` framework cheat by UUID, or `None` when the feature isn't
+/// a Lua cheat of a framework table (the caller then falls through to the
+/// Auto-Assembler path). `memrec.id` is recovered from the UUID's trailing
+/// `<CheatEntry>` id, `description` from the feature name — the two fields a
+/// Manifold cheat block reads.
+fn locate_framework_cheat(app_id: &str, uuid: &str) -> Result<Option<FrameworkCheat>, String> {
+    let exe_hint = detect_game_exe(app_id).ok();
+    let manifests = load_manifests_for(app_id, exe_hint.as_deref()).map_err(|e| e.to_string())?;
+    for m in &manifests {
+        if !m.framework {
+            continue;
+        }
+        let Some(f) = m.features_recursive().find(|f| f.uuid == uuid) else {
+            continue;
+        };
+        if !f.lua {
+            return Ok(None); // a plain AA cheat living in a framework table
+        }
+        let script = f
+            .script
+            .as_ref()
+            .ok_or_else(|| format!("framework cheat {uuid:?} has no script"))?;
+        let (enable_src, disable_src) = lua_enable_disable(script);
+        let id = uuid
+            .rsplit_once('-')
+            .and_then(|(_, n)| n.parse::<i64>().ok())
+            .unwrap_or(0);
+        let ct_path = ct_tables_dir_for(app_id)
+            .map_err(|e| e.to_string())?
+            .join(format!("{}.ct", m.title));
+        return Ok(Some(FrameworkCheat {
+            exe: m.exe.clone(),
+            ct_path,
+            enable_src,
+            disable_src,
+            memrec: MemRec {
+                id,
+                description: f.name.clone(),
+            },
+        }));
+    }
+    Ok(None)
 }
 
 pub(super) fn locate_feature_script(app_id: &str, uuid: &str) -> Result<(String, String), String> {

@@ -122,19 +122,24 @@ pub fn convert_ct_file_with_exe_hint(
         });
     }
 
+    // A framework table binds its exe in the Lua header, not via aobscanmodule;
+    // fall back to that before the caller's hint.
     let exe = derive_exe(&features)
+        .or_else(|| crate::framework::framework_target_exe(&text))
         .or_else(|| exe_hint.map(str::to_owned))
         .ok_or_else(|| CtImportError::NoExeBinding {
             path: path.to_path_buf(),
         })?;
 
     let prereqs = derive_prereqs(&exe);
+    let framework = crate::framework::is_framework_table(&text);
 
     Ok(Manifest {
         exe,
         title: stem,
         features,
         prereqs,
+        framework,
     })
 }
 

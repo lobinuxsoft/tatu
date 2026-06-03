@@ -17,6 +17,25 @@ fn parse_aobscanmodule_with_pattern() {
 }
 
 #[test]
+fn parse_reassemble_captures_operand_verbatim() {
+    // The DD2 Fatal Fall Height codecave reassembles the displaced
+    // instruction at the hook site. Case-insensitive dispatch, operand kept
+    // verbatim for execution-time resolution.
+    assert_eq!(
+        classify("reassemble(HeightDieForHumanWorkHook+4)").unwrap(),
+        Statement::Reassemble("HeightDieForHumanWorkHook+4".into())
+    );
+    assert_eq!(
+        classify("reAssemble(0x1400000)").unwrap(),
+        Statement::Reassemble("0x1400000".into())
+    );
+    assert!(matches!(
+        classify("reassemble()"),
+        Err(ParseError::BadCall { .. })
+    ));
+}
+
+#[test]
 fn parse_command_names_are_case_insensitive() {
     // CE-AA authors (e.g. the Manifold framework on the DD2 table) write
     // commands in camelCase. The dispatch must normalise case while leaving
