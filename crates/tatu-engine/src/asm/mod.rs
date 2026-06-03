@@ -78,7 +78,64 @@ pub fn resolve_address(operand: &str, symbols: &HashMap<String, u64>) -> Result<
 /// Compile a single CE-AA asm line to bytes. Returns `Ok(None)` if the line
 /// is not asm (caller should keep falling through to its own `db`/`dq`/`nop`
 /// handlers).
+///
+/// Wraps [`compile_dispatch`] with a RIP-relative fallback: in long mode a
+/// bare absolute memory operand (`[symbol]` / `[0xADDR]`) above ±2 GiB can't
+/// be encoded as `[disp32]`, so on that specific iced failure we retry the
+/// line with the operand rewritten RIP-relative (see [`rip_relative_retry`]).
 pub fn compile_line(
+    line: &str,
+    symbols: &HashMap<String, u64>,
+    base_addr: u64,
+) -> Result<Option<Vec<u8>>, AsmError> {
+    match compile_dispatch(line, symbols, base_addr) {
+        Err(e @ AsmError::IcedX86(_)) => match rip_relative_retry(line, symbols, base_addr)? {
+            Some(bytes) => Ok(Some(bytes)),
+            None => Err(e),
+        },
+        other => other,
+    }
+}
+
+/// Span of the first `[...]` bracket pair in `line`, as `(open, close)` byte
+/// indices. `None` when the line has no bracketed memory operand.
+fn bracket_span(line: &str) -> Option<(usize, usize)> {
+    let open = line.find('[')?;
+    let close = line[open..].find(']')? + open;
+    Some((open, close))
+}
+
+/// Retry a line whose only obstacle is a far bare-absolute memory operand by
+/// emitting it RIP-relative. Returns `None` (propagate the original error)
+/// when the line has no such operand or the address fits a 32-bit
+/// displacement after all.
+fn rip_relative_retry(
+    line: &str,
+    symbols: &HashMap<String, u64>,
+    base_addr: u64,
+) -> Result<Option<Vec<u8>>, AsmError> {
+    let Some((open, close)) = bracket_span(line) else {
+        return Ok(None);
+    };
+    let Some(target) = operands::resolve_bare_absolute(&line[open + 1..close], symbols) else {
+        return Ok(None);
+    };
+    if operands::fits_i32(target) {
+        return Ok(None);
+    }
+    // Compile with a small placeholder so iced emits the absolute `[disp32]`
+    // form, then rewrite that operand to `[rip+disp32]` aimed at `target`.
+    let placeholder = format!("{}[0x1000]{}", &line[..open], &line[close + 1..]);
+    let Some(bytes) = compile_dispatch(&placeholder, symbols, base_addr)? else {
+        return Ok(None);
+    };
+    let rip = reassemble::retarget_abs_to_rip(&bytes, base_addr, target)?;
+    Ok(Some(rip))
+}
+
+/// Dispatch a CE-AA asm line to the per-mnemonic encoder. Returns `Ok(None)`
+/// when the line is not recognised asm.
+fn compile_dispatch(
     line: &str,
     symbols: &HashMap<String, u64>,
     base_addr: u64,
@@ -145,6 +202,37 @@ mod tests {
             .iter()
             .map(|(k, v)| ((*k).to_string(), *v))
             .collect()
+    }
+
+    #[test]
+    fn far_absolute_memory_operand_becomes_rip_relative() {
+        // A codecave constant above the 4 GiB line can't be a `[disp32]`
+        // absolute; it must encode RIP-relative (DD2 Fatal Fall Height's
+        // `movss xmm0,[HeightDieForHumanWorkOverride]`).
+        let base = 0x1_43cb_0000_u64;
+        let target = 0x1_43cb_1000_u64;
+        let syms = symtab(&[("Override", target)]);
+        let bytes = compile_line("movss xmm0,[Override]", &syms, base)
+            .unwrap()
+            .unwrap();
+        // F3 0F 10 05 <disp32> = movss xmm0,[rip+disp32], 8 bytes.
+        assert_eq!(&bytes[..4], &[0xF3, 0x0F, 0x10, 0x05], "rip-relative movss");
+        assert_eq!(bytes.len(), 8);
+        let disp = i32::from_le_bytes(bytes[4..8].try_into().unwrap()) as i64;
+        let resolved = (base as i64 + bytes.len() as i64 + disp) as u64;
+        assert_eq!(resolved, target, "must resolve back to the symbol");
+    }
+
+    #[test]
+    fn near_absolute_memory_operand_stays_disp32() {
+        // An address that fits a 32-bit displacement keeps the compact
+        // SIB-absolute form — the RIP fallback must not fire.
+        let syms = symtab(&[("low", 0x1000)]);
+        let bytes = compile_line("movss xmm0,[low]", &syms, 0x4000)
+            .unwrap()
+            .unwrap();
+        // F3 0F 10 04 25 <disp32> = SIB absolute, 9 bytes.
+        assert_eq!(&bytes[..5], &[0xF3, 0x0F, 0x10, 0x04, 0x25]);
     }
 
     #[test]

@@ -17,7 +17,9 @@
 //! from the codecave (the common case: the displaced instruction was a short
 //! conditional jump whose target is now 2 GiB+ away).
 
-use iced_x86::{BlockEncoder, BlockEncoderOptions, Decoder, DecoderOptions, InstructionBlock};
+use iced_x86::{
+    BlockEncoder, BlockEncoderOptions, Decoder, DecoderOptions, InstructionBlock, Register,
+};
 
 use super::AsmError;
 
@@ -52,6 +54,48 @@ pub fn reassemble_instruction(
         AsmError::Unsupported(format!(
             "reassemble: re-encode at {dest_addr:#x} failed: {e}"
         ))
+    })?;
+    Ok(encoded.code_buffer)
+}
+
+/// Re-encode a single instruction (already assembled in `bytes`, located at
+/// `base`) so its absolute memory operand becomes RIP-relative pointing at
+/// `target`.
+///
+/// `bytes` must hold an instruction whose memory operand iced encoded as an
+/// absolute `[disp32]` (SIB, no base/index) — the caller produces this by
+/// compiling with a small placeholder address. In long mode an absolute
+/// target above ±2 GiB can't be reached by `[disp32]`, so CE (and this) emit
+/// `[rip+disp32]` instead, which iced computes from the absolute `target` and
+/// the instruction's own next-IP. Required by codecaves that load constants
+/// stored in the cave (`movss xmm0,[Override]`) when the module — and thus the
+/// cave — lives above the 4 GiB line.
+pub(super) fn retarget_abs_to_rip(
+    bytes: &[u8],
+    base: u64,
+    target: u64,
+) -> Result<Vec<u8>, AsmError> {
+    let mut decoder = Decoder::with_ip(64, bytes, base, DecoderOptions::NONE);
+    if !decoder.can_decode() {
+        return Err(AsmError::Unsupported(
+            "rip-relative retarget: no bytes to decode".into(),
+        ));
+    }
+    let mut instr = decoder.decode();
+    if instr.is_invalid() {
+        return Err(AsmError::Unsupported(
+            "rip-relative retarget: undecodable instruction".into(),
+        ));
+    }
+
+    instr.set_memory_base(Register::RIP);
+    instr.set_memory_displacement64(target);
+    instr.set_memory_displ_size(4);
+
+    let instrs = [instr];
+    let block = InstructionBlock::new(&instrs, base);
+    let encoded = BlockEncoder::encode(64, block, BlockEncoderOptions::NONE).map_err(|e| {
+        AsmError::Unsupported(format!("rip-relative retarget: re-encode failed: {e}"))
     })?;
     Ok(encoded.code_buffer)
 }
