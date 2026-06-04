@@ -15,6 +15,8 @@ pub mod protocol;
 #[cfg(windows)]
 pub mod mono;
 #[cfg(windows)]
+pub mod proxy;
+#[cfg(windows)]
 pub mod resolver;
 #[cfg(windows)]
 pub mod server;
@@ -65,7 +67,12 @@ mod entry {
         _reserved: *mut c_void,
     ) -> BOOL {
         if reason == DLL_PROCESS_ATTACH {
-            // Detach immediately: the thread outlives this call.
+            // Bind the winhttp forwarders synchronously: the game may call
+            // winhttp before our bootstrap thread runs, so the real-function
+            // pointers must be live the instant DllMain returns.
+            // SAFETY: runs during DLL load, before any proxied export is called.
+            unsafe { crate::proxy::init_forwarding() };
+            // Mono work goes on its own thread — never in DllMain (loader lock).
             std::thread::spawn(bootstrap);
         }
         TRUE
