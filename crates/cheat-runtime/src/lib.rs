@@ -69,6 +69,7 @@ pub mod symbol_table;
 pub mod thread_context;
 pub mod thread_control;
 pub mod threads;
+pub mod unity;
 
 // parser + asm live in tatu-engine since Phase 7A1 — re-exported
 // here as `cheat_runtime::parser` / `cheat_runtime::asm` for the
@@ -126,3 +127,4 @@ pub use thread_context::{
     write_debug_register,
 };
 pub use thread_control::{find_paused_thread, resume_thread, suspend_count, suspend_thread};
+pub use unity::{UnityBackend, detect_unity_backend, find_mono_runtime};
