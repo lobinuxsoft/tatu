@@ -12,6 +12,10 @@ description = "Linux-native Cheat Engine Auto-Assembler runtime. Reusable from a
 crate-type = ["rlib", "cdylib"]
 
 [dependencies]
+# Shared Mono collector wire protocol (Command enum + LE read/write helpers).
+# Only the platform-independent `protocol` module is used here; the collector's
+# Windows-only Mono FFI/server are cfg-gated out on this (Linux) target.
+cheat-mono-collector = { path = "../cheat-mono-collector" }
 dirs = "6"
 # Raw-deflate decode for framework tables' embedded modules (custom base85 →
 # deflate). Used by the `framework` loader.
