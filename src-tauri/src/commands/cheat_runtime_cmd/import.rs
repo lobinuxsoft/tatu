@@ -7,8 +7,9 @@
 //! so the user can edit it externally and retry without re-uploading.
 
 use std::fs;
+use std::path::Path;
 
-use cheat_runtime::{convert_ct_file_with_exe_hint, ct_tables_dir_for};
+use cheat_runtime::{convert_ct_file_with_exe_hint, ct_tables_dir_for, manifests_dir_for};
 use serde::Serialize;
 
 use crate::steam::detect_game_exe;
@@ -33,12 +34,15 @@ pub struct ImportSummary {
     pub written_to: String,
 }
 
-/// Delete a previously imported `.ct` from the user's library. Post-#134
-/// there's no companion JSON manifest to clean up — the loader synthesises
-/// manifests from `.ct` on demand, so removing the `.ct` is the whole job.
+/// Delete a previously imported `.ct` from the user's library. Besides the
+/// `.ct` itself, this also drops any legacy `trainers/<app_id>/<stem>.json`
+/// sidecar sharing the same file stem: pre-#134 imports (and the cheat-core
+/// migrator) left a JSON manifest there, and the loader still falls back to
+/// it when no `.ct` of that stem wins. Without this cleanup, removing the
+/// `.ct` resurrects the stale JSON as phantom toggles in the UI.
 ///
 /// Idempotent: missing files are silently ignored — the goal is "after
-/// this call, the named `.ct` is gone", not "a strict atomic transaction
+/// this call, the named table is gone", not "a strict atomic transaction
 /// failed because half of it was already gone".
 #[tauri::command]
 pub fn cheat_runtime_remove_ct(app_id: String, file_name: String) -> Result<(), String> {
@@ -54,10 +58,31 @@ pub fn cheat_runtime_remove_ct(app_id: String, file_name: String) -> Result<(), 
     }
 
     let ct_dir = ct_tables_dir_for(&app_id).map_err(|e| e.to_string())?;
-    let ct_path = ct_dir.join(&file_name);
+    let legacy_dir = manifests_dir_for(&app_id).map_err(|e| e.to_string())?;
+    remove_ct_from_dirs(&ct_dir, &legacy_dir, &file_name).map_err(|e| e.to_string())
+}
+
+/// Disk side of [`cheat_runtime_remove_ct`], split out with explicit dirs so
+/// unit tests can run against a `TempDir` without poisoning the process-wide
+/// `XDG_CONFIG_HOME`. Removes `<ct_dir>/<file_name>` and the legacy
+/// `<legacy_dir>/<stem>.json` sidecar sharing the same stem. Idempotent.
+fn remove_ct_from_dirs(ct_dir: &Path, legacy_dir: &Path, file_name: &str) -> std::io::Result<()> {
+    let ct_path = ct_dir.join(file_name);
     if ct_path.exists() {
-        fs::remove_file(&ct_path)
-            .map_err(|e| format!("failed to delete {}: {e}", ct_path.display()))?;
+        fs::remove_file(&ct_path)?;
+    }
+
+    // The loader dedupes `cheat-tables/*.ct` against `trainers/*.json` by
+    // file stem, so a leftover `<stem>.json` would re-appear as a phantom
+    // manifest after the `.ct` is gone.
+    // Build the JSON name by hand rather than `with_extension`: stems like
+    // `DD2_v6.0.0_Full` contain dots, and `with_extension` would mistake the
+    // last segment for an extension and clobber it.
+    if let Some(stem) = Path::new(file_name).file_stem().and_then(|s| s.to_str()) {
+        let legacy_path = legacy_dir.join(format!("{stem}.json"));
+        if legacy_path.exists() {
+            fs::remove_file(&legacy_path)?;
+        }
     }
     Ok(())
 }
@@ -116,4 +141,45 @@ fn is_safe_basename(file_name: &str) -> bool {
         || file_name == "."
         || file_name == ".."
         || file_name.is_empty())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn remove_ct_also_drops_legacy_json_sidecar() {
+        let ct_dir = TempDir::new().unwrap();
+        let legacy_dir = TempDir::new().unwrap();
+        let ct = ct_dir.path().join("DD2_v6.0.0_Full.ct");
+        let json = legacy_dir.path().join("DD2_v6.0.0_Full.json");
+        fs::write(&ct, b"[ENABLE]").unwrap();
+        fs::write(&json, b"{}").unwrap();
+
+        remove_ct_from_dirs(ct_dir.path(), legacy_dir.path(), "DD2_v6.0.0_Full.ct").unwrap();
+
+        assert!(!ct.exists(), "the .ct should be gone");
+        assert!(!json.exists(), "the legacy JSON sidecar should be gone too");
+    }
+
+    #[test]
+    fn remove_ct_is_idempotent_when_nothing_exists() {
+        let ct_dir = TempDir::new().unwrap();
+        let legacy_dir = TempDir::new().unwrap();
+        // Neither file present — must not error.
+        remove_ct_from_dirs(ct_dir.path(), legacy_dir.path(), "absent.ct").unwrap();
+    }
+
+    #[test]
+    fn remove_ct_leaves_unrelated_stems_untouched() {
+        let ct_dir = TempDir::new().unwrap();
+        let legacy_dir = TempDir::new().unwrap();
+        let other_json = legacy_dir.path().join("OtherTable.json");
+        fs::write(&other_json, b"{}").unwrap();
+
+        remove_ct_from_dirs(ct_dir.path(), legacy_dir.path(), "DD2.ct").unwrap();
+
+        assert!(other_json.exists(), "a different stem must survive");
+    }
 }
