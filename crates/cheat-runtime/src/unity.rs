@@ -29,11 +29,12 @@ pub enum UnityBackend {
 
 /// Classify the scripting backend of the Unity game installed in `game_dir`.
 ///
-/// The Unity standalone layout is a `<Name>_Data/` directory next to the exe
-/// containing `globalgamemanagers` (always present). From there:
+/// The Unity standalone layout is a `<Name>_Data/` directory next to the exe.
+/// From there:
 /// - **IL2CPP** ⇒ `GameAssembly.dll` beside the exe, or `<Data>/il2cpp_data/`.
 /// - **Mono** ⇒ `<Data>/Managed/` with assemblies, plus a Mono runtime DLL
-///   under `<Data>/MonoBleedingEdge/` (modern) or `<Data>/Mono/` (legacy).
+///   under `MonoBleedingEdge/` (modern) or `Mono/` (legacy), which can sit
+///   either beside the exe or inside `<Data>/`.
 ///
 /// IL2CPP is checked first: an IL2CPP build can still carry a vestigial
 /// `Managed/` folder, but a Mono build never carries `GameAssembly.dll`.
@@ -46,37 +47,41 @@ pub fn detect_unity_backend(game_dir: &Path) -> UnityBackend {
         return UnityBackend::Il2Cpp;
     }
 
-    if data.join("Managed").is_dir() && find_mono_runtime(&data).is_some() {
+    if data.join("Managed").is_dir() && find_mono_runtime(game_dir, &data).is_some() {
         return UnityBackend::Mono;
     }
 
     UnityBackend::NotUnity
 }
 
-/// Locate the Mono runtime DLL inside a Unity `_Data` directory, if any. The
-/// installer uses this both to confirm the Mono backend and to know the runtime
-/// is the modern bdwgc build the collector targets. Returns the DLL path.
-pub fn find_mono_runtime(data_dir: &Path) -> Option<PathBuf> {
-    // Modern Unity: MonoBleedingEdge; legacy: Mono. The runtime may sit at the
-    // root of that dir or under an arch subdir (`EmbedRuntime`, `x86_64`).
+/// Locate the Mono runtime DLL for a Unity game, if any. The installer uses this
+/// both to confirm the Mono backend and to know the runtime is the bdwgc build
+/// the collector targets. Returns the DLL path.
+///
+/// The runtime directory sits beside the exe (`<game>/MonoBleedingEdge/`, common
+/// on modern builds) or inside `_Data` (`<Data>/Mono/`, legacy), so both bases
+/// are searched.
+pub fn find_mono_runtime(game_dir: &Path, data_dir: &Path) -> Option<PathBuf> {
     const RUNTIME_ROOTS: &[&str] = &["MonoBleedingEdge", "Mono"];
     const RUNTIME_NAMES: &[&str] = &["mono-2.0-bdwgc.dll", "mono.dll", "monosgen-2.0.dll"];
 
-    for root in RUNTIME_ROOTS {
-        let base = data_dir.join(root);
-        if !base.is_dir() {
-            continue;
-        }
-        // Check the root and one level of subdirectories (EmbedRuntime/x86_64).
-        let mut search = vec![base.clone()];
-        if let Ok(entries) = std::fs::read_dir(&base) {
-            search.extend(entries.flatten().map(|e| e.path()).filter(|p| p.is_dir()));
-        }
-        for dir in search {
-            for name in RUNTIME_NAMES {
-                let candidate = dir.join(name);
-                if candidate.is_file() {
-                    return Some(candidate);
+    for base_parent in [game_dir, data_dir] {
+        for root in RUNTIME_ROOTS {
+            let base = base_parent.join(root);
+            if !base.is_dir() {
+                continue;
+            }
+            // Check the root and one level of subdirectories (EmbedRuntime/x86_64).
+            let mut search = vec![base.clone()];
+            if let Ok(entries) = std::fs::read_dir(&base) {
+                search.extend(entries.flatten().map(|e| e.path()).filter(|p| p.is_dir()));
+            }
+            for dir in search {
+                for name in RUNTIME_NAMES {
+                    let candidate = dir.join(name);
+                    if candidate.is_file() {
+                        return Some(candidate);
+                    }
                 }
             }
         }
@@ -84,10 +89,14 @@ pub fn find_mono_runtime(data_dir: &Path) -> Option<PathBuf> {
     None
 }
 
-/// Find the Unity `<Name>_Data` directory: one ending in `_Data` that holds the
-/// `globalgamemanagers` blob every Unity standalone build emits. Matching on
-/// that blob (rather than the exe-derived name) keeps detection independent of
-/// what the exe is called.
+/// Markers that identify a Unity `_Data` directory across build layouts: classic
+/// (`globalgamemanagers`), modern single-archive (`data.unity3d`), or the
+/// always-present runtime config (`boot.config`). Matching on these (rather than
+/// the exe-derived name) keeps detection independent of what the exe is called.
+const DATA_DIR_MARKERS: &[&str] = &["globalgamemanagers", "data.unity3d", "boot.config"];
+
+/// Find the Unity `<Name>_Data` directory: one ending in `_Data` that holds any
+/// known Unity marker.
 fn find_unity_data_dir(game_dir: &Path) -> Option<PathBuf> {
     let entries = std::fs::read_dir(game_dir).ok()?;
     for entry in entries.flatten() {
@@ -99,7 +108,7 @@ fn find_unity_data_dir(game_dir: &Path) -> Option<PathBuf> {
             .file_name()
             .and_then(|n| n.to_str())
             .is_some_and(|n| n.ends_with("_Data"));
-        if is_data_dir && path.join("globalgamemanagers").is_file() {
+        if is_data_dir && DATA_DIR_MARKERS.iter().any(|m| path.join(m).is_file()) {
             return Some(path);
         }
     }
@@ -112,7 +121,7 @@ mod tests {
     use std::fs;
     use tempfile::TempDir;
 
-    /// Build a Unity `_Data` dir with the `globalgamemanagers` marker.
+    /// Build a Unity `_Data` dir with the classic `globalgamemanagers` marker.
     fn make_data_dir(root: &Path, name: &str) -> PathBuf {
         let data = root.join(name);
         fs::create_dir_all(&data).unwrap();
@@ -131,7 +140,26 @@ mod tests {
         fs::write(runtime.join("mono-2.0-bdwgc.dll"), b"MZ").unwrap();
 
         assert_eq!(detect_unity_backend(tmp.path()), UnityBackend::Mono);
-        assert!(find_mono_runtime(&data).is_some());
+        assert!(find_mono_runtime(tmp.path(), &data).is_some());
+    }
+
+    #[test]
+    fn detects_mono_with_data_unity3d_and_runtime_at_game_root() {
+        // The Enigma of Fear layout: modern single-archive `_Data` (no
+        // globalgamemanagers, has data.unity3d) and MonoBleedingEdge sitting
+        // beside the exe rather than inside _Data.
+        let tmp = TempDir::new().unwrap();
+        let data = tmp.path().join("Game_Data");
+        fs::create_dir_all(data.join("Managed")).unwrap();
+        fs::write(data.join("data.unity3d"), b"\0").unwrap();
+        fs::write(data.join("boot.config"), b"\0").unwrap();
+        fs::write(data.join("Managed/Assembly-CSharp.dll"), b"MZ").unwrap();
+        let runtime = tmp.path().join("MonoBleedingEdge/EmbedRuntime");
+        fs::create_dir_all(&runtime).unwrap();
+        fs::write(runtime.join("mono-2.0-bdwgc.dll"), b"MZ").unwrap();
+
+        assert_eq!(detect_unity_backend(tmp.path()), UnityBackend::Mono);
+        assert!(find_mono_runtime(tmp.path(), &data).is_some());
     }
 
     #[test]
@@ -198,5 +226,21 @@ mod tests {
         let data = make_data_dir(tmp.path(), "Game_Data");
         fs::create_dir_all(data.join("Managed")).unwrap();
         assert_eq!(detect_unity_backend(tmp.path()), UnityBackend::NotUnity);
+    }
+
+    /// Validate detection against the real Enigma of Fear install if present.
+    /// `#[ignore]` because it depends on a local Steam library.
+    #[test]
+    #[ignore]
+    fn detects_real_enigma_of_fear() {
+        let candidates = [
+            "/var/mnt/DATA/SteamLibrary/steamapps/common/Enigma of Fear",
+            "/run/media/lobinux/DATA/SteamLibrary/steamapps/common/Enigma of Fear",
+        ];
+        let Some(dir) = candidates.iter().map(Path::new).find(|p| p.is_dir()) else {
+            eprintln!("Enigma of Fear not installed; skipping");
+            return;
+        };
+        assert_eq!(detect_unity_backend(dir), UnityBackend::Mono);
     }
 }
