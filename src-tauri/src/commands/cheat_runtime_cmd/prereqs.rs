@@ -12,8 +12,8 @@ use cheat_runtime::{Prereq, PrereqStatus, detect_reframework, load_manifests_for
 use serde::Serialize;
 
 use crate::prereqs::{install_mono_collector, install_reframework};
-use crate::steam::detect_game_exe;
 use crate::steam::exe::find_install_path;
+use crate::steam::{LaunchOptOutcome, detect_game_exe, set_winhttp_override};
 
 #[derive(Debug, Serialize)]
 pub struct PrereqReport {
@@ -123,4 +123,14 @@ pub fn cheat_runtime_install_mono_collector(app_id: String) -> Result<InstallRes
         release_tag: info.release_tag,
         backed_up: info.backed_up,
     })
+}
+
+/// Apply `WINEDLLOVERRIDES=winhttp=n,b` to `app_id`'s Steam launch options so
+/// Proton loads the Mono collector. Companion to
+/// [`cheat_runtime_install_mono_collector`]: the DLL placement and this launch
+/// option together make up the collector's auto-install vector. Fails if Steam
+/// is running (it would overwrite the edit on exit).
+#[tauri::command]
+pub fn cheat_runtime_set_winhttp_override(app_id: String) -> Result<LaunchOptOutcome, String> {
+    set_winhttp_override(&app_id).map_err(|e| e.to_string())
 }
