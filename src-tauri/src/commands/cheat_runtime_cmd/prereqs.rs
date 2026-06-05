@@ -11,7 +11,7 @@
 use cheat_runtime::{Prereq, PrereqStatus, detect_reframework, load_manifests_for};
 use serde::Serialize;
 
-use crate::prereqs::install_reframework;
+use crate::prereqs::{install_mono_collector, install_reframework};
 use crate::steam::detect_game_exe;
 use crate::steam::exe::find_install_path;
 
@@ -102,4 +102,25 @@ pub fn cheat_runtime_prereqs_install(
         }
         other => Err(format!("unknown prereq kind {other:?}")),
     }
+}
+
+/// Drop the Mono collector (`winhttp.dll`) next to `app_id`'s game exe.
+///
+/// Unlike [`cheat_runtime_prereqs_install`], this isn't a manifest-declared
+/// prereq — it's a runtime injection vector gated on the game being Unity
+/// Mono (the installer checks `detect_unity_backend` itself). The bytes come
+/// from the artifact compiled into tatu, so there's no download. The caller
+/// still owns the companion launch-option step
+/// (`WINEDLLOVERRIDES=winhttp=n,b`), which is smoke-time and user-driven.
+#[tauri::command]
+pub fn cheat_runtime_install_mono_collector(app_id: String) -> Result<InstallResult, String> {
+    let game_dir = find_install_path(&app_id).map_err(|e| e.to_string())?;
+    let info = install_mono_collector(&game_dir).map_err(|e| e.to_string())?;
+    Ok(InstallResult {
+        kind: "mono-collector".to_string(),
+        dll_path: info.dll_path,
+        size_bytes: info.size_bytes,
+        release_tag: info.release_tag,
+        backed_up: info.backed_up,
+    })
 }

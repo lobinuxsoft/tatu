@@ -84,6 +84,7 @@ pub fn run() {
             commands::cheat_runtime_cmd::import::cheat_runtime_remove_ct,
             commands::cheat_runtime_cmd::prereqs::cheat_runtime_prereqs_check,
             commands::cheat_runtime_cmd::prereqs::cheat_runtime_prereqs_install,
+            commands::cheat_runtime_cmd::prereqs::cheat_runtime_install_mono_collector,
             commands::cheat_search_cmd::open_fearless_search,
         ])
         .run(tauri::generate_context!())
