@@ -30,12 +30,27 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use cheat_runtime::{UnityBackend, detect_unity_backend};
 use serde::Deserialize;
 
 const GITHUB_API: &str = "https://api.github.com/repos/praydog/REFramework-nightly/releases/latest";
 const ASSET_NAME: &str = "REFramework.zip";
 const DLL_NAME: &str = "dinput8.dll";
 const USER_AGENT: &str = concat!("tatu-tracker/", env!("CARGO_PKG_VERSION"));
+
+/// The Mono collector DLL, cross-built (`x86_64-pc-windows-gnu`, release,
+/// stripped) and embedded at compile time. Unlike REFramework — which we
+/// download from praydog's GitHub releases — tatu builds this collector
+/// itself, so we vendor the pre-built artifact in `assets/` and ship it in
+/// the binary. Regenerate with `assets/regen-mono-collector.sh` whenever
+/// the `cheat-mono-collector` crate changes.
+const MONO_COLLECTOR_DLL: &[u8] = include_bytes!("../assets/cheat-mono-collector.dll");
+
+/// Proxy name the collector masquerades as under Proton/Wine. The DLL
+/// exports the full winhttp surface (45 forwarders) so the game loads it
+/// transparently; pairing this with `WINEDLLOVERRIDES=winhttp=n,b` makes
+/// Wine prefer our sibling DLL over the prefix's builtin.
+const MONO_PROXY_NAME: &str = "winhttp.dll";
 
 #[derive(Debug, thiserror::Error)]
 pub enum PrereqError {
@@ -57,6 +72,8 @@ pub enum PrereqError {
     GameDirMissing(String),
     #[error("extracted dinput8.dll was empty")]
     EmptyDll,
+    #[error("{0} is not a Unity Mono game; the Mono collector only loads into Mono runtimes")]
+    NotMonoUnity(String),
 }
 
 /// What the installer wrote, for the UI's success toast.
@@ -126,6 +143,41 @@ pub fn install_reframework(game_dir: &Path) -> Result<InstalledInfo, PrereqError
         dll_path: final_path.display().to_string(),
         size_bytes,
         release_tag: release.tag_name,
+        backed_up: backup.map(|p| p.display().to_string()),
+    })
+}
+
+/// Drop the embedded Mono collector into `game_dir` as `winhttp.dll`, so a
+/// Unity Mono game running under Proton loads it on launch (the collector's
+/// `DllMain` then waits for Mono, attaches, and serves `Class:Method`→JIT
+/// resolution to native tatu over TCP loopback).
+///
+/// Gated on [`detect_unity_backend`] returning [`UnityBackend::Mono`] — the
+/// collector only knows how to talk to the `mono_*` C API; dropping it into
+/// an IL2CPP or non-Unity game would do nothing useful and would shadow the
+/// game's real winhttp. Mirrors [`install_reframework`]'s atomic write +
+/// numbered backup, but the bytes come from the compiled-in artifact rather
+/// than a download, so there is no network/zip step.
+///
+/// Note: this only places the DLL. The companion launch-option
+/// (`WINEDLLOVERRIDES=winhttp=n,b`) is a separate, smoke-time step.
+pub fn install_mono_collector(game_dir: &Path) -> Result<InstalledInfo, PrereqError> {
+    if !game_dir.is_dir() {
+        return Err(PrereqError::GameDirMissing(game_dir.display().to_string()));
+    }
+    if detect_unity_backend(game_dir) != UnityBackend::Mono {
+        return Err(PrereqError::NotMonoUnity(game_dir.display().to_string()));
+    }
+
+    let final_path = game_dir.join(MONO_PROXY_NAME);
+    let backup = move_existing_aside(&final_path)?;
+    let size_bytes = write_atomic(&final_path, MONO_COLLECTOR_DLL)?;
+
+    Ok(InstalledInfo {
+        dll_path: final_path.display().to_string(),
+        size_bytes,
+        // Not a download — report the tatu version that bundled the artifact.
+        release_tag: concat!("tatu ", env!("CARGO_PKG_VERSION")).to_string(),
         backed_up: backup.map(|p| p.display().to_string()),
     })
 }
@@ -320,6 +372,75 @@ mod tests {
 
         let extracted = extract_dll_from_zip(&buf).unwrap();
         assert_eq!(extracted, b"FAKE_DLL");
+    }
+
+    /// Build a minimal Unity Mono game layout `detect_unity_backend` accepts.
+    fn make_mono_game(root: &Path) {
+        let data = root.join("Game_Data");
+        fs::create_dir_all(data.join("Managed")).unwrap();
+        fs::write(data.join("globalgamemanagers"), b"\0").unwrap();
+        fs::write(data.join("Managed/Assembly-CSharp.dll"), b"MZ").unwrap();
+        let runtime = data.join("MonoBleedingEdge/EmbedRuntime");
+        fs::create_dir_all(&runtime).unwrap();
+        fs::write(runtime.join("mono-2.0-bdwgc.dll"), b"MZ").unwrap();
+    }
+
+    #[test]
+    fn embedded_collector_dll_has_a_pe_header() {
+        // Guards against the vendored artifact going missing/empty at build
+        // time — include_bytes! would still compile an empty slice.
+        assert!(
+            MONO_COLLECTOR_DLL.len() > 64 * 1024,
+            "collector DLL too small"
+        );
+        assert_eq!(&MONO_COLLECTOR_DLL[..2], b"MZ", "not a PE image");
+    }
+
+    #[test]
+    fn install_mono_reports_game_dir_missing() {
+        let bogus = std::path::Path::new("/does/not/exist/at/all/please");
+        match install_mono_collector(bogus).unwrap_err() {
+            PrereqError::GameDirMissing(_) => {}
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn install_mono_rejects_non_mono_game() {
+        let tmp = TempDir::new().unwrap();
+        // A directory that exists but isn't a Unity Mono game.
+        match install_mono_collector(tmp.path()).unwrap_err() {
+            PrereqError::NotMonoUnity(_) => {}
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn install_mono_places_winhttp_into_mono_game() {
+        let tmp = TempDir::new().unwrap();
+        make_mono_game(tmp.path());
+
+        let info = install_mono_collector(tmp.path()).unwrap();
+        let placed = tmp.path().join("winhttp.dll");
+        assert!(placed.is_file());
+        assert_eq!(fs::read(&placed).unwrap(), MONO_COLLECTOR_DLL);
+        assert_eq!(info.size_bytes, MONO_COLLECTOR_DLL.len() as u64);
+        assert!(info.backed_up.is_none());
+        assert!(!placed.with_extension("dll.tmp").exists());
+    }
+
+    #[test]
+    fn install_mono_backs_up_existing_winhttp() {
+        let tmp = TempDir::new().unwrap();
+        make_mono_game(tmp.path());
+        let placed = tmp.path().join("winhttp.dll");
+        fs::write(&placed, b"PREEXISTING").unwrap();
+
+        let info = install_mono_collector(tmp.path()).unwrap();
+        let backup = info.backed_up.expect("should back up existing winhttp");
+        assert!(backup.ends_with(".tatu-backup"));
+        assert_eq!(fs::read(&backup).unwrap(), b"PREEXISTING");
+        assert_eq!(fs::read(&placed).unwrap(), MONO_COLLECTOR_DLL);
     }
 
     #[test]
