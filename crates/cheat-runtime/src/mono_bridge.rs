@@ -136,6 +136,28 @@ impl MonoClient {
     }
 }
 
+/// Heuristic: does `symbol` look like a Mono `Class:Method` (or
+/// `[Image]Namespace.Class:Method`) rather than an ELF `module:symbol` or a
+/// bare label? Used to decide which unresolved symbols to route through the
+/// collector before running a script.
+///
+/// A Mono descriptor has a `:` whose left side is a managed type name — never a
+/// module file (`mono-2.0-bdwgc.dll:fn`, `libfoo.so:sym`) and never a path.
+pub fn is_mono_symbol(symbol: &str) -> bool {
+    let (_, desc) = parse_mono_symbol(symbol);
+    let Some((ty, method)) = desc.split_once(':') else {
+        return false;
+    };
+    if ty.is_empty() || method.is_empty() {
+        return false;
+    }
+    if ty.contains(['/', '\\']) {
+        return false;
+    }
+    let lower = ty.to_ascii_lowercase();
+    !(lower.ends_with(".dll") || lower.ends_with(".so") || lower.ends_with(".exe"))
+}
+
 /// Split an optional `[Image]` prefix off a Mono symbol, returning
 /// `(image_filter, method_descriptor)`. The descriptor is what Mono's
 /// `mono_method_desc_new` consumes (`Namespace.Class:Method`).
@@ -160,6 +182,22 @@ mod tests {
     use super::*;
     use std::net::TcpListener;
     use std::thread;
+
+    #[test]
+    fn is_mono_symbol_classifies_descriptors() {
+        // Mono Class:Method forms.
+        assert!(is_mono_symbol("Pistol:Shoot"));
+        assert!(is_mono_symbol("HPModuleBase:Damage"));
+        assert!(is_mono_symbol("UnityEngine.Player:Update"));
+        assert!(is_mono_symbol("[Assembly-CSharp]Player:Update"));
+        // Not Mono: ELF/PE module:symbol, paths, bare labels.
+        assert!(!is_mono_symbol("mono-2.0-bdwgc.dll:mono_compile_method"));
+        assert!(!is_mono_symbol("libfoo.so:some_sym"));
+        assert!(!is_mono_symbol("game.exe:Foo"));
+        assert!(!is_mono_symbol("returnhere"));
+        assert!(!is_mono_symbol("newmem"));
+        assert!(!is_mono_symbol(""));
+    }
 
     /// Spawn a scripted collector that speaks the real wire protocol (so these
     /// tests exercise the exact serialization the Windows collector uses) and

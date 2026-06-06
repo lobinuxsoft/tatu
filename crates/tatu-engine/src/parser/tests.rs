@@ -87,11 +87,65 @@ fn parse_symbol_offset_site() {
         classify("codecave:").unwrap(),
         Statement::LabelSite("codecave".into())
     );
-    // Module-relative (`.exe` carries a dot) is not an identifier base →
+    // Module-relative (`.exe` carries a dot, no `:`) is not a symbol base →
     // falls through to Raw, unchanged from prior behaviour.
     assert_eq!(
         classify("DD2.exe+1062702:").unwrap(),
         Statement::Raw("DD2.exe+1062702:".into())
+    );
+    // Mono descriptor injection site (`Class:Method+offset:`) — the Enigma
+    // ammo cheat shape. The `:` inside the symbol must not break parsing.
+    assert_eq!(
+        classify("Pistol:Shoot+5f:").unwrap(),
+        Statement::SymbolSite {
+            symbol: "Pistol:Shoot".into(),
+            offset: 0x5f,
+        }
+    );
+    // Namespaced descriptor with no offset.
+    assert_eq!(
+        classify("UnityEngine.Player:Update:").unwrap(),
+        Statement::SymbolSite {
+            symbol: "UnityEngine.Player:Update".into(),
+            offset: 0,
+        }
+    );
+}
+
+#[test]
+fn enigma_ammo_full_script_exposes_mono_site() {
+    // Exact shape of the Enigma "ammo" cheat (ID 26), including the trailing
+    // space after the alloc line, as it appears in the .ct.
+    let src = "[ENABLE]\n\
+        //code from here to '[DISABLE]' will be used to enable the cheat\n\
+        alloc(newmem,2048,Pistol:Shoot+5f) \n\
+        label(returnhere)\n\
+        label(originalcode)\n\
+        label(exit)\n\
+        newmem:\n\
+        originalcode:\n\
+        inc eax\n\
+        mov [rsi+7C],eax\n\
+        exit:\n\
+        jmp returnhere\n\
+        Pistol:Shoot+5f:\n\
+        jmp newmem\n\
+        returnhere:\n\
+        [DISABLE]\n";
+    let script = crate::parser::parse(src).unwrap();
+    let has_site = script.enable.iter().any(|s| {
+        matches!(s, crate::parser::Statement::SymbolSite { symbol, .. } if symbol == "Pistol:Shoot")
+    });
+    assert!(
+        has_site,
+        "no SymbolSite for Pistol:Shoot in {:?}",
+        script.enable
+    );
+    let unresolved =
+        crate::analysis::unresolved_symbols(&script, &std::collections::HashSet::new());
+    assert!(
+        unresolved.contains("Pistol:Shoot"),
+        "Pistol:Shoot missing from unresolved={unresolved:?}"
     );
 }
 
