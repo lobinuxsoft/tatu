@@ -2,14 +2,16 @@
 //! frontend renders, tagged with liveness + symbol-readiness flags.
 
 use cheat_runtime::{
-    AddrExpr, FeatureKind, FreezeRegistry, Manifest, ManifestFeature, ValueSpec, analysis,
-    find_pid_by_exe, load_manifests_for, parse_addr_expr, parse_script,
+    AddrExpr, FeatureKind, FreezeRegistry, Manifest, ManifestFeature, UnityBackend, ValueSpec,
+    analysis, detect_unity_backend, find_pid_by_exe, is_mono_symbol, load_manifests_for,
+    parse_addr_expr, parse_script,
 };
 use serde::Serialize;
 use tauri::State;
 
 use super::{ActiveCheats, purge_stale_cheats};
 use crate::steam::detect_game_exe;
+use crate::steam::exe::find_install_path;
 
 #[derive(Debug, Serialize)]
 pub struct FeatureView {
@@ -77,6 +79,12 @@ pub fn cheat_runtime_list_features(
         (keys, syms)
     };
 
+    // Unity Mono games can resolve `Class:Method` symbols through the collector
+    // at enable time, so those don't count as "needs CE".
+    let mono_backend = find_install_path(&app_id)
+        .map(|dir| detect_unity_backend(&dir) == UnityBackend::Mono)
+        .unwrap_or(false);
+
     let mut out = Vec::new();
     for m in manifests {
         let game_running = find_pid_by_exe(&m.exe).is_some();
@@ -89,6 +97,7 @@ pub fn cheat_runtime_list_features(
             game_running,
             provided_symbols: &provided_symbols,
             framework: m.framework,
+            mono_backend,
         };
         for f in &m.features {
             out.push(build_view(f, &ctx));
@@ -112,6 +121,9 @@ struct ViewCtx<'a> {
     /// Whether this manifest is a Lua framework table — its `{$lua}` cheats run
     /// in the framework runtime, so they aren't "needs CE".
     framework: bool,
+    /// Whether the game is Unity Mono — `Class:Method` symbols then resolve via
+    /// the collector, so they don't make a cheat "needs CE".
+    mono_backend: bool,
 }
 
 fn build_view(f: &ManifestFeature, ctx: &ViewCtx<'_>) -> FeatureView {
@@ -130,7 +142,7 @@ fn build_view(f: &ManifestFeature, ctx: &ViewCtx<'_>) -> FeatureView {
     } else {
         f.script
             .as_deref()
-            .is_some_and(|src| compute_needs_ce(src, ctx.provided_symbols))
+            .is_some_and(|src| compute_needs_ce(src, ctx.provided_symbols, ctx.mono_backend))
     };
     FeatureView {
         manifest_title: ctx.manifest_title.to_string(),
@@ -168,10 +180,23 @@ fn collect_provided_symbols(manifest: &Manifest) -> std::collections::HashSet<St
 /// A Toggle needs CE delegation when its script is pure Lua, or references a
 /// symbol no script in the table binds (a Lua-resolved pointer root). An
 /// unparseable script returns `false` so enable surfaces the real error.
-fn compute_needs_ce(script_src: &str, provided: &std::collections::HashSet<String>) -> bool {
+///
+/// When `mono_backend` is set, `Class:Method` symbols are resolvable through the
+/// collector at enable time, so they don't count toward "needs CE" — only
+/// genuinely unbindable symbols (Lua pointer roots) do.
+fn compute_needs_ce(
+    script_src: &str,
+    provided: &std::collections::HashSet<String>,
+    mono_backend: bool,
+) -> bool {
     match parse_script(script_src) {
         Ok(script) => {
-            script.lua_only || !analysis::unresolved_symbols(&script, provided).is_empty()
+            if script.lua_only {
+                return true;
+            }
+            analysis::unresolved_symbols(&script, provided)
+                .iter()
+                .any(|s| !(mono_backend && is_mono_symbol(s)))
         }
         Err(_) => false,
     }

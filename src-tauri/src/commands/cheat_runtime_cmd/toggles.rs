@@ -7,8 +7,11 @@
 use std::path::PathBuf;
 use std::sync::Mutex;
 
+use std::collections::HashSet;
+
 use cheat_runtime::{
-    Engine, FeatureKind, FreezeRegistry, MemRec, PersistedHook, ct_tables_dir_for, find_pid_by_exe,
+    Engine, FeatureKind, FreezeRegistry, MemRec, MonoClient, PersistedHook, Script, UnityBackend,
+    analysis, ct_tables_dir_for, detect_unity_backend, find_pid_by_exe, is_mono_symbol,
     load_manifests_for, lua_enable_disable, parse_script,
 };
 use tauri::State;
@@ -16,6 +19,7 @@ use tauri::State;
 use super::{ActiveCheatEntry, ActiveCheats, FrameworkActor, purge_stale_cheats};
 use crate::state::AppState;
 use crate::steam::detect_game_exe;
+use crate::steam::exe::find_install_path;
 
 /// A `{$lua}` framework cheat resolved from a manifest: where it lives and what
 /// to run.
@@ -85,6 +89,13 @@ pub fn cheat_runtime_enable(
         msg
     })?;
     let mut engine = Engine::new(pid);
+    // Unity Mono cheats reference `Class:Method` symbols the AA script never
+    // defines; resolve them through the in-game collector and bind them before
+    // the executor runs (it then treats them like any other symbol).
+    bind_mono_symbols(&mut engine, &app_id, &script).map_err(|e| {
+        eprintln!("[enable {feature_uuid}] {e}");
+        e
+    })?;
     let cheat = engine.enable(&script).map_err(|e| {
         let msg = format!("enable: {e}");
         eprintln!("[enable {feature_uuid}] {msg}");
@@ -111,6 +122,50 @@ pub fn cheat_runtime_enable(
         .lock()
         .map_err(|e| format!("active registry poisoned: {e}"))?;
     guard.insert(feature_uuid, ActiveCheatEntry::Linux(cheat));
+    Ok(())
+}
+
+/// Resolve a Unity Mono game's `Class:Method` symbols through the in-game
+/// collector and bind them into `engine` before the script runs. The executor
+/// then resolves `Pistol:Shoot+5f` like any other `symbol+offset` from its
+/// table — it never has to know about Mono.
+///
+/// No-op for non-Mono games or scripts with no unresolved Mono symbols. Returns
+/// an error only when the script *needs* Mono symbols but the collector isn't
+/// reachable — the user must install the collector and relaunch the game.
+fn bind_mono_symbols(engine: &mut Engine, app_id: &str, script: &Script) -> Result<(), String> {
+    let Ok(game_dir) = find_install_path(app_id) else {
+        // Can't locate the install; let the executor surface any unresolved
+        // symbols itself rather than guessing.
+        return Ok(());
+    };
+    if detect_unity_backend(&game_dir) != UnityBackend::Mono {
+        return Ok(());
+    }
+
+    let mono_syms: Vec<String> = analysis::unresolved_symbols(script, &HashSet::new())
+        .into_iter()
+        .filter(|s| is_mono_symbol(s))
+        .collect();
+    if mono_syms.is_empty() {
+        return Ok(());
+    }
+
+    let mut client = MonoClient::connect().map_err(|e| {
+        format!(
+            "this cheat needs Mono symbols ({}), but the collector isn't running: {e}. \
+             Install the Mono collector and relaunch the game.",
+            mono_syms.join(", ")
+        )
+    })?;
+    for sym in mono_syms {
+        let addr = client
+            .resolve(&sym)
+            .map_err(|e| format!("Mono symbol {sym:?} did not resolve: {e}"))?;
+        eprintln!("[enable] mono resolve {sym} -> {addr:#x}");
+        engine.bind_symbol(sym, addr);
+    }
+    let _ = client.terminate();
     Ok(())
 }
 
