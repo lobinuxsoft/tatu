@@ -242,10 +242,26 @@ fn body_has_lua_directive(stmts: &[Statement]) -> bool {
     })
 }
 
+/// Find the byte offset just past a `[ENABLE]` / `[DISABLE]` section header.
+///
+/// The header must be its own line (comments stripped): CE's boilerplate
+/// `//code from here to '[DISABLE]' will be used to enable the cheat` contains
+/// the literal `[DISABLE]`, so a naive substring search would mistake that
+/// comment for the real DISABLE header and truncate the ENABLE body to nothing.
 fn find_block_header(input: &str, tag: &str) -> Option<usize> {
     let needle = format!("[{tag}]");
-    let pos = input.find(&needle)?;
-    Some(pos + needle.len())
+    let mut pos = 0;
+    for line in input.split_inclusive('\n') {
+        if strip_comment(line).trim() == needle {
+            // Offset just past the needle (section_after backs up by
+            // needle.len() to find the header start). `find` locates it past
+            // any leading whitespace on the header line.
+            let needle_start = pos + line.find(&needle).expect("line contains needle");
+            return Some(needle_start + needle.len());
+        }
+        pos += line.len();
+    }
+    None
 }
 
 fn section_after(input: &str, start: usize, end: Option<usize>) -> &str {
@@ -303,6 +319,14 @@ fn classify(line: &str) -> Result<Statement, ParseError> {
         }
         if let Some((symbol, offset)) = parse_symbol_offset(name) {
             return Ok(Statement::SymbolSite { symbol, offset });
+        }
+        // Mono descriptor injection site with no offset (`Class:Method:`). The
+        // `:` distinguishes it from a plain label (already handled above).
+        if is_mono_descriptor(name) {
+            return Ok(Statement::SymbolSite {
+                symbol: name.to_string(),
+                offset: 0,
+            });
         }
     }
     // Function-call style commands: `name(args)`.
@@ -508,11 +532,11 @@ fn parse_alloc(args: &str) -> Result<Statement, ParseError> {
 }
 
 /// Parse a `symbol+N` / `symbol-N` site label (the part before the trailing
-/// `:`). The base must be a plain identifier — module-relative forms like
-/// `DD2.exe+X` carry a `.` and fall through to [`Statement::Raw`], matching
-/// prior behaviour. The offset follows the same `parse_size` convention as
-/// numeric sites (`0x`/`$` hex, otherwise decimal). Returns `None` for any
-/// other shape so the caller keeps falling through.
+/// `:`). The base is a plain identifier or a Mono descriptor (`Class:Method`);
+/// module-relative forms like `DD2.exe+X` carry a `.` but no `:` and fall
+/// through to [`Statement::Raw`], matching prior behaviour. The offset is
+/// **hex by default** (CE-AA convention for address offsets: `+5f` = `+0x5f`),
+/// tolerating an explicit `0x`/`$` prefix. Returns `None` for any other shape.
 fn parse_symbol_offset(name: &str) -> Option<(String, i64)> {
     let idx = name.rfind(['+', '-'])?;
     if idx == 0 {
@@ -520,11 +544,17 @@ fn parse_symbol_offset(name: &str) -> Option<(String, i64)> {
     }
     let (sym, op_and_off) = name.split_at(idx);
     let sym = sym.trim();
-    if !is_identifier(sym) {
+    if !(is_identifier(sym) || is_mono_descriptor(sym)) {
         return None;
     }
     let (op, off) = op_and_off.split_at(1);
-    let magnitude = parse_size(off.trim())? as i64;
+    let off = off.trim();
+    let hex = off
+        .strip_prefix("0x")
+        .or_else(|| off.strip_prefix("0X"))
+        .or_else(|| off.strip_prefix('$'))
+        .unwrap_or(off);
+    let magnitude = u64::from_str_radix(hex, 16).ok()? as i64;
     let offset = if op == "-" { -magnitude } else { magnitude };
     Some((sym.to_string(), offset))
 }
@@ -551,6 +581,24 @@ fn is_identifier(s: &str) -> bool {
         return false;
     }
     chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+/// A Mono method descriptor: `Class:Method` or `Namespace.Class:Method`. It has
+/// a `:` and is otherwise identifier-shaped (alphanumerics, `_`, `.`). The `:`
+/// requirement keeps it distinct from a module-relative base like `DD2.exe+N`
+/// (which has a `.` but no `:` and must stay [`Statement::Raw`]).
+fn is_mono_descriptor(s: &str) -> bool {
+    if !s.contains(':') {
+        return false;
+    }
+    let Some(first) = s.chars().next() else {
+        return false;
+    };
+    if !(first.is_ascii_alphabetic() || first == '_') {
+        return false;
+    }
+    s.chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | ':'))
 }
 
 #[cfg(test)]
