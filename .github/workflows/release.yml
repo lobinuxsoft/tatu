@@ -37,7 +37,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: "src-tauri -> target"
+          workspaces: ". -> target"
           key: release-${{ matrix.target }}
 
       - name: Install system dependencies (Linux)
@@ -46,15 +46,17 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev
 
+      # The repo is a Cargo workspace: target/ lives at the root, not in src-tauri/.
       - name: Build binary
-        working-directory: src-tauri
-        run: cargo build --release
+        run: cargo build --release -p tatu-tracker
 
       - name: Upload binary
         uses: actions/upload-artifact@v4
         with:
           name: binary-${{ matrix.target }}
-          path: src-tauri/target/release/${{ matrix.binary }}
+          path: target/release/${{ matrix.binary }}
+          # Fail loudly instead of publishing a release with no assets.
+          if-no-files-found: error
 
   appimage:
     name: AppImage
