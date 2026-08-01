@@ -1,5 +1,80 @@
 # Changelog
 
+## [0.7.0](https://github.com/lobinuxsoft/tatu/compare/v0.6.0...v0.7.0) (2026-08-01)
+
+
+### Features
+
+* 'Import .CT' button + Mono table exe-binding fallback ([81f1147](https://github.com/lobinuxsoft/tatu/commit/81f114724a702a9438871f52116e6b542a692625))
+* **asm:** encode far absolute memory operands rip-relative ([78c8486](https://github.com/lobinuxsoft/tatu/commit/78c84864a06779266fb0294da26bb8f61a85c47e))
+* **asm:** strip jmp far/near distance hints in long mode ([d60831d](https://github.com/lobinuxsoft/tatu/commit/d60831d1ebdbe20b6f5aaa9f236dbff3ee20d05c))
+* CE-style tree view for cheats panel ([#133](https://github.com/lobinuxsoft/tatu/issues/133)) ([157bcd8](https://github.com/lobinuxsoft/tatu/commit/157bcd8ff0843465019c8b9376d05483d4f80757))
+* **cheat-runtime:** direct .CT loader — drop manifest JSON intermediate ([276b726](https://github.com/lobinuxsoft/tatu/commit/276b726bb82d6a94f866d2ea4e6b2be07875a031))
+* **cheat-runtime:** direct .CT loader — drop manifest JSON intermediate ([#134](https://github.com/lobinuxsoft/tatu/issues/134)) ([e9a5b33](https://github.com/lobinuxsoft/tatu/commit/e9a5b338407374ba22dc1234594d5939ed946d1d))
+* **cheat-runtime:** expose ct_tables_dir_for(app_id) ([6b8a50e](https://github.com/lobinuxsoft/tatu/commit/6b8a50e9237f4cf367b2615da702d274479ad556))
+* **cheat-runtime:** nested ManifestFeature.children for CE tree fidelity ([56c3f4a](https://github.com/lobinuxsoft/tatu/commit/56c3f4ac87ff9fb4a670da221e8af46ad874bcf0))
+* **cheats:** flag framework-dependent cheats as "needs CE" ([cffa3b4](https://github.com/lobinuxsoft/tatu/commit/cffa3b4db3a54537011d24094619e21d69cbafdd))
+* **ct_import:** exe-hint fallback for Mono / minimalist tables ([0ce4568](https://github.com/lobinuxsoft/tatu/commit/0ce4568dd99f41cb87b7115bebbfcfc6cda81aec))
+* **ct_import:** recursive walk preserves CheatEntries tree ([a157065](https://github.com/lobinuxsoft/tatu/commit/a1570659c9c37339d17fb736783008825878e89e))
+* **engine:** implement CE-AA reassemble() statement ([94cd2e0](https://github.com/lobinuxsoft/tatu/commit/94cd2e056339b288b16df1137eacda6b3aff15f8))
+* **framework:** load Lua framework tables and run their cheats from import ([3e05c90](https://github.com/lobinuxsoft/tatu/commit/3e05c907273073f423173862352bf004a153b3df))
+* **frontend:** 'Import .CT' button in the cheats panel ([e26e971](https://github.com/lobinuxsoft/tatu/commit/e26e971a4bce7af0a1e1a9a1194fefd23b3a87ff))
+* **frontend:** CE-style collapsible tree view for cheats panel ([087281b](https://github.com/lobinuxsoft/tatu/commit/087281b4c4bc43b5d63e655df64ada847c203a28))
+* **frontend:** per-table '✗' remove button + persistent import-failure toast ([caeef1b](https://github.com/lobinuxsoft/tatu/commit/caeef1bc0af0bfe0033e33522bd679031a7be886))
+* import .CT robustness (exe-hint + remove button + Tier-1 asm) ([0d7ffdf](https://github.com/lobinuxsoft/tatu/commit/0d7ffdf90a3654459fb154e36d68975ce66b4bd7))
+* **lua:** embed Lua 5.4 runtime with CE memory primitives (phase 0) ([03d0221](https://github.com/lobinuxsoft/tatu/commit/03d0221d6d8593eb92475b819deac1969da19f4d))
+* **lua:** run framework cheat tables natively (CE primitives, constants, stubs) ([c8727a4](https://github.com/lobinuxsoft/tatu/commit/c8727a414ada1e8d59c2c9013c5ecdc03592d6dc))
+* **mono-bridge:** native-Linux TCP client for the Mono collector ([674b53d](https://github.com/lobinuxsoft/tatu/commit/674b53dc5494caf7a5da1ce096124bae2458e5d5))
+* **mono-bridge:** native-Linux TCP client for the Mono collector ([f1e43b2](https://github.com/lobinuxsoft/tatu/commit/f1e43b2a985fb68edb7d427c46fd9734645997c8))
+* **mono-collector:** Windows-side Mono symbol collector (CE-compatible) ([d36cce1](https://github.com/lobinuxsoft/tatu/commit/d36cce19857280e12f685f46ff3584e9cbbf2894))
+* **mono-collector:** Windows-side Mono symbol collector (CE-compatible) ([f4c44aa](https://github.com/lobinuxsoft/tatu/commit/f4c44aa1010e2d9128b4a90a07e208d68e516af7))
+* **mono-collector:** winhttp.dll proxy load vector ([c0cd478](https://github.com/lobinuxsoft/tatu/commit/c0cd47826e70913fdc627277a370d3596fc6430f))
+* **mono-collector:** winhttp.dll proxy load vector ([847a94f](https://github.com/lobinuxsoft/tatu/commit/847a94fcfa664c980415a98604c3dddf7814faae))
+* **mono:** resolve Class:Method symbols via collector at enable time ([9d96420](https://github.com/lobinuxsoft/tatu/commit/9d96420e521b8d7776d04ca8d347e07b9d6de702))
+* **mono:** wire collector to executor + parser fixes for Mono injection sites ([4f575b6](https://github.com/lobinuxsoft/tatu/commit/4f575b6963edabb647b91b1d6fdd07c7b07e0392))
+* native Lua framework runtime + CE-AA reassemble/rip-relative/far-jmp ([2155b2f](https://github.com/lobinuxsoft/tatu/commit/2155b2f210746b79556de0f2f2bf856b60c77dd8))
+* **prereqs:** install Mono collector as winhttp.dll proxy ([cf04772](https://github.com/lobinuxsoft/tatu/commit/cf04772282ff805d16f43d438a84e7308039f18a))
+* **prereqs:** install Mono collector as winhttp.dll proxy ([1e253d9](https://github.com/lobinuxsoft/tatu/commit/1e253d9e79707422838c8e74c484af6b350b5236))
+* **prereqs:** REFramework auto-detect + one-click install for RE Engine games ([e7910cc](https://github.com/lobinuxsoft/tatu/commit/e7910cc06360c368987e561ad19baacac390942a))
+* **prereqs:** REFramework auto-detect + one-click install for RE Engine games ([#98](https://github.com/lobinuxsoft/tatu/issues/98)) ([8f5f3a2](https://github.com/lobinuxsoft/tatu/commit/8f5f3a275c44be57ad7f99c2d95f6b5f2d1b9e9f))
+* **steam:** set WINEDLLOVERRIDES launch option for Mono collector ([8751010](https://github.com/lobinuxsoft/tatu/commit/87510102233445f8902f604c6df198874b1f11ae))
+* **steam:** set WINEDLLOVERRIDES launch option for Mono collector ([72246e2](https://github.com/lobinuxsoft/tatu/commit/72246e255f4f11bebc3c1a65c8834bf89fa6926a))
+* **tatu-engine:** aobscan(symbol, pattern) — no-module-scope variant ([07eac1a](https://github.com/lobinuxsoft/tatu/commit/07eac1afe15924ba255625aa4832313d74a3a108))
+* **tatu-engine:** aobscan(symbol, pattern) — no-module-scope variant ([0d6f377](https://github.com/lobinuxsoft/tatu/commit/0d6f3776186dda4a214e40d8788abf77105a0c4e))
+* **tatu-engine:** Tier-1 asm — 'nop' + 'test' mnemonics ([c282b48](https://github.com/lobinuxsoft/tatu/commit/c282b48befd5733c6b8f2b8b7cc16d74f1a83ffd))
+* **tatu-engine:** Tier-2 asm — SSE2 scalar (79% → 91.6% corpus coverage) ([3fad404](https://github.com/lobinuxsoft/tatu/commit/3fad4040e5ed8bc4abf9448858ace47d2f054012))
+* **tatu-engine:** Tier-2 asm — SSE2 scalar (mov/arith/cvt) ([bd2ec90](https://github.com/lobinuxsoft/tatu/commit/bd2ec909c8d8699fc5a734faa6e100e849afd6c2))
+* **tatu-engine:** Tier-3 asm — SSE2 packed + x87 + cmov + misc (91.6% → 99.7%) ([166ebc7](https://github.com/lobinuxsoft/tatu/commit/166ebc7028ec5505848325bbfb17b7c2af619245))
+* **tatu-engine:** Tier-3 asm (91.6% → 99.7% corpus coverage) ([b4b8e84](https://github.com/lobinuxsoft/tatu/commit/b4b8e84e5207341703e240bb912d859e0b890704))
+* **tatu-tracker:** cheat_runtime_import_ct command ([670a615](https://github.com/lobinuxsoft/tatu/commit/670a615044597c9402c26982a4608a3058208798))
+* **tatu-tracker:** cheat_runtime_remove_ct + Steam exe hint in import + enable error logging ([454b6a6](https://github.com/lobinuxsoft/tatu/commit/454b6a658191aed447103f10b6678131d111241d))
+* **tatu-tracker:** FeatureView tree + recursive UUID lookup ([1a266ef](https://github.com/lobinuxsoft/tatu/commit/1a266ef0324d3cf8ba4236dc86a52e22e8eac854))
+* **unity:** detect Unity scripting backend (Mono / IL2CPP) ([3ff476e](https://github.com/lobinuxsoft/tatu/commit/3ff476e61bd703d62e6a365b88fae9915b1f1cb5))
+* **unity:** detect Unity scripting backend (Mono / IL2CPP) ([f3f0234](https://github.com/lobinuxsoft/tatu/commit/f3f023485db0f90a1fd685a2e1f7bc08eec76b61))
+
+
+### Bug Fixes
+
+* **analysis:** stop treating hex byte literals and type casts as symbols ([3f1b304](https://github.com/lobinuxsoft/tatu/commit/3f1b304156505f077c9ca74f2c52a1b7e2311346))
+* **asm:** emit jmp/call far as CE's 14-byte absolute indirect ([db85c3d](https://github.com/lobinuxsoft/tatu/commit/db85c3d26b33548f76768f53593be89368387f0d))
+* **ci:** build artifacts from the workspace target dir ([431ca44](https://github.com/lobinuxsoft/tatu/commit/431ca445acea2b2862751ec7ccf11e493ea213f6))
+* **ci:** build artifacts from the workspace target dir ([51a4c40](https://github.com/lobinuxsoft/tatu/commit/51a4c40e2f14d591f66a286f61ecf8f7612577b3))
+* **ct_import:** fallback derive_exe to '{ Game : X.exe }' comment block ([3cfc369](https://github.com/lobinuxsoft/tatu/commit/3cfc369a55e5bc962f2abb405bc9841495817c46))
+* **engine:** default codecave alloc near the last AOB scan ([7512f79](https://github.com/lobinuxsoft/tatu/commit/7512f7925fd7d3d151192f385cd14b3e52d48ea2))
+* **import:** drop legacy JSON sidecar when removing a .ct ([4ab5bcf](https://github.com/lobinuxsoft/tatu/commit/4ab5bcffa5dfde778b017e845e499495a31a92cc))
+* **import:** drop legacy JSON sidecar when removing a .ct ([4638954](https://github.com/lobinuxsoft/tatu/commit/463895431d6c248e06913d3c966cc2e8adab1542))
+* make CE-AA cheat tables work natively against Proton games + flag framework-dependent cheats ([80763a4](https://github.com/lobinuxsoft/tatu/commit/80763a4bafa5aa68ad02a4dd182100ae66d1b8ea))
+* **parser:** support Mono descriptors, hex offsets, comment-safe headers ([4821ee7](https://github.com/lobinuxsoft/tatu/commit/4821ee71b35502c0d5deaae5267db3af88d70369))
+* **runtime:** make CE-AA cheat tables work against Proton games ([72fa0e4](https://github.com/lobinuxsoft/tatu/commit/72fa0e4ec3eceed0e2fdd23cea3c7f239bbad68a))
+* **unity:** detect modern Unity layouts (data.unity3d, runtime at game root) ([f4f2c8c](https://github.com/lobinuxsoft/tatu/commit/f4f2c8c9f8a01ad34a456da7756849ea54aef135))
+* **unity:** detect modern Unity layouts (data.unity3d, runtime at game root) ([fc694b7](https://github.com/lobinuxsoft/tatu/commit/fc694b7fcd06c4a269648dd0c1834ec8c826eba7))
+
+
+### Tests
+
+* **cheat-runtime:** table-driven AA regression suite ([f011adc](https://github.com/lobinuxsoft/tatu/commit/f011adc207453db712abf1d0c8c0f33fcc494f71))
+* **cheat-runtime:** table-driven AA regression suite (closes [#136](https://github.com/lobinuxsoft/tatu/issues/136)) ([335c5fd](https://github.com/lobinuxsoft/tatu/commit/335c5fd5052cf6582f0c00cad3381d1bbc3eeb83))
+
 ## [0.6.0](https://github.com/lobinuxsoft/tatu/compare/v0.5.0...v0.6.0) (2026-05-26)
 
 
