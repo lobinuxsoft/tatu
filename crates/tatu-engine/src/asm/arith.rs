@@ -1,4 +1,4 @@
-//! Arithmetic / comparison mnemonics: `cmp`, `add`, `sub`, `xor`.
+//! Arithmetic / comparison mnemonics: `cmp`, `test`, `add`, `sub`, `xor`.
 
 use std::collections::HashMap;
 
@@ -105,6 +105,99 @@ pub(super) fn emit_cmp(
         _ => {
             return Err(AsmError::Unsupported(format!(
                 "cmp {lhs_text}: 8/16-bit lhs register not supported yet"
+            )));
+        }
+    }
+    Ok(a.assemble(base)?)
+}
+
+/// `test <lhs>, <rhs>` — bitwise AND that sets flags but doesn't store the
+/// result. Same operand surface as `cmp` (register/memory/immediate), so we
+/// mirror the `emit_cmp` structure rather than re-deriving it. Tier-1
+/// addition driven by the FearLess audit: 100 lines / 287 scripts use
+/// `test reg, reg|imm` to gate conditional branches that the original game
+/// code sets up before the patched site.
+pub(super) fn emit_test(
+    rest: &str,
+    syms: &HashMap<String, u64>,
+    base: u64,
+) -> Result<Vec<u8>, AsmError> {
+    let (lhs_text, rhs_text) = split_two_operands(rest)?;
+    let mut a = CodeAssembler::new(64)?;
+
+    if let Some((size_opt, mem)) = try_parse_memory_operand(lhs_text, syms)? {
+        let size = match size_opt {
+            Some(s) => s,
+            None => parse_register(rhs_text)
+                .map(|r| match r {
+                    TypedReg::R64(_) => MemSize::Qword,
+                    TypedReg::R32(_) => MemSize::Dword,
+                    TypedReg::R16(_) => MemSize::Word,
+                    TypedReg::R8(_) => MemSize::Byte,
+                })
+                .ok_or_else(|| {
+                    AsmError::Unsupported(format!(
+                        "test {lhs_text}, {rhs_text:?}: cannot infer memory size — add a `qword/dword/word/byte ptr` prefix"
+                    ))
+                })?,
+        };
+        let sized = apply_size(size, mem);
+        if let Some(reg) = parse_register(rhs_text) {
+            match (size, reg) {
+                (MemSize::Qword, TypedReg::R64(r)) => a.test(sized, r)?,
+                (MemSize::Dword, TypedReg::R32(r)) => a.test(sized, r)?,
+                (MemSize::Word, TypedReg::R16(r)) => a.test(sized, r)?,
+                (MemSize::Byte, TypedReg::R8(r)) => a.test(sized, r)?,
+                _ => {
+                    return Err(AsmError::Unsupported(format!(
+                        "test {lhs_text}, {rhs_text:?}: register width mismatches memory size"
+                    )));
+                }
+            }
+        } else if let Some(imm) = parse_immediate(rhs_text, syms) {
+            match size {
+                MemSize::Byte => a.test(sized, (imm as i32) & 0xff)?,
+                MemSize::Word => a.test(sized, (imm as i32) & 0xffff)?,
+                MemSize::Dword => a.test(sized, imm as i32)?,
+                MemSize::Qword => a.test(sized, imm as i32)?,
+            }
+        } else {
+            return Err(AsmError::Unsupported(format!(
+                "test {lhs_text}, {rhs_text:?}: rhs must be a register or immediate"
+            )));
+        }
+        return Ok(a.assemble(base)?);
+    }
+
+    let lhs = parse_register(lhs_text).ok_or_else(|| {
+        AsmError::Unsupported(format!("test lhs {lhs_text:?}: not a register or memory"))
+    })?;
+    match lhs {
+        TypedReg::R64(l) => {
+            if let Some(TypedReg::R64(r)) = parse_register(rhs_text) {
+                a.test(l, r)?;
+            } else if let Some(imm) = parse_immediate(rhs_text, syms) {
+                a.test(l, imm as i32)?;
+            } else {
+                return Err(AsmError::Unsupported(format!(
+                    "test {lhs_text}, {rhs_text:?}: rhs must be a register or immediate"
+                )));
+            }
+        }
+        TypedReg::R32(l) => {
+            if let Some(TypedReg::R32(r)) = parse_register(rhs_text) {
+                a.test(l, r)?;
+            } else if let Some(imm) = parse_immediate(rhs_text, syms) {
+                a.test(l, imm as i32)?;
+            } else {
+                return Err(AsmError::Unsupported(format!(
+                    "test {lhs_text}, {rhs_text:?}: rhs must be a register or immediate"
+                )));
+            }
+        }
+        _ => {
+            return Err(AsmError::Unsupported(format!(
+                "test {lhs_text}: 8/16-bit lhs register not supported yet"
             )));
         }
     }
@@ -268,5 +361,52 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(bytes, vec![0x31, 0xC0]);
+    }
+
+    #[test]
+    fn test_reg_reg() {
+        // test rax, rbx → 48 85 D8 (test r/m64, r64).
+        let bytes = compile_line("test rax, rbx", &HashMap::new(), 0)
+            .unwrap()
+            .unwrap();
+        assert_eq!(bytes, vec![0x48, 0x85, 0xD8]);
+    }
+
+    #[test]
+    fn test_reg_imm() {
+        // test eax, 1 — common gating idiom before a conditional jump.
+        // iced may pick `F7 C0 imm32` (5+2 bytes) or the eax-special
+        // `A9 imm32` (5 bytes). Accept either; both compute the same AND.
+        let bytes = compile_line("test eax, 1", &HashMap::new(), 0)
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(
+                bytes.as_slice(),
+                [0xF7, 0xC0, 0x01, 0, 0, 0] | [0xA9, 0x01, 0, 0, 0]
+            ),
+            "unexpected test encoding: {bytes:02X?}"
+        );
+    }
+
+    #[test]
+    fn test_mem_imm_with_byte_ptr() {
+        // The dominant FearLess shape is `test byte ptr [symbol], imm` for
+        // flag-byte checks before a branch.
+        let syms = symtab(&[("flag", 0x12345678)]);
+        let bytes = compile_line("test byte ptr [flag], 1", &syms, 0)
+            .unwrap()
+            .unwrap();
+        assert_eq!(*bytes.last().unwrap(), 0x01, "imm trails the encoding");
+        assert!(
+            bytes.len() >= 6,
+            "test byte [disp32], imm8 should encode in 7 bytes, got {bytes:02X?}"
+        );
+    }
+
+    #[test]
+    fn nop_single_byte() {
+        let bytes = compile_line("nop", &HashMap::new(), 0).unwrap().unwrap();
+        assert_eq!(bytes, vec![0x90]);
     }
 }

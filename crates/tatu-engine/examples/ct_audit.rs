@@ -24,6 +24,7 @@ use tatu_engine::parser::{Statement, parse};
 
 const SUPPORTED_CALLS: &[&str] = &[
     "aobscanmodule",
+    "aobscan",
     "registersymbol",
     "unregistersymbol",
     "label",
@@ -167,6 +168,7 @@ fn tally(
             Statement::AobScanModule { .. } => {
                 *calls.entry("aobscanmodule".into()).or_insert(0) += 1
             }
+            Statement::AobScan { .. } => *calls.entry("aobscan".into()).or_insert(0) += 1,
             Statement::RegisterSymbol(_) => *calls.entry("registersymbol".into()).or_insert(0) += 1,
             Statement::UnregisterSymbol(_) => {
                 *calls.entry("unregistersymbol".into()).or_insert(0) += 1
@@ -176,13 +178,15 @@ fn tally(
             Statement::GlobalAlloc { .. } => *calls.entry("globalalloc".into()).or_insert(0) += 1,
             Statement::Dealloc(_) => *calls.entry("dealloc".into()).or_insert(0) += 1,
             Statement::Define { .. } => *calls.entry("define".into()).or_insert(0) += 1,
+            Statement::Reassemble(_) => *calls.entry("reassemble".into()).or_insert(0) += 1,
             Statement::Directive(d) => *directives.entry(d.clone()).or_insert(0) += 1,
             Statement::Raw(line) => {
                 if let Some(name) = call_name(line) {
                     *calls.entry(name).or_insert(0) += 1;
                 }
             }
-            Statement::LabelSite(_) | Statement::AbsoluteSite(_) => {}
+            Statement::LabelSite(_) | Statement::AbsoluteSite(_) | Statement::SymbolSite { .. } => {
+            }
         }
     }
 }

@@ -33,9 +33,19 @@
 //! - [`xml_walker`] — descent over `<CheatEntry>` nodes + projection to
 //!   [`crate::manifest::ManifestFeature`].
 //! - [`heuristics`] — header-vs-ornament / Lua-vs-AA / exe-recovery rules.
-//! - [`disk`] — directory traversal + idempotent on-disk writes.
+//!
+//! ### #134 — no more disk-side JSON cache
+//!
+//! Up to #163 the importer also persisted each converted manifest as a JSON
+//! sidecar under `trainers/<app_id>/`. The loader has since switched to
+//! parsing `.ct` files directly on every call (see
+//! [`crate::manifest::load_manifests_for`]), so the disk-writer helpers
+//! were removed: there is no longer a `.json` cache to keep in sync, and
+//! the round-trip degradation it caused (Lua bodies, comments and CE-only
+//! tweaks were thrown away) is gone. The single primitive callers still
+//! need is [`convert_ct_file_with_exe_hint`], used by both the loader and
+//! the import command (the latter for parse-time validation).
 
-mod disk;
 mod heuristics;
 mod xml_walker;
 
@@ -45,10 +55,8 @@ use std::path::{Path, PathBuf};
 
 use crate::manifest::Manifest;
 
-use self::heuristics::derive_exe;
+use self::heuristics::{derive_exe, derive_prereqs};
 use self::xml_walker::walk_entries;
-
-pub use self::disk::{auto_import_default_dirs, auto_import_for_app, import_dirs};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CtImportError {
@@ -68,27 +76,30 @@ pub enum CtImportError {
     Empty { path: PathBuf },
     #[error("table at {path} has cheats but no aobscanmodule line to recover the module name from")]
     NoExeBinding { path: PathBuf },
-    #[error("could not resolve config dir (XDG_CONFIG_HOME / HOME unset?)")]
-    NoConfigDir,
-    #[error("manifest serialisation failed: {0}")]
-    Serde(#[from] serde_json::Error),
-}
-
-#[derive(Debug, Default)]
-pub struct ImportReport {
-    /// Manifest files that were just written.
-    pub created: Vec<PathBuf>,
-    /// `.ct` files that already had a matching manifest on disk, so the
-    /// importer left them alone.
-    pub skipped: Vec<PathBuf>,
-    /// `.ct` files the importer tried to convert but failed on. The errors
-    /// surface here instead of aborting the whole pass so one bad table
-    /// doesn't block the rest of the user's library.
-    pub failed: Vec<(PathBuf, CtImportError)>,
 }
 
 /// Convert a single `.ct` file into an in-memory [`Manifest`].
+///
+/// Errors with `NoExeBinding` if neither the AA scripts (`aobscanmodule`,
+/// `{ Game : X.exe }` comment block) nor the caller supply an exe name.
+/// Use [`convert_ct_file_with_exe_hint`] from the Tauri import command
+/// where Steam already knows the installed game's exe.
 pub fn convert_ct_file(path: &Path) -> Result<Manifest, CtImportError> {
+    convert_ct_file_with_exe_hint(path, None)
+}
+
+/// Same as [`convert_ct_file`] but accepts a final-resort `exe_hint`.
+/// CE tables authored without an `aobscanmodule` line and without the
+/// `{ Game : X.exe }` template comment (notably Mono / minimalist
+/// FearLess uploads) can't infer the binding from their own contents.
+/// When the caller knows the game's exe via another channel (e.g.
+/// Steam's `appmanifest`), pass it here so the import still succeeds
+/// — the resulting manifest renders in the UI even if specific cheats
+/// later fail because the hard-coded addresses don't match.
+pub fn convert_ct_file_with_exe_hint(
+    path: &Path,
+    exe_hint: Option<&str>,
+) -> Result<Manifest, CtImportError> {
     let text = fs::read_to_string(path).map_err(|source| CtImportError::Io {
         path: path.to_path_buf(),
         source,
@@ -111,14 +122,24 @@ pub fn convert_ct_file(path: &Path) -> Result<Manifest, CtImportError> {
         });
     }
 
-    let exe = derive_exe(&features).ok_or_else(|| CtImportError::NoExeBinding {
-        path: path.to_path_buf(),
-    })?;
+    // A framework table binds its exe in the Lua header, not via aobscanmodule;
+    // fall back to that before the caller's hint.
+    let exe = derive_exe(&features)
+        .or_else(|| crate::framework::framework_target_exe(&text))
+        .or_else(|| exe_hint.map(str::to_owned))
+        .ok_or_else(|| CtImportError::NoExeBinding {
+            path: path.to_path_buf(),
+        })?;
+
+    let prereqs = derive_prereqs(&exe);
+    let framework = crate::framework::is_framework_table(&text);
 
     Ok(Manifest {
         exe,
         title: stem,
         features,
+        prereqs,
+        framework,
     })
 }
 

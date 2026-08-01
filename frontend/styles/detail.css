@@ -108,6 +108,12 @@
 .ce-tables-header { display: flex; align-items: center; gap: 0.5rem; font-family: var(--font-display); font-size: 0.72rem; font-weight: 700; text-transform: var(--display-transform); letter-spacing: var(--display-tracking); color: var(--fg-muted); margin-bottom: 0.4rem; }
 .ce-refresh-btn { margin-left: auto; background: transparent; color: var(--fg-muted); border: 1px solid var(--border); padding: 0.2rem 0.5rem; border-radius: var(--r-sm); font-family: var(--font-display); font-size: 0.65rem; cursor: pointer; transition: color var(--t-fast), border-color var(--t-fast); }
 .ce-refresh-btn:hover { color: var(--fg); border-color: var(--accent); }
+.ce-import-btn { margin-left: auto; background: var(--accent); color: var(--bg-panel); border: 1px solid var(--accent); padding: 0.2rem 0.6rem; border-radius: var(--r-sm); font-family: var(--font-display); font-size: 0.65rem; font-weight: 700; text-transform: var(--display-transform); letter-spacing: var(--display-tracking); cursor: pointer; transition: opacity var(--t-fast); }
+.ce-import-btn:hover:not(:disabled) { opacity: 0.85; }
+.ce-import-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+/* When both Import + Refresh sit in the same header, only Import owns
+   margin-left:auto (pushes right); Refresh follows immediately after. */
+.ce-import-btn + .ce-refresh-btn { margin-left: 0.4rem; }
 .ce-tables-list { list-style: none; padding: 0; margin: 0; }
 .ce-table-row { display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0; border-bottom: 1px solid var(--border-subtle); }
 .ce-table-info { flex: 1; min-width: 0; }
@@ -116,16 +122,51 @@
 .ce-open-btn { background: var(--accent); color: var(--bg-panel); border: none; padding: 0.35rem 0.7rem; border-radius: var(--r); font-family: var(--font-display); font-size: 0.7rem; font-weight: 700; text-transform: var(--display-transform); letter-spacing: var(--display-tracking); cursor: pointer; flex-shrink: 0; transition: opacity var(--t-fast); }
 .ce-open-btn:hover:not(:disabled) { opacity: 0.85; }
 .ce-open-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.ce-remove-btn { background: transparent; color: var(--fg-muted); border: 1px solid var(--border); padding: 0.25rem 0.5rem; border-radius: var(--r); font-size: 0.8rem; line-height: 1; cursor: pointer; flex-shrink: 0; margin-left: 0.3rem; transition: color var(--t-fast), border-color var(--t-fast), background var(--t-fast); }
+.ce-remove-btn:hover:not(:disabled) { color: #ff6c6c; border-color: #ff6c6c; background: rgba(255, 108, 108, 0.08); }
+.ce-remove-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .cheat-runtime-section { margin-bottom: 1rem; }
+/* #98 — runtime section dims when a prereq (REFramework) is missing. */
+.cheat-runtime-section[data-prereq-blocked="true"] .cheat-tree { opacity: 0.5; pointer-events: none; }
+.cheat-runtime-section[data-prereq-blocked="true"] .cheat-refresh-all { opacity: 0.5; pointer-events: none; }
+/* #98 — install button styling, sits inside the warn / err banner row. */
+.ce-prereq-install-btn { margin-left: 0.5rem; background: var(--accent); color: var(--bg-panel); border: 1px solid var(--accent); padding: 0.3rem 0.7rem; border-radius: var(--r); font-family: var(--font-display); font-size: 0.7rem; font-weight: 700; text-transform: var(--display-transform); letter-spacing: var(--display-tracking); cursor: pointer; transition: opacity var(--t-fast); }
+.ce-prereq-install-btn:hover:not(:disabled) { opacity: 0.85; }
+.ce-prereq-install-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 .cheat-runtime-header { display: flex; align-items: center; gap: 0.5rem; font-family: var(--font-display); font-size: 0.72rem; font-weight: 700; text-transform: var(--display-transform); letter-spacing: var(--display-tracking); color: var(--fg-muted); margin-bottom: 0.4rem; }
 .cheat-runtime-list { list-style: none; padding: 0; margin: 0; }
-.cheat-runtime-item { display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0; border-bottom: 1px solid var(--border-subtle); }
+.cheat-runtime-item { display: flex; align-items: center; flex-wrap: wrap; gap: 0.6rem; padding: 0.5rem 0; border-bottom: 1px solid var(--border-subtle); }
 .cheat-runtime-info { flex: 1; min-width: 0; }
+/* "Needs CE" rows: framework-dependent cheats that can't run natively. */
+.cheat-needs-ce { display: flex; align-items: center; gap: 0.4rem; flex-shrink: 0; }
+.cheat-needs-ce-badge { font-size: 0.62rem; color: var(--warning); border: 1px solid var(--warning-border, var(--border)); padding: 0.2rem 0.45rem; border-radius: var(--r); font-family: var(--font-display); font-weight: 700; white-space: nowrap; cursor: help; }
+.cheat-needs-ce-open { padding: 0.25rem 0.5rem; font-size: 0.62rem; }
+/* Persistent enable-failure reason, full-width under the row. */
+.cheat-runtime-error-msg { flex-basis: 100%; width: 100%; font-size: 0.65rem; color: var(--danger-strong, #d77); font-family: var(--font-display); }
 .cheat-runtime-name { font-size: 0.85rem; font-weight: 600; color: var(--fg); }
 .cheat-runtime-meta { font-size: 0.65rem; color: var(--fg-dim); margin-top: 0.15rem; font-family: var(--font-display); }
 .cheat-runtime-header-row { list-style: none; padding: 0.8rem 0 0.3rem; border-bottom: 1px solid var(--border-subtle); }
 .cheat-runtime-header-text { font-family: var(--font-display); font-size: 0.7rem; font-weight: 700; text-transform: var(--display-transform); letter-spacing: var(--display-tracking); color: var(--fg-muted); }
+
+/* CE-style hierarchical tree view (#133). Mirrors `<CheatEntries>` nesting
+   recovered from real .CT files — depth 5+ is common (Ender Magnolia,
+   Elden Ring). Indentation comes from natural <ul> nesting; expand state
+   is controlled by `data-expanded` on the header row. */
+.cheat-tree { list-style: none; padding: 0; margin: 0; }
+.cheat-tree-node { list-style: none; }
+.cheat-tree-children { list-style: none; padding-left: 1.1rem; margin: 0; border-left: 1px solid var(--border-subtle); }
+.cheat-tree-row { display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0; border-bottom: 1px solid var(--border-subtle); }
+.cheat-tree-header { cursor: default; }
+.cheat-tree-header[data-has-children="true"] { cursor: pointer; user-select: none; transition: background var(--t-fast); }
+.cheat-tree-header[data-has-children="true"]:hover { background: var(--bg-2); }
+.cheat-tree-header[data-expanded="false"] + .cheat-tree-children { display: none; }
+.cheat-tree-caret { display: inline-block; width: 0.9rem; flex-shrink: 0; text-align: center; font-size: 0.65rem; color: var(--fg-muted); }
+.cheat-tree-caret-empty { visibility: hidden; }
+.cheat-tree-header .cheat-tree-name { font-family: var(--font-display); font-size: 0.72rem; font-weight: 700; text-transform: var(--display-transform); letter-spacing: var(--display-tracking); color: var(--fg-muted); }
+.cheat-refresh-all { margin-left: auto; background: var(--bg-3); color: var(--fg); border: 1px solid var(--border); padding: 0.25rem 0.6rem; border-radius: var(--r); font-family: var(--font-display); font-size: 0.65rem; font-weight: 700; text-transform: var(--display-transform); letter-spacing: var(--display-tracking); cursor: pointer; transition: background var(--t-fast), border-color var(--t-fast); }
+.cheat-refresh-all:hover:not(:disabled) { background: var(--accent); color: var(--bg-panel); border-color: var(--accent); }
+.cheat-refresh-all:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* Orphan-hooks banner: appears at the top of the cheats panel when the
    tracker finds persisted hook records whose game PID is still alive. */

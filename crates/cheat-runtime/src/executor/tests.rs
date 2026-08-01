@@ -183,12 +183,13 @@ fn failed_statement_rolls_back_prior_writes() {
     let target_addr = victim.as_ptr() as u64 + 8;
 
     // First write zeros, then trigger an Unsupported asm line — must rollback.
-    // `imul rax, rbx, 4` is outside the Phase B subset.
+    // `fizzbuzz` is a truly fake mnemonic that will never be added, so
+    // this test stays robust as the supported set grows.
     let script_src = "[ENABLE]\n\
          registersymbol(victim)\n\
          victim:\n\
          db 00 00 00 00 00 00 00 00\n\
-         imul rax, rbx, 4\n\
+         fizzbuzz rax, rbx\n\
          [DISABLE]\n";
     let script = parse(script_src).unwrap();
 

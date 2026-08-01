@@ -4,6 +4,7 @@ members = [
     "src-tauri",
     "crates/cheat-runtime",
     "crates/ce-launcher",
+    "crates/cheat-mono-collector",
     "crates/tatu-engine",
     "crates/tatu-mem",
 ]

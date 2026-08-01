@@ -48,15 +48,19 @@ pub mod ct_import;
 pub mod debug;
 pub mod elfsym;
 pub mod executor;
+pub mod framework;
 pub mod freeze;
 pub mod linux_backend;
+pub mod lua;
 pub mod manifest;
 pub mod maps;
 pub mod memory;
 pub mod memory_access;
 pub mod memory_debug;
 pub mod migrate;
+pub mod mono_bridge;
 pub mod persisted_hook;
+pub mod prereqs;
 pub mod process;
 pub mod ptrace_helpers;
 pub mod regions;
@@ -65,11 +69,12 @@ pub mod symbol_table;
 pub mod thread_context;
 pub mod thread_control;
 pub mod threads;
+pub mod unity;
 
 // parser + asm live in tatu-engine since Phase 7A1 — re-exported
 // here as `cheat_runtime::parser` / `cheat_runtime::asm` for the
 // existing call sites (executor, ce-launcher, tests, the tracker).
-pub use tatu_engine::{asm, parser};
+pub use tatu_engine::{analysis, asm, parser};
 
 pub use alloc::{AllocError, alloc_remote, dealloc_remote};
 pub use asm::{AsmError, compile_line as compile_asm_line};
@@ -78,28 +83,31 @@ pub use chain::{
     AddrExpr, ChainError, Value, parse_addr_expr, read_chain, read_value, resolve_addr_expr,
     walk_chain, write_chain, write_value,
 };
-pub use ct_import::{
-    CtImportError, ImportReport, auto_import_default_dirs, auto_import_for_app, convert_ct_file,
-    import_dirs as ct_import_dirs,
-};
+pub use ct_import::{CtImportError, convert_ct_file, convert_ct_file_with_exe_hint};
 pub use debug::{BpSize, BpType, DebugError, DebugEvent, DebugEventKind, Debugger};
 pub use elfsym::{ElfSymError, find_libc_symbol, find_module_base, find_module_symbol};
 pub use executor::{ActiveCheat, Engine, ExecError};
+pub use framework::{
+    FrameworkError, FrameworkRuntime, FrameworkTable, MemRec, framework_target_exe,
+    is_framework_table, is_lua_cheat, lua_enable_disable, parse_framework_table,
+};
 pub use freeze::{FreezeError, FreezeHandle, FreezeKey, FreezeRegistry, FreezeTarget};
 pub use manifest::{
-    FeatureKind, Manifest, ManifestError, ManifestFeature, VType, ValueSpec, load_manifests_for,
-    manifests_dir_for,
+    FeatureKind, Manifest, ManifestError, ManifestFeature, Prereq, RecursiveFeatureIter, VType,
+    ValueSpec, ct_tables_dir_for, load_manifests_for, load_manifests_from_roots, manifests_dir_for,
 };
 pub use maps::{MemoryRegion, Perms, parse_maps, read_maps};
 pub use memory::{RuntimeError, read_bytes, write_bytes};
 pub use memory_debug::{read_via_ptrace, write_via_ptrace};
 pub use migrate::{MigrateError, MigrateReport, migrate_default_dirs, migrate_dirs};
+pub use mono_bridge::{MonoClient, MonoError, is_mono_symbol};
 pub use nix::unistd::Pid;
 pub use parser::{ParseError as ScriptParseError, Script, Statement, parse as parse_script};
 pub use persisted_hook::{
     LoadAllReport as PersistedLoadAllReport, PersistError, PersistedAlloc, PersistedHook,
     PersistedWrite, load_all as load_all_persisted_hooks, persist_dir,
 };
+pub use prereqs::{PrereqStatus, detect_reframework};
 pub use process::{find_pid_by_exe, find_pids_by_exe};
 pub use ptrace_helpers::{
     PtraceError, PtraceResult, attach_and_wait, install_sigchld_handler, safe_ptrace,
@@ -119,3 +127,4 @@ pub use thread_context::{
     write_debug_register,
 };
 pub use thread_control::{find_paused_thread, resume_thread, suspend_count, suspend_thread};
+pub use unity::{UnityBackend, detect_unity_backend, find_mono_runtime};

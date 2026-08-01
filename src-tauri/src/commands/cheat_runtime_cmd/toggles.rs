@@ -4,16 +4,33 @@
 //! a normal Linux process from the kernel's POV; ptrace +
 //! `process_vm_readv/writev` are the engine. Wine-side bridge dropped.
 
+use std::path::PathBuf;
 use std::sync::Mutex;
 
+use std::collections::HashSet;
+
 use cheat_runtime::{
-    Engine, FeatureKind, FreezeRegistry, PersistedHook, find_pid_by_exe, load_manifests_for,
-    parse_script,
+    Engine, FeatureKind, FreezeRegistry, MemRec, MonoClient, PersistedHook, Script, UnityBackend,
+    analysis, ct_tables_dir_for, detect_unity_backend, find_pid_by_exe, is_mono_symbol,
+    load_manifests_for, lua_enable_disable, parse_script,
 };
 use tauri::State;
 
-use super::{ActiveCheatEntry, ActiveCheats, purge_stale_cheats};
+use super::{ActiveCheatEntry, ActiveCheats, FrameworkActor, purge_stale_cheats};
 use crate::state::AppState;
+use crate::steam::detect_game_exe;
+use crate::steam::exe::find_install_path;
+
+/// A `{$lua}` framework cheat resolved from a manifest: where it lives and what
+/// to run.
+struct FrameworkCheat {
+    exe: String,
+    /// The `.CT` whose embedded framework bootstraps this cheat.
+    ct_path: PathBuf,
+    enable_src: String,
+    disable_src: String,
+    memrec: MemRec,
+}
 
 #[tauri::command]
 pub fn cheat_runtime_enable(
@@ -22,6 +39,7 @@ pub fn cheat_runtime_enable(
     _state: State<'_, Mutex<AppState>>,
     active: State<'_, ActiveCheats>,
     freezes: State<'_, FreezeRegistry>,
+    framework: State<'_, FrameworkActor>,
 ) -> Result<(), String> {
     purge_stale_cheats(&active, Some(&freezes))?;
     {
@@ -31,6 +49,24 @@ pub fn cheat_runtime_enable(
         if guard.contains_key(&feature_uuid) {
             return Ok(());
         }
+    }
+
+    // Framework `{$lua}` cheats run their Lua block in the table's bootstrapped
+    // runtime (owned by the actor thread), not the AA executor.
+    if let Some(cheat) = locate_framework_cheat(&app_id, &feature_uuid)? {
+        framework.toggle(
+            app_id,
+            cheat.exe.clone(),
+            cheat.ct_path,
+            cheat.memrec,
+            cheat.enable_src,
+            true,
+        )?;
+        let mut guard = active
+            .lock()
+            .map_err(|e| format!("active registry poisoned: {e}"))?;
+        guard.insert(feature_uuid, ActiveCheatEntry::Framework { exe: cheat.exe });
+        return Ok(());
     }
 
     let (exe, script_src) = locate_feature_script(&app_id, &feature_uuid).map_err(|e| {
@@ -47,9 +83,24 @@ pub fn cheat_runtime_enable(
         "[enable {feature_uuid}] linux runtime, pid {}",
         pid.as_raw()
     );
-    let script = parse_script(&script_src).map_err(|e| format!("parse: {e}"))?;
+    let script = parse_script(&script_src).map_err(|e| {
+        let msg = format!("parse: {e}");
+        eprintln!("[enable {feature_uuid}] {msg}");
+        msg
+    })?;
     let mut engine = Engine::new(pid);
-    let cheat = engine.enable(&script).map_err(|e| format!("enable: {e}"))?;
+    // Unity Mono cheats reference `Class:Method` symbols the AA script never
+    // defines; resolve them through the in-game collector and bind them before
+    // the executor runs (it then treats them like any other symbol).
+    bind_mono_symbols(&mut engine, &app_id, &script).map_err(|e| {
+        eprintln!("[enable {feature_uuid}] {e}");
+        e
+    })?;
+    let cheat = engine.enable(&script).map_err(|e| {
+        let msg = format!("enable: {e}");
+        eprintln!("[enable {feature_uuid}] {msg}");
+        msg
+    })?;
     eprintln!(
         "[enable {feature_uuid}] success, symbols={:?}",
         cheat.symbols().keys().collect::<Vec<_>>()
@@ -74,6 +125,50 @@ pub fn cheat_runtime_enable(
     Ok(())
 }
 
+/// Resolve a Unity Mono game's `Class:Method` symbols through the in-game
+/// collector and bind them into `engine` before the script runs. The executor
+/// then resolves `Pistol:Shoot+5f` like any other `symbol+offset` from its
+/// table — it never has to know about Mono.
+///
+/// No-op for non-Mono games or scripts with no unresolved Mono symbols. Returns
+/// an error only when the script *needs* Mono symbols but the collector isn't
+/// reachable — the user must install the collector and relaunch the game.
+fn bind_mono_symbols(engine: &mut Engine, app_id: &str, script: &Script) -> Result<(), String> {
+    let Ok(game_dir) = find_install_path(app_id) else {
+        // Can't locate the install; let the executor surface any unresolved
+        // symbols itself rather than guessing.
+        return Ok(());
+    };
+    if detect_unity_backend(&game_dir) != UnityBackend::Mono {
+        return Ok(());
+    }
+
+    let mono_syms: Vec<String> = analysis::unresolved_symbols(script, &HashSet::new())
+        .into_iter()
+        .filter(|s| is_mono_symbol(s))
+        .collect();
+    if mono_syms.is_empty() {
+        return Ok(());
+    }
+
+    let mut client = MonoClient::connect().map_err(|e| {
+        format!(
+            "this cheat needs Mono symbols ({}), but the collector isn't running: {e}. \
+             Install the Mono collector and relaunch the game.",
+            mono_syms.join(", ")
+        )
+    })?;
+    for sym in mono_syms {
+        let addr = client
+            .resolve(&sym)
+            .map_err(|e| format!("Mono symbol {sym:?} did not resolve: {e}"))?;
+        eprintln!("[enable] mono resolve {sym} -> {addr:#x}");
+        engine.bind_symbol(sym, addr);
+    }
+    let _ = client.terminate();
+    Ok(())
+}
+
 /// Minimal ISO-8601 timestamp using only std. Avoids pulling chrono just
 /// for this one cosmetic field — recovery never parses it, only the user
 /// reads it from the on-disk JSON if they go spelunking.
@@ -91,6 +186,7 @@ pub fn cheat_runtime_disable(
     app_id: String,
     feature_uuid: String,
     active: State<'_, ActiveCheats>,
+    framework: State<'_, FrameworkActor>,
 ) -> Result<(), String> {
     let entry = {
         let mut guard = active
@@ -100,6 +196,20 @@ pub fn cheat_runtime_disable(
     };
     let result: Result<(), String> = match entry {
         Some(ActiveCheatEntry::Linux(c)) => c.disable().map_err(|e| format!("disable: {e}")),
+        Some(ActiveCheatEntry::Framework { exe }) => {
+            // Run the cheat's [DISABLE] block in the table's runtime.
+            match locate_framework_cheat(&app_id, &feature_uuid)? {
+                Some(cheat) => framework.toggle(
+                    app_id.clone(),
+                    exe,
+                    cheat.ct_path,
+                    cheat.memrec,
+                    cheat.disable_src,
+                    false,
+                ),
+                None => Ok(()),
+            }
+        }
         None => Ok(()),
     };
     // Whether the disable succeeded or not, the on-disk record is
@@ -121,26 +231,72 @@ pub fn cheat_runtime_disable(
     result
 }
 
-pub(super) fn locate_feature_script(app_id: &str, uuid: &str) -> Result<(String, String), String> {
-    let manifests = load_manifests_for(app_id).map_err(|e| e.to_string())?;
-    for m in manifests {
-        for f in m.features {
-            if f.uuid != uuid {
-                continue;
-            }
-            return match (f.kind, f.script) {
-                (FeatureKind::Header, _) => Err(format!(
-                    "feature {uuid:?} is a Header (visual-only) — not toggleable"
-                )),
-                (FeatureKind::Value, _) => Err(format!(
-                    "feature {uuid:?} is a Value — use cheat_runtime_value_read / write / freeze"
-                )),
-                (FeatureKind::Toggle, Some(script)) => Ok((m.exe, script)),
-                (FeatureKind::Toggle, None) => Err(format!(
-                    "feature {uuid:?} is a Toggle but has no script — the manifest is malformed"
-                )),
-            };
+/// Resolve a `{$lua}` framework cheat by UUID, or `None` when the feature isn't
+/// a Lua cheat of a framework table (the caller then falls through to the
+/// Auto-Assembler path). `memrec.id` is recovered from the UUID's trailing
+/// `<CheatEntry>` id, `description` from the feature name — the two fields a
+/// Manifold cheat block reads.
+fn locate_framework_cheat(app_id: &str, uuid: &str) -> Result<Option<FrameworkCheat>, String> {
+    let exe_hint = detect_game_exe(app_id).ok();
+    let manifests = load_manifests_for(app_id, exe_hint.as_deref()).map_err(|e| e.to_string())?;
+    for m in &manifests {
+        if !m.framework {
+            continue;
         }
+        let Some(f) = m.features_recursive().find(|f| f.uuid == uuid) else {
+            continue;
+        };
+        if !f.lua {
+            return Ok(None); // a plain AA cheat living in a framework table
+        }
+        let script = f
+            .script
+            .as_ref()
+            .ok_or_else(|| format!("framework cheat {uuid:?} has no script"))?;
+        let (enable_src, disable_src) = lua_enable_disable(script);
+        let id = uuid
+            .rsplit_once('-')
+            .and_then(|(_, n)| n.parse::<i64>().ok())
+            .unwrap_or(0);
+        let ct_path = ct_tables_dir_for(app_id)
+            .map_err(|e| e.to_string())?
+            .join(format!("{}.ct", m.title));
+        return Ok(Some(FrameworkCheat {
+            exe: m.exe.clone(),
+            ct_path,
+            enable_src,
+            disable_src,
+            memrec: MemRec {
+                id,
+                description: f.name.clone(),
+            },
+        }));
+    }
+    Ok(None)
+}
+
+pub(super) fn locate_feature_script(app_id: &str, uuid: &str) -> Result<(String, String), String> {
+    let exe_hint = detect_game_exe(app_id).ok();
+    let manifests = load_manifests_for(app_id, exe_hint.as_deref()).map_err(|e| e.to_string())?;
+    for m in manifests {
+        // features_recursive walks Header → child Toggle subtrees so a UUID
+        // buried 5 levels deep (real-world CE table shape, see #133 audit)
+        // still resolves to its owning manifest's exe + script.
+        let Some(f) = m.features_recursive().find(|f| f.uuid == uuid) else {
+            continue;
+        };
+        return match (f.kind, f.script.as_ref()) {
+            (FeatureKind::Header, _) => Err(format!(
+                "feature {uuid:?} is a Header (visual-only) — not toggleable"
+            )),
+            (FeatureKind::Value, _) => Err(format!(
+                "feature {uuid:?} is a Value — use cheat_runtime_value_read / write / freeze"
+            )),
+            (FeatureKind::Toggle, Some(script)) => Ok((m.exe.clone(), script.clone())),
+            (FeatureKind::Toggle, None) => Err(format!(
+                "feature {uuid:?} is a Toggle but has no script — the manifest is malformed"
+            )),
+        };
     }
     Err(format!("feature {uuid} not found for app {app_id}"))
 }

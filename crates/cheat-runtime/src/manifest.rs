@@ -28,11 +28,13 @@
 //! the feature→script binding, which is documented in personal memory as a
 //! still-open problem.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
 const MANIFEST_SUBDIR: &str = "backlog-tracker/trainers";
+const CT_SUBDIR: &str = "backlog-tracker/cheat-tables";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Manifest {
@@ -40,6 +42,40 @@ pub struct Manifest {
     #[serde(default)]
     pub title: String,
     pub features: Vec<ManifestFeature>,
+    /// Per-game prerequisites the runtime must satisfy before any feature in
+    /// this manifest can be enabled. Populated by the CT importer when it
+    /// recognises the game family (e.g. RE Engine exes get a
+    /// [`Prereq::Reframework`] auto-attached — see #98). Empty for the
+    /// common case; the UI hides the prereq banner when the vec is empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub prereqs: Vec<Prereq>,
+    /// `true` when this table is driven by an embedded Lua framework
+    /// (Manifold-style): its `<LuaScript>` bootstraps modules from `<Files>`,
+    /// and its toggles are `{$lua}` cheats ([`ManifestFeature::lua`]) run
+    /// through [`crate::FrameworkRuntime`] rather than the AA executor.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub framework: bool,
+}
+
+/// serde `skip_serializing_if` helper for `bool` fields defaulting to `false`.
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
+/// External dependency the runtime needs in place before its scripts can
+/// run safely. Tagged enum so future variants (EAC bypass, Denuvo offline
+/// patches, BepInEx for IL2CPP Mono games, …) can join without breaking
+/// existing manifests.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Prereq {
+    /// praydog's REFramework `dinput8.dll` proxy — required by every RE
+    /// Engine game (RE2/3/4, MHW, DD2, SF6, PRAGMATA, …) to neutralise
+    /// Capcom Anti-Tamper's periodic page-integrity scans + anti-debug
+    /// syscalls. Without it, AOB scans + trampolines crash the game within
+    /// seconds. The installer side lives in `tatu-tracker::prereqs` (the
+    /// runtime crate is filesystem-free for portability).
+    Reframework,
 }
 
 /// Visual / behavioural category of a [`ManifestFeature`].
@@ -137,6 +173,22 @@ pub struct ManifestFeature {
     /// Toggle and Header.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value: Option<ValueSpec>,
+    /// `true` when [`Self::script`] is a `{$lua}` framework cheat rather than
+    /// an Auto-Assembler script. Such toggles run through
+    /// [`crate::FrameworkRuntime`] (the table's bootstrapped Lua), not the AA
+    /// executor. Only set on [`FeatureKind::Toggle`] of a [`Manifest`] with
+    /// `framework == true`.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub lua: bool,
+    /// Nested children. CE tables routinely group cheats under
+    /// [`FeatureKind::Header`] entries, sometimes arbitrarily deep — the
+    /// `ender_magnolia_v11.ct` import exposes 5 levels, `elden_ring`
+    /// tables go up to 7. The UI renders this as a collapsible tree.
+    ///
+    /// Flat manifests (no nesting) deserialise with `children = []` and
+    /// the UI still works — the field is optional in JSON.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub children: Vec<ManifestFeature>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -153,6 +205,46 @@ pub enum ManifestError {
     NoConfigDir,
 }
 
+impl ManifestFeature {
+    /// Depth-first iterator over `self` + every descendant in
+    /// `self.children`. Use this from any code that wants to find a
+    /// feature by UUID without caring about the tree structure
+    /// (`cheat_runtime_enable`, `locate_feature_script`,
+    /// `locate_value_feature`).
+    pub fn iter_recursive(&self) -> RecursiveFeatureIter<'_> {
+        RecursiveFeatureIter { stack: vec![self] }
+    }
+}
+
+impl Manifest {
+    /// Depth-first iterator over every feature in every subtree of this
+    /// manifest. Equivalent to chaining `iter_recursive` over each
+    /// top-level feature.
+    pub fn features_recursive(&self) -> impl Iterator<Item = &ManifestFeature> {
+        self.features.iter().flat_map(|f| f.iter_recursive())
+    }
+}
+
+/// Depth-first iterator returned by [`ManifestFeature::iter_recursive`].
+/// Yields the root first, then descends into each child's subtree in order.
+pub struct RecursiveFeatureIter<'a> {
+    stack: Vec<&'a ManifestFeature>,
+}
+
+impl<'a> Iterator for RecursiveFeatureIter<'a> {
+    type Item = &'a ManifestFeature;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let node = self.stack.pop()?;
+        // Push children in reverse so the leftmost child is visited
+        // first (LIFO stack flips order).
+        for child in node.children.iter().rev() {
+            self.stack.push(child);
+        }
+        Some(node)
+    }
+}
+
 pub fn manifests_dir_for(app_id: &str) -> Result<PathBuf, ManifestError> {
     Ok(dirs::config_dir()
         .ok_or(ManifestError::NoConfigDir)?
@@ -160,26 +252,107 @@ pub fn manifests_dir_for(app_id: &str) -> Result<PathBuf, ManifestError> {
         .join(app_id))
 }
 
-/// Load every `*.json` file under `$XDG_CONFIG_HOME/backlog-tracker/trainers/<app_id>/`.
+/// Resolve `$XDG_CONFIG_HOME/backlog-tracker/cheat-tables/<app_id>/`. Pre-#134
+/// this lived in `ct_import::disk`; the loader now consumes the `.ct` files
+/// directly so the dir helper moves next to its primary caller.
+pub fn ct_tables_dir_for(app_id: &str) -> Result<PathBuf, ManifestError> {
+    Ok(dirs::config_dir()
+        .ok_or(ManifestError::NoConfigDir)?
+        .join(CT_SUBDIR)
+        .join(app_id))
+}
+
+/// Load every per-game manifest, parsing `.ct` source files directly.
 ///
-/// Missing directory is not an error — returns an empty vec, so a UI can call
-/// this on a game with no manifests and render an empty state cleanly.
-pub fn load_manifests_for(app_id: &str) -> Result<Vec<Manifest>, ManifestError> {
-    let dir = manifests_dir_for(app_id)?;
-    if !dir.is_dir() {
-        return Ok(Vec::new());
-    }
+/// Order of precedence (#134 — JSON intermediate dropped as canonical):
+///
+/// 1. `cheat-tables/<app_id>/*.ct` — primary source. Each `.ct` is parsed +
+///    converted via [`crate::ct_import::convert_ct_file_with_exe_hint`] on
+///    every call. Per-file conversion failures are logged to stderr and
+///    skipped so one malformed table doesn't blank the user's library.
+/// 2. `trainers/<app_id>/*.json` — legacy fallback for stems with no
+///    matching `.ct` (e.g. the synthetic `legacy.json` produced by the
+///    cheat-core migrator, or manifests authored by hand). A `.ct` of the
+///    same stem always wins.
+///
+/// `exe_hint` is forwarded to the importer for tables that lack both an
+/// `aobscanmodule(_, exe, _)` line and a `{ Game : X.exe }` template
+/// comment (notably hand-rolled Mono / Unity tables). Pass
+/// `Some(detect_game_exe(app_id).ok())` from the Tauri layer — `None` is
+/// fine when the caller has no Steam binding available and the table is
+/// expected to carry its own exe info.
+///
+/// Missing directories are not errors — an empty vec is returned so a UI
+/// can call this on a game with no tables and render an empty state.
+pub fn load_manifests_for(
+    app_id: &str,
+    exe_hint: Option<&str>,
+) -> Result<Vec<Manifest>, ManifestError> {
+    let ct_dir = ct_tables_dir_for(app_id)?;
+    let legacy_dir = manifests_dir_for(app_id)?;
+    load_manifests_from_roots(&ct_dir, &legacy_dir, exe_hint)
+}
+
+/// Test-friendly variant of [`load_manifests_for`] that takes the two
+/// source directories explicitly. Lets the unit tests build a self-
+/// contained tree under `TempDir` without poisoning the process-wide
+/// `XDG_CONFIG_HOME`. Same semantics as the public entry point: `.ct`
+/// primary, `.json` legacy, dedupe by file stem, sort by title.
+pub fn load_manifests_from_roots(
+    ct_dir: &Path,
+    legacy_dir: &Path,
+    exe_hint: Option<&str>,
+) -> Result<Vec<Manifest>, ManifestError> {
     let mut out = Vec::new();
-    for entry in std::fs::read_dir(&dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if path
-            .extension()
-            .is_some_and(|e| e.eq_ignore_ascii_case("json"))
-        {
+    let mut seen_stems: HashSet<String> = HashSet::new();
+
+    if ct_dir.is_dir() {
+        for entry in std::fs::read_dir(ct_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if !path
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("ct"))
+            {
+                continue;
+            }
+            let stem = match path.file_stem() {
+                Some(s) => s.to_string_lossy().into_owned(),
+                None => continue,
+            };
+            match crate::ct_import::convert_ct_file_with_exe_hint(&path, exe_hint) {
+                Ok(manifest) => {
+                    seen_stems.insert(stem);
+                    out.push(manifest);
+                }
+                Err(e) => {
+                    eprintln!("[cheat-runtime load] skipping {}: {e}", path.display());
+                }
+            }
+        }
+    }
+
+    if legacy_dir.is_dir() {
+        for entry in std::fs::read_dir(legacy_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if !path
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("json"))
+            {
+                continue;
+            }
+            let stem = match path.file_stem() {
+                Some(s) => s.to_string_lossy().into_owned(),
+                None => continue,
+            };
+            if seen_stems.contains(&stem) {
+                continue;
+            }
             out.push(load_one(&path)?);
         }
     }
+
     out.sort_by_key(|m| m.title.to_lowercase());
     Ok(out)
 }
@@ -249,6 +422,8 @@ mod tests {
                     kind: FeatureKind::Toggle,
                     script: Some("[ENABLE]\n[DISABLE]\n".into()),
                     value: None,
+                    lua: false,
+                    children: Vec::new(),
                 },
                 ManifestFeature {
                     uuid: "h".into(),
@@ -257,6 +432,8 @@ mod tests {
                     kind: FeatureKind::Header,
                     script: None,
                     value: None,
+                    lua: false,
+                    children: Vec::new(),
                 },
                 ManifestFeature {
                     uuid: "v".into(),
@@ -269,8 +446,12 @@ mod tests {
                         offsets: vec![0x13C, 0x8B8, 0x2D0],
                         vtype: VType::U32,
                     }),
+                    lua: false,
+                    children: Vec::new(),
                 },
             ],
+            prereqs: Vec::new(),
+            framework: false,
         };
         let text = serde_json::to_string(&m).unwrap();
         let back: Manifest = serde_json::from_str(&text).unwrap();
@@ -310,6 +491,100 @@ mod tests {
         assert_eq!(VType::F64.size_bytes(), 8);
         assert!(VType::F32.is_float() && VType::F64.is_float());
         assert!(!VType::U32.is_float() && !VType::I64.is_float());
+    }
+
+    #[test]
+    fn nested_children_round_trip_preserves_tree() {
+        // Mirrors the real-world CE shape recovered from
+        // `ender_magnolia_v11.ct` (depth 5) and `elden_ring` tables
+        // (depth 7): a Header parent owns child Toggles + grandchildren.
+        let leaf = ManifestFeature {
+            uuid: "leaf".into(),
+            name: "God Mode".into(),
+            category: None,
+            kind: FeatureKind::Toggle,
+            script: Some("[ENABLE]\n[DISABLE]\n".into()),
+            value: None,
+            lua: false,
+            children: Vec::new(),
+        };
+        let sub_header = ManifestFeature {
+            uuid: "sub".into(),
+            name: "Combat".into(),
+            category: None,
+            kind: FeatureKind::Header,
+            script: None,
+            value: None,
+            lua: false,
+            children: vec![leaf.clone()],
+        };
+        let m = Manifest {
+            exe: "Game.exe".into(),
+            title: "Nested".into(),
+            features: vec![ManifestFeature {
+                uuid: "root".into(),
+                name: "Player".into(),
+                category: None,
+                kind: FeatureKind::Header,
+                script: None,
+                value: None,
+                lua: false,
+                children: vec![sub_header],
+            }],
+            prereqs: Vec::new(),
+            framework: false,
+        };
+        let text = serde_json::to_string(&m).unwrap();
+        let back: Manifest = serde_json::from_str(&text).unwrap();
+        assert_eq!(m, back);
+        // Tree shape preserved at depth 3.
+        assert_eq!(back.features[0].children[0].children[0].uuid, "leaf");
+    }
+
+    #[test]
+    fn flat_manifest_without_children_field_still_loads() {
+        // Manifests written before #133 don't have a `children` array.
+        // `#[serde(default)]` must populate it as empty so older files
+        // on disk continue to work without an out-of-band migration.
+        let m: Manifest = serde_json::from_str(
+            r#"{
+                "exe": "Game.exe",
+                "features": [
+                    {"uuid":"u","name":"God Mode","script":"[ENABLE]\n[DISABLE]\n"}
+                ]
+            }"#,
+        )
+        .unwrap();
+        assert!(m.features[0].children.is_empty());
+    }
+
+    #[test]
+    fn empty_children_omitted_in_serialised_output() {
+        // skip_serializing_if = "Vec::is_empty" keeps the JSON tidy for
+        // the 99% of features that don't have children. Without this,
+        // every flat-manifest dump would gain a noisy `"children": []`.
+        let m = Manifest {
+            exe: "G".into(),
+            title: "T".into(),
+            features: vec![ManifestFeature {
+                uuid: "u".into(),
+                name: "n".into(),
+                category: None,
+                kind: FeatureKind::Toggle,
+                script: Some("[ENABLE]\n[DISABLE]\n".into()),
+                value: None,
+                lua: false,
+                children: Vec::new(),
+            }],
+            prereqs: Vec::new(),
+            framework: false,
+        };
+        let json = serde_json::to_string(&m).unwrap();
+        assert!(!json.contains("\"children\""));
+        // Same omission guarantee for prereqs — the 99% of manifests
+        // without any RE Engine / Mono / etc. dependency should serialise
+        // clean. See #98 (Prereq enum) for the schema.
+        assert!(!json.contains("\"prereqs\""));
     }
 
     #[test]
@@ -379,5 +654,132 @@ mod tests {
             ManifestError::Json { path, .. } => assert_eq!(path, bad),
             other => panic!("unexpected error: {other:?}"),
         }
+    }
+
+    const BASIC_CT: &str = include_str!("../tests/fixtures/ct/01_basic_toggle.ct");
+
+    #[test]
+    fn loads_ct_directly_when_no_legacy_json_present() {
+        let tmp = TempDir::new().unwrap();
+        let ct_dir = tmp.path().join("ct");
+        let json_dir = tmp.path().join("json");
+        std::fs::create_dir_all(&ct_dir).unwrap();
+
+        std::fs::write(ct_dir.join("alpha.ct"), BASIC_CT).unwrap();
+
+        let manifests = load_manifests_from_roots(&ct_dir, &json_dir, None).unwrap();
+        assert_eq!(manifests.len(), 1);
+        assert_eq!(manifests[0].title, "alpha");
+        // The fixture's aobscanmodule line pins fixture.exe.
+        assert_eq!(manifests[0].exe, "fixture.exe");
+        assert_eq!(manifests[0].features.len(), 1);
+    }
+
+    #[test]
+    fn ct_takes_precedence_over_matching_legacy_json() {
+        // Dedupe is by file stem. A user that imported `mytable.ct` once
+        // (back when imports also wrote `mytable.json`) and then re-edited
+        // the `.ct` upstream should see the fresh `.ct` parse, not the
+        // stale JSON snapshot.
+        let tmp = TempDir::new().unwrap();
+        let ct_dir = tmp.path().join("ct");
+        let json_dir = tmp.path().join("json");
+        std::fs::create_dir_all(&ct_dir).unwrap();
+        std::fs::create_dir_all(&json_dir).unwrap();
+
+        std::fs::write(ct_dir.join("alpha.ct"), BASIC_CT).unwrap();
+        std::fs::write(
+            json_dir.join("alpha.json"),
+            r#"{"exe":"stale.exe","title":"Stale","features":[]}"#,
+        )
+        .unwrap();
+
+        let manifests = load_manifests_from_roots(&ct_dir, &json_dir, None).unwrap();
+        assert_eq!(manifests.len(), 1);
+        assert_eq!(manifests[0].title, "alpha");
+        assert_eq!(manifests[0].exe, "fixture.exe");
+    }
+
+    #[test]
+    fn legacy_json_loads_when_no_matching_ct() {
+        // The cheat-core migrator writes synthetic `legacy.json` manifests
+        // with no `.ct` companion — those must still surface. Likewise any
+        // hand-curated manifest the user dropped into trainers/ pre-#134.
+        let tmp = TempDir::new().unwrap();
+        let ct_dir = tmp.path().join("ct");
+        let json_dir = tmp.path().join("json");
+        std::fs::create_dir_all(&json_dir).unwrap();
+
+        std::fs::write(
+            json_dir.join("legacy.json"),
+            r#"{"exe":"old.exe","title":"Old","features":[]}"#,
+        )
+        .unwrap();
+
+        let manifests = load_manifests_from_roots(&ct_dir, &json_dir, None).unwrap();
+        assert_eq!(manifests.len(), 1);
+        assert_eq!(manifests[0].title, "Old");
+    }
+
+    #[test]
+    fn malformed_ct_is_skipped_not_fatal() {
+        // A single broken `.ct` must not blank the library — the loader
+        // logs and moves on so a typo in one table doesn't hide the rest.
+        let tmp = TempDir::new().unwrap();
+        let ct_dir = tmp.path().join("ct");
+        let json_dir = tmp.path().join("json");
+        std::fs::create_dir_all(&ct_dir).unwrap();
+
+        std::fs::write(ct_dir.join("good.ct"), BASIC_CT).unwrap();
+        std::fs::write(ct_dir.join("bad.ct"), "<not really xml").unwrap();
+
+        let manifests = load_manifests_from_roots(&ct_dir, &json_dir, None).unwrap();
+        assert_eq!(manifests.len(), 1);
+        assert_eq!(manifests[0].title, "good");
+    }
+
+    #[test]
+    fn manifest_without_prereqs_field_defaults_to_empty() {
+        // Existing on-disk JSON manifests (every legacy manifest written
+        // before #98) lack the `prereqs` array. `#[serde(default)]` must
+        // populate it as empty so they keep loading without a one-shot
+        // migration. Same contract as `children` field (post-#133).
+        let m: Manifest = serde_json::from_str(
+            r#"{
+                "exe": "Game.exe",
+                "features": [{"uuid":"u","name":"X","script":"[ENABLE]\n[DISABLE]\n"}]
+            }"#,
+        )
+        .unwrap();
+        assert!(m.prereqs.is_empty());
+    }
+
+    #[test]
+    fn reframework_prereq_round_trips_with_kind_tag() {
+        // External `kind` tag (`#[serde(tag = "kind")]`) means the JSON
+        // shape is `{"kind":"reframework"}`, not a bare string. Future
+        // variants (BepInEx, EAC bypass, …) extend the same envelope.
+        let json = r#"{
+            "exe": "PRAGMATA.exe",
+            "title": "Pragmata",
+            "features": [],
+            "prereqs": [{"kind":"reframework"}]
+        }"#;
+        let m: Manifest = serde_json::from_str(json).unwrap();
+        assert_eq!(m.prereqs, vec![Prereq::Reframework]);
+        let back = serde_json::to_string(&m).unwrap();
+        assert!(back.contains("\"kind\":\"reframework\""));
+    }
+
+    #[test]
+    fn missing_dirs_return_empty_not_error() {
+        let tmp = TempDir::new().unwrap();
+        let manifests = load_manifests_from_roots(
+            &tmp.path().join("nope-ct"),
+            &tmp.path().join("nope-json"),
+            None,
+        )
+        .unwrap();
+        assert!(manifests.is_empty());
     }
 }

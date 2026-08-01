@@ -1,0 +1,25 @@
+[package]
+name = "cheat-mono-collector"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Built as a Windows DLL (`--target x86_64-pc-windows-gnu`) that is loaded into
+# a Unity Mono game running under Proton/Wine. It resolves `Class:Method` symbols
+# by calling the game's exported `mono_*` C API in-process and serves the result
+# to native-Linux tatu over a TCP loopback socket, speaking a Cheat-Engine-
+# compatible wire protocol. The protocol core is platform-independent so it can
+# be unit-tested on the host; the Mono FFI and TCP server are Windows-only.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_System_LibraryLoader",
+    "Win32_System_SystemServices",
+] }
+
+[dev-dependencies]

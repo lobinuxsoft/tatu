@@ -25,14 +25,19 @@
 //! - [`values`] — typed read/write/freeze over pointer-chains.
 
 pub mod features;
+pub mod framework_runtimes;
+pub mod import;
 pub mod orphans;
+pub mod prereqs;
 pub mod toggles;
 pub mod values;
 
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use cheat_runtime::{ActiveCheat, FreezeRegistry, Pid};
+use cheat_runtime::{ActiveCheat, FreezeRegistry, Pid, find_pid_by_exe};
+
+pub use framework_runtimes::FrameworkActor;
 
 /// One enabled cheat as seen by the registry. Linux-only post-pivot
 /// #128 — the wine-side Bridge variant was dropped along with the
@@ -42,12 +47,22 @@ use cheat_runtime::{ActiveCheat, FreezeRegistry, Pid};
 /// sites that match on it.
 pub enum ActiveCheatEntry {
     Linux(ActiveCheat),
+    /// A `{$lua}` framework cheat. The live state (the bootstrapped Lua, its
+    /// hooks and symbols) lives in the [`FrameworkActor`] thread; this entry is
+    /// just the registry marker so the UI shows it active and `purge_stale`
+    /// can drop it when the game exits (`exe` is its liveness key).
+    Framework {
+        exe: String,
+    },
 }
 
 impl ActiveCheatEntry {
     pub fn symbols(&self) -> HashMap<String, u64> {
         match self {
             ActiveCheatEntry::Linux(c) => c.symbols().clone(),
+            // Framework symbols live in the Lua runtime, not exposed to the
+            // AA value layer yet.
+            ActiveCheatEntry::Framework { .. } => HashMap::new(),
         }
     }
 }
@@ -85,6 +100,11 @@ pub(super) fn purge_stale_cheats(
         .iter()
         .filter_map(|(uuid, entry)| match entry {
             ActiveCheatEntry::Linux(c) if !pid_is_alive(c.pid()) => Some(uuid.clone()),
+            // Framework cheats have no PID of their own — their liveness is the
+            // game process existing at all.
+            ActiveCheatEntry::Framework { exe } if find_pid_by_exe(exe).is_none() => {
+                Some(uuid.clone())
+            }
             _ => None,
         })
         .collect();

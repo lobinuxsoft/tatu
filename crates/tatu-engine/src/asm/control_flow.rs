@@ -16,6 +16,7 @@ pub(super) enum Mnemonic {
 pub(super) fn is_conditional_jump(m: &str) -> bool {
     matches!(
         m,
+        // Canonical Intel mnemonics.
         "je" | "jne"
             | "jg"
             | "jge"
@@ -31,6 +32,21 @@ pub(super) fn is_conditional_jump(m: &str) -> bool {
             | "jnc"
             | "js"
             | "jns"
+            | "jo"
+            | "jno"
+            | "jp"
+            | "jnp"
+            | "jpe"
+            | "jpo"
+            // CE-AA / NASM-style aliases (still appear in older / hand-rolled tables).
+            | "jna"   // = jbe
+            | "jnae"  // = jb
+            | "jnb"   // = jae
+            | "jnbe"  // = ja
+            | "jng"   // = jle
+            | "jnge"  // = jl
+            | "jnl"   // = jge
+            | "jnle" // = jg
     )
 }
 
@@ -40,6 +56,29 @@ pub(super) fn emit_unary_target(
     base: u64,
     m: Mnemonic,
 ) -> Result<Vec<u8>, AsmError> {
+    // CE-AA `far` forces the 14-byte absolute indirect form (`FF /4 [rip+0]`
+    // for jmp, `FF /2` for call, followed by the 8-byte target). CE table
+    // authors rely on this fixed size so the script's resume label lands at a
+    // known offset past the hook, and on its absolute reach so the codecave is
+    // hit regardless of how far the allocator placed it. iced's typed builder
+    // would pick a 5-byte `rel32` instead, shifting the resume label into the
+    // middle of an instruction — emit the bytes directly to match CE.
+    if let Some(t) = rest.strip_prefix("far ") {
+        let target = resolve_target(t.trim(), syms)?;
+        let modrm = match m {
+            Mnemonic::Jmp => 0x25,  // FF /4, ModRM mod=00 reg=100 rm=101 ([rip+disp32])
+            Mnemonic::Call => 0x15, // FF /2, reg=010
+        };
+        let mut bytes = vec![0xFF, modrm, 0x00, 0x00, 0x00, 0x00];
+        bytes.extend_from_slice(&target.to_le_bytes());
+        return Ok(bytes);
+    }
+    // `near` is the long-mode default (rel32); drop the hint and continue.
+    let rest = rest
+        .strip_prefix("near ")
+        .map(str::trim_start)
+        .unwrap_or(rest);
+
     let mut a = CodeAssembler::new(64)?;
 
     // Indirect call/jmp through memory: `call qword ptr [rax+370]`. CE
@@ -87,16 +126,20 @@ pub(super) fn emit_jcc(
     match mnemonic {
         "je" | "jz" => a.je(target)?,
         "jne" | "jnz" => a.jne(target)?,
-        "jg" => a.jg(target)?,
-        "jge" => a.jge(target)?,
-        "jl" => a.jl(target)?,
-        "jle" => a.jle(target)?,
-        "ja" => a.ja(target)?,
-        "jae" | "jnc" => a.jae(target)?,
-        "jb" | "jc" => a.jb(target)?,
-        "jbe" => a.jbe(target)?,
+        "jg" | "jnle" => a.jg(target)?,
+        "jge" | "jnl" => a.jge(target)?,
+        "jl" | "jnge" => a.jl(target)?,
+        "jle" | "jng" => a.jle(target)?,
+        "ja" | "jnbe" => a.ja(target)?,
+        "jae" | "jnc" | "jnb" => a.jae(target)?,
+        "jb" | "jc" | "jnae" => a.jb(target)?,
+        "jbe" | "jna" => a.jbe(target)?,
         "js" => a.js(target)?,
         "jns" => a.jns(target)?,
+        "jo" => a.jo(target)?,
+        "jno" => a.jno(target)?,
+        "jp" | "jpe" => a.jp(target)?,
+        "jnp" | "jpo" => a.jnp(target)?,
         _ => return Err(AsmError::Unsupported(mnemonic.into())),
     };
     Ok(a.assemble(base)?)
@@ -138,6 +181,38 @@ mod tests {
         assert_eq!(bytes[0], 0xE9);
         let delta = i32::from_le_bytes(bytes[1..5].try_into().unwrap()) as i64;
         assert_eq!(delta, 0x10005 - 0x20005);
+    }
+
+    #[test]
+    fn jmp_far_emits_14_byte_absolute_indirect() {
+        let syms = symtab(&[("codecave", 0x1_4000_5000_u64)]);
+        // `jmp far` forces CE's fixed 14-byte `FF 25 00000000 <abs8>` form,
+        // reaching the codecave absolutely (DD2 hook).
+        let far = compile_line("jmp far codecave", &syms, 0x1000)
+            .unwrap()
+            .unwrap();
+        assert_eq!(far.len(), 14);
+        assert_eq!(&far[..6], &[0xFF, 0x25, 0x00, 0x00, 0x00, 0x00]);
+        let abs = u64::from_le_bytes(far[6..14].try_into().unwrap());
+        assert_eq!(abs, 0x1_4000_5000);
+        // `call far` uses FF /2.
+        let call = compile_line("call far codecave", &syms, 0x1000)
+            .unwrap()
+            .unwrap();
+        assert_eq!(&call[..2], &[0xFF, 0x15]);
+    }
+
+    #[test]
+    fn jmp_near_hint_is_stripped_to_rel32() {
+        let syms = symtab(&[("codecave", 0x2000)]);
+        let plain = compile_line("jmp codecave", &syms, 0x1000)
+            .unwrap()
+            .unwrap();
+        let near = compile_line("jmp near codecave", &syms, 0x1000)
+            .unwrap()
+            .unwrap();
+        assert_eq!(near, plain);
+        assert_eq!(near[0], 0xE9);
     }
 
     #[test]

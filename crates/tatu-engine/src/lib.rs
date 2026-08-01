@@ -20,6 +20,7 @@
 //! cross-process primitives (allocate, suspend, scan) so the engine
 //! can drive both paths from one state machine.
 
+pub mod analysis;
 pub mod asm;
 pub mod backend;
 pub mod executor;

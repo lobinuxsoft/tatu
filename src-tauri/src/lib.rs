@@ -4,6 +4,7 @@ mod disk;
 mod drm;
 mod hltb;
 mod inventory;
+mod prereqs;
 mod shortcuts;
 mod state;
 mod steam;
@@ -12,7 +13,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use cheat_runtime::FreezeRegistry;
-use commands::cheat_runtime_cmd::ActiveCheats;
+use commands::cheat_runtime_cmd::{ActiveCheats, FrameworkActor};
 use state::AppState;
 
 pub type SharedState = Mutex<AppState>;
@@ -34,32 +35,18 @@ pub fn run() {
         Err(e) => eprintln!("[cheat-runtime migrate] failed: {e}"),
     }
 
-    // Auto-import every `.ct` table under `cheat-tables/<appid>/` into a
-    // manifest at `trainers/<appid>/`. Same idempotency guarantee: only
-    // tables without a matching manifest are written. Per-file failures are
-    // logged but don't abort startup — one malformed `.ct` mustn't keep the
-    // rest of the user's library from showing up.
-    match cheat_runtime::auto_import_default_dirs() {
-        Ok(report) if !report.created.is_empty() || !report.failed.is_empty() => {
-            eprintln!(
-                "[cheat-runtime ct-import] created={} skipped={} failed={}",
-                report.created.len(),
-                report.skipped.len(),
-                report.failed.len()
-            );
-            for (path, err) in &report.failed {
-                eprintln!("[cheat-runtime ct-import]   {} -> {err}", path.display());
-            }
-        }
-        Ok(_) => {}
-        Err(e) => eprintln!("[cheat-runtime ct-import] failed: {e}"),
-    }
+    // Post-#134: `.ct` files in `cheat-tables/<appid>/` are parsed on
+    // demand by `load_manifests_for` (no more JSON sidecars), so the
+    // startup auto-import pass was removed. Per-file parse failures now
+    // surface at list time via the loader's stderr log + the import
+    // command's validation toast.
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(Mutex::new(app_state))
         .manage(FreezeRegistry::new())
         .manage(active_cheats)
+        .manage(FrameworkActor::spawn())
         .invoke_handler(tauri::generate_handler![
             commands::state_cmd::get_state,
             commands::state_cmd::get_settings,
@@ -93,6 +80,12 @@ pub fn run() {
             commands::cheat_runtime_cmd::values::cheat_runtime_value_read,
             commands::cheat_runtime_cmd::values::cheat_runtime_value_write,
             commands::cheat_runtime_cmd::values::cheat_runtime_value_freeze,
+            commands::cheat_runtime_cmd::import::cheat_runtime_import_ct,
+            commands::cheat_runtime_cmd::import::cheat_runtime_remove_ct,
+            commands::cheat_runtime_cmd::prereqs::cheat_runtime_prereqs_check,
+            commands::cheat_runtime_cmd::prereqs::cheat_runtime_prereqs_install,
+            commands::cheat_runtime_cmd::prereqs::cheat_runtime_install_mono_collector,
+            commands::cheat_runtime_cmd::prereqs::cheat_runtime_set_winhttp_override,
             commands::cheat_search_cmd::open_fearless_search,
         ])
         .run(tauri::generate_context!())

@@ -217,6 +217,8 @@ fn migrate_one(
             kind: crate::manifest::FeatureKind::Toggle,
             script: Some(synth_script(address, &cheat.action.value().to_le_bytes())),
             value: None,
+            lua: false,
+            children: Vec::new(),
         });
     }
 
@@ -228,6 +230,13 @@ fn migrate_one(
             table.game_name
         },
         features,
+        // Legacy cheat-core tables predate the prereqs concept (#98) and
+        // never targeted RE Engine games in practice (cheat-core only
+        // handled Absolute/Static/PointerChain, RE Engine cheats need
+        // aobscanmodule). Empty vec is correct here.
+        prereqs: Vec::new(),
+        // Legacy cheat-core tables are plain AA, never Lua-framework.
+        framework: false,
     };
 
     std::fs::create_dir_all(&target_dir)?;

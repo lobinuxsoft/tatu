@@ -39,10 +39,17 @@ function renderCeBanner(status) {
 // section and tables list with no banner above them.
 
 function renderTablesSection(gameId, tables) {
+  // Hidden file input lives outside the table list so it survives a
+  // re-render mid-pick (loadCheats() rewrites .ce-tables-section but the
+  // panel itself is stable). The visible button proxies the click.
+  const importControls =
+    `<button class="ce-import-btn" data-action="import-ct" title="Pick a .CT file to import into this game's library">Import .CT</button>` +
+    `<input type="file" class="ce-import-input" accept=".ct,.CT" hidden>`;
   if (!tables.length) {
     return (
       `<div class="ce-tables-section">` +
         `<div class="ce-tables-header">Available .CT tables` +
+          importControls +
           `<button class="ce-refresh-btn" data-action="refresh-tables">Refresh</button>` +
         `</div>` +
         `<div class="ach-empty">` +
@@ -54,6 +61,7 @@ function renderTablesSection(gameId, tables) {
   let html =
     `<div class="ce-tables-section">` +
       `<div class="ce-tables-header">Available .CT tables` +
+        importControls +
         `<button class="ce-refresh-btn" data-action="refresh-tables">Refresh</button>` +
       `</div>` +
       `<ul class="ce-tables-list">`;
@@ -65,6 +73,7 @@ function renderTablesSection(gameId, tables) {
           `<div class="ce-table-meta">${esc(fmtKB(t.size_bytes))}</div>` +
         `</div>` +
         `<button class="ce-open-btn" data-table="${esc(t.name)}">Open CE</button>` +
+        `<button class="ce-remove-btn" data-table="${esc(t.name)}" title="Delete this .CT and its manifest">✗</button>` +
       `</li>`;
   }
   html += `</ul></div>`;
@@ -106,6 +115,8 @@ function wireTables(panel, gameId) {
   if (refresh) {
     refresh.addEventListener("click", () => loadCheats(gameId));
   }
+  wireImportButton(panel, gameId);
+  wireRemoveTableButtons(panel, gameId);
   panel.querySelectorAll(".ce-open-btn").forEach(btn => {
     btn.addEventListener("click", async () => {
       const tableName = btn.dataset.table;
@@ -125,7 +136,85 @@ function wireTables(panel, gameId) {
   });
 }
 
-function renderRuntimeSection(features) {
+// #98 — surface REFramework / other prereqs above the runtime section.
+// The backend returns one PrereqReport per distinct prereq declared by
+// any manifest of this game; an empty array means nothing to install
+// (the common case for vanilla UE / Mono / native titles).
+function renderPrereqBanner(prereqs) {
+  if (!Array.isArray(prereqs) || !prereqs.length) return "";
+  const rows = [];
+  for (const p of prereqs) {
+    const label = prereqLabel(p.kind);
+    if (p.status === "installed") {
+      rows.push(
+        `<div class="ce-banner ce-banner-ok">${esc(label)} installed at <code>${esc(p.game_dir)}</code></div>`
+      );
+      continue;
+    }
+    const reason = p.status === "corrupt"
+      ? `${esc(label)} install looks corrupt — reinstall to recover`
+      : `${esc(label)} required by this game's cheats`;
+    const btnText = p.status === "corrupt" ? `Reinstall ${esc(label)}` : `Install ${esc(label)}`;
+    rows.push(
+      `<div class="ce-banner ce-banner-warn">` +
+        `${reason} ` +
+        `<button class="ce-prereq-install-btn" data-kind="${esc(p.kind)}">${btnText}</button>` +
+      `</div>`
+    );
+  }
+  return rows.join("");
+}
+
+function prereqLabel(kind) {
+  if (kind === "reframework") return "REFramework";
+  return kind;
+}
+
+// True iff at least one prereq is in `missing` or `corrupt` state — the
+// runtime section dims its toggles in that case. The user can still
+// expand the tree (so they see what the game offers) but cannot enable
+// cheats until the prereq is in place.
+function anyPrereqBlocking(prereqs) {
+  if (!Array.isArray(prereqs)) return false;
+  return prereqs.some(p => p.status === "missing" || p.status === "corrupt");
+}
+
+// Click handler for `Install REFramework` (and future prereq variants).
+// The install command is synchronous on the backend (downloads + extracts
+// + atomic rename within a single call) — the UI shows a spinner via the
+// button label so the user knows something's happening during the ~10 s
+// download. On success we re-load the panel so the banner re-renders
+// against the now-installed prereq and the runtime section un-dims.
+function wirePrereqBanner(panel, gameId) {
+  const buttons = panel.querySelectorAll(".ce-prereq-install-btn");
+  buttons.forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const kind = btn.getAttribute("data-kind") || "";
+      const original = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = "Installing…";
+      try {
+        const result = await invoke("cheat_runtime_prereqs_install", {
+          appId: String(gameId),
+          kind,
+        });
+        const sizeMB = (result.size_bytes / (1024 * 1024)).toFixed(1);
+        const tag = result.release_tag || "latest";
+        btn.textContent = `✓ Installed ${prereqLabel(kind)} ${esc(tag)} (${sizeMB} MB)`;
+        // Re-render so the banner flips to the success state + runtime
+        // section un-dims. Brief delay so the user reads the success
+        // text on the button before the panel re-renders.
+        setTimeout(() => loadCheats(gameId), 800);
+      } catch (e) {
+        btn.disabled = false;
+        btn.textContent = `✗ ${original} — ${String(e)}`;
+        btn.title = String(e);
+      }
+    });
+  });
+}
+
+function renderRuntimeSection(features, gameId, prereqsBlocked, ceTableName) {
   if (!features.length) {
     return (
       `<div class="cheat-runtime-section">` +
@@ -139,54 +228,159 @@ function renderRuntimeSection(features) {
       `</div>`
     );
   }
-  const anyRunning = features.some(f => f.game_running);
+  // Liveness pill: at least one feature reports the game running.
+  // Walk the tree because the flag rides on every node, not just roots.
+  const anyRunning = anyNodeRunning(features);
   const pillCls = anyRunning ? "cheat-pill-on" : "cheat-pill-off";
   const pillTxt = anyRunning ? "\u{1F7E2} Game running" : "\u{1F534} Game not running";
 
+  // Global "Refresh all values" button — clicks every Value row's per-row
+  // read button in sequence. Required by #133 acceptance; the per-row ↻
+  // covers individual reads but a 50+ entry table (Dragon's Dogma 2) makes
+  // that impractical for an "I just enabled the master cheat, refresh
+  // everything" workflow.
+  const blockedAttr = prereqsBlocked ? ' data-prereq-blocked="true"' : "";
   let html =
-    `<div class="cheat-runtime-section">` +
+    `<div class="cheat-runtime-section"${blockedAttr}>` +
       `<div class="cheat-runtime-header">` +
         `Trainer features <span class="cheat-pill ${pillCls}">${pillTxt}</span>` +
+        `<button class="cheat-refresh-all" data-action="refresh-all" title="Read every Value row's current value">Refresh all values</button>` +
       `</div>` +
-      `<ul class="cheat-runtime-list">`;
+      `<ul class="cheat-tree" data-game-id="${esc(String(gameId))}">`;
   for (const f of features) {
-    if (f.kind === "header") {
-      // Visual-only divider: no switch, no toggle. Renders as a small caps
-      // title above the next batch of features. Mirrors CE's `<GroupHeader>`
-      // entries — see MemoryRecordUnit.pas:148.
-      html +=
-        `<li class="cheat-runtime-header-row">` +
-          `<div class="cheat-runtime-header-text">${esc(f.name)}</div>` +
-        `</li>`;
-      continue;
-    }
-    if (f.kind === "value") {
-      html += renderValueRow(f);
-      continue;
-    }
-    const dis = f.game_running ? "" : "disabled";
-    const ch = f.active ? "checked" : "";
-    const cat = f.category ? `${esc(f.category)} • ` : "";
-    html +=
-      `<li class="cheat-runtime-item">` +
-        `<div class="cheat-runtime-info">` +
-          `<div class="cheat-runtime-name">${esc(f.name)}</div>` +
-          `<div class="cheat-runtime-meta">${cat}${esc(f.manifest_exe)}</div>` +
-        `</div>` +
-        `<label class="cheat-switch" title="${dis ? 'Launch the game first' : 'Toggle'}">` +
-          `<input type="checkbox" data-feature-uuid="${esc(f.uuid)}" ${ch} ${dis}>` +
-          `<span class="cheat-switch-slider"></span>` +
-        `</label>` +
-      `</li>`;
+    html += renderTreeNode(f, gameId, 0, ceTableName);
   }
   html += `</ul></div>`;
   return html;
 }
 
+function anyNodeRunning(features) {
+  for (const f of features) {
+    if (f.game_running) return true;
+    if (f.children && anyNodeRunning(f.children)) return true;
+  }
+  return false;
+}
+
+/// Render one node and its subtree. CE tables nest up to 7 levels in the
+/// wild (Dragon's Dogma 2 v6, Elden Ring All-in-One); the renderer doesn't
+/// cap depth — CSS handles indentation by natural <ul> nesting.
+function renderTreeNode(f, gameId, depth, ceTableName) {
+  const hasChildren = Array.isArray(f.children) && f.children.length > 0;
+  const expanded = isExpanded(gameId, f.uuid);
+  const expandedAttr = expanded ? "true" : "false";
+
+  let rowHtml;
+  if (f.kind === "header") {
+    // Headers with children are interactive (caret + click expands).
+    // Childless Headers stay as visual dividers — mirrors CE's
+    // GroupHeader semantics (MemoryRecordUnit.pas:148).
+    const caret = hasChildren
+      ? `<span class="cheat-tree-caret">${expanded ? "▼" : "▶"}</span>`
+      : `<span class="cheat-tree-caret cheat-tree-caret-empty"></span>`;
+    rowHtml =
+      `<div class="cheat-tree-row cheat-tree-header" data-expanded="${expandedAttr}"` +
+        ` data-uuid="${esc(f.uuid)}" data-has-children="${hasChildren ? 'true' : 'false'}">` +
+        caret +
+        `<div class="cheat-tree-name">${esc(f.name)}</div>` +
+      `</div>`;
+  } else if (f.kind === "value") {
+    rowHtml = renderValueRow(f);
+  } else {
+    rowHtml = renderToggleRow(f, ceTableName);
+  }
+
+  // Wrap each node in <li> so semantic structure is preserved
+  // (assistive tech, keyboard tabbing). Children render as a nested
+  // <ul> the caret toggles via the `data-expanded` attribute on the
+  // parent row; CSS hides the <ul> when collapsed.
+  let html = `<li class="cheat-tree-node" data-depth="${depth}">${rowHtml}`;
+  if (hasChildren) {
+    html += `<ul class="cheat-tree-children">`;
+    for (const child of f.children) {
+      html += renderTreeNode(child, gameId, depth + 1, ceTableName);
+    }
+    html += `</ul>`;
+  }
+  html += `</li>`;
+  return html;
+}
+
+function renderToggleRow(f, ceTableName) {
+  const cat = f.category ? `${esc(f.category)} • ` : "";
+  const info =
+    `<div class="cheat-runtime-info">` +
+      `<div class="cheat-runtime-name">${esc(f.name)}</div>` +
+      `<div class="cheat-runtime-meta">${cat}${esc(f.manifest_exe)}</div>` +
+    `</div>`;
+
+  // needs_ce: the script depends on a pointer root only CE's Lua framework
+  // binds (e.g. CharacterManagerPtr). The native executor can't run it, so
+  // we never show a toggle that would flip on and instantly fail. Surface a
+  // "needs CE" badge + an Open-in-CE shortcut (reuses the .ce-open-btn
+  // handler wired by wireTables) instead.
+  if (f.needs_ce) {
+    const open = ceTableName
+      ? `<button class="ce-open-btn cheat-needs-ce-open" data-table="${esc(ceTableName)}"` +
+          ` title="This cheat uses the table's Lua framework — run it in Cheat Engine">Open in CE</button>`
+      : "";
+    return (
+      `<div class="cheat-tree-row cheat-runtime-item cheat-runtime-needs-ce">` +
+        info +
+        `<div class="cheat-needs-ce">` +
+          `<span class="cheat-needs-ce-badge" title="Depends on a pointer root resolved by the table's Lua framework, which tatu can't run natively">🔒 Needs CE</span>` +
+          open +
+        `</div>` +
+      `</div>`
+    );
+  }
+
+  const dis = f.game_running ? "" : "disabled";
+  const ch = f.active ? "checked" : "";
+  return (
+    `<div class="cheat-tree-row cheat-runtime-item">` +
+      info +
+      `<label class="cheat-switch" title="${dis ? 'Launch the game first' : 'Toggle'}">` +
+        `<input type="checkbox" data-feature-uuid="${esc(f.uuid)}" ${ch} ${dis}>` +
+        `<span class="cheat-switch-slider"></span>` +
+      `</label>` +
+    `</div>`
+  );
+}
+
+// --- expand/collapse state (LocalStorage, scoped by gameId + uuid) ---
+//
+// Default: expanded on first encounter. Once the user collapses a node we
+// remember it forever (across reloads, across sessions). Stored as a flat
+// key-per-uuid rather than a JSON blob so we don't need to load + parse
+// the whole tree state to read a single node, and so multiple game panels
+// open simultaneously don't trample each other's writes.
+
+function expandKey(gameId, uuid) {
+  return `tatu.cheats.exp.${gameId}.${uuid}`;
+}
+
+function isExpanded(gameId, uuid) {
+  try {
+    const v = localStorage.getItem(expandKey(gameId, uuid));
+    return v === null ? true : v === "1";
+  } catch (_) {
+    return true; // localStorage unavailable (private mode): default open.
+  }
+}
+
+function setExpanded(gameId, uuid, expanded) {
+  try {
+    localStorage.setItem(expandKey(gameId, uuid), expanded ? "1" : "0");
+  } catch (_) { /* ignore */ }
+}
+
 /// Render one Value-kind row: typed numeric input + Set + Freeze. Dimmed
 /// (with reason) when the game isn't running OR the master scaffold cheat
 /// hasn't been enabled — the backend flags both via `game_running` and
-/// `symbol_ready` in the FeatureView.
+/// `symbol_ready` in the FeatureView. The wrapper `<div>` substitutes
+/// for the old `<li>` because tree rows now compose into `cheat-tree-node`
+/// `<li>` parents.
 function renderValueRow(f) {
   const cat = f.category ? `${esc(f.category)} • ` : "";
   const spec = f.value_spec || {};
@@ -204,7 +398,7 @@ function renderValueRow(f) {
   const isFloat = vt === "f32" || vt === "f64";
   const step = isFloat ? "any" : "1";
   return (
-    `<li class="cheat-runtime-item cheat-runtime-value ${blocked ? 'cheat-runtime-value-blocked' : ''}" data-feature-uuid="${esc(f.uuid)}" data-vtype="${esc(vt)}">` +
+    `<div class="cheat-tree-row cheat-runtime-item cheat-runtime-value ${blocked ? 'cheat-runtime-value-blocked' : ''}" data-feature-uuid="${esc(f.uuid)}" data-vtype="${esc(vt)}">` +
       `<div class="cheat-runtime-info">` +
         `<div class="cheat-runtime-name">${esc(f.name)} <span class="cheat-runtime-vtype">${esc(vt)}</span></div>` +
         `<div class="cheat-runtime-meta">${cat}${addrSummary}</div>` +
@@ -218,7 +412,7 @@ function renderValueRow(f) {
           `<span class="cheat-switch-slider"></span>` +
         `</label>` +
       `</div>` +
-    `</li>`
+    `</div>`
   );
 }
 
@@ -332,6 +526,169 @@ function wireValueRows(panel, gameId) {
   });
 }
 
+/// Wire the per-row "✗" remove button: confirm + invoke backend + refresh
+/// panel. Lets the user prune minimalist / superseded / broken tables
+/// without leaving the app — counterpart to the Import .CT button.
+function wireRemoveTableButtons(panel, gameId) {
+  panel.querySelectorAll(".ce-remove-btn").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const tableName = btn.dataset.table;
+      // confirm() is intentionally simple here — the action is reversible
+      // (the user can re-import the same .CT) but the in-app deletion is
+      // immediate, so a single yes/no prompt strikes the right balance.
+      if (!confirm(`Delete "${tableName}" and its converted manifest?`)) return;
+      btn.disabled = true;
+      const original = btn.textContent;
+      btn.textContent = "…";
+      try {
+        await invoke("cheat_runtime_remove_ct", {
+          appId: String(gameId),
+          fileName: tableName,
+        });
+        loadCheats(gameId);
+      } catch (e) {
+        btn.textContent = "✗";
+        btn.title = String(e);
+        btn.disabled = false;
+        setTimeout(() => btn.removeAttribute("title"), 3000);
+      } finally {
+        // loadCheats re-renders the panel so the button reference is gone
+        // anyway, but reset textContent in case the call errored.
+        btn.textContent = original;
+      }
+    });
+  });
+}
+
+/// Wire the "Import .CT" button: trigger hidden <input type="file">, read
+/// the picked file as bytes, hand off to the backend command which copies
+/// into `cheat-tables/<app_id>/` and runs `auto_import_for_app` so the new
+/// manifest appears in the list without a restart.
+function wireImportButton(panel, gameId) {
+  const btn = panel.querySelector(".ce-import-btn");
+  const input = panel.querySelector(".ce-import-input");
+  if (!btn || !input) return;
+
+  btn.addEventListener("click", () => input.click());
+
+  input.addEventListener("change", async () => {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    const original = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "Importing…";
+    try {
+      const buf = await file.arrayBuffer();
+      const contents = Array.from(new Uint8Array(buf));
+      const summary = await invoke("cheat_runtime_import_ct", {
+        appId: String(gameId),
+        fileName: file.name,
+        contents,
+      });
+      // Summary fields (post-#134, JSON sidecars dropped): imported[],
+      // failed[][file, err], written_to. The "skipped" bucket from the old
+      // shape went away — the importer no longer round-trips through a JSON
+      // cache, so there's nothing to deduplicate against.
+      const imported = (summary.imported || []).length;
+      const failed = (summary.failed || []).length;
+      let msg;
+      let isError = false;
+      if (failed > 0) {
+        const [name, err] = summary.failed[0];
+        msg = `✗ ${name}: ${err}`;
+        isError = true;
+      } else if (imported > 0) {
+        msg = `✓ Imported`;
+      } else {
+        msg = `✓ Done`;
+      }
+      btn.textContent = msg;
+      btn.title = msg; // full text in tooltip in case the button truncates
+      loadCheats(gameId);
+      if (isError) {
+        // Keep the failure message visible until the user clicks the button
+        // again — 3 seconds disappears too fast to read a NoExeBinding-class
+        // error and decide what to do next.
+        btn.disabled = false;
+        const dismiss = () => {
+          btn.textContent = original;
+          btn.removeAttribute("title");
+          btn.removeEventListener("click", dismiss, true);
+        };
+        btn.addEventListener("click", dismiss, true);
+      } else {
+        setTimeout(() => {
+          btn.textContent = original;
+          btn.removeAttribute("title");
+          btn.disabled = false;
+        }, 3000);
+      }
+    } catch (e) {
+      btn.textContent = "✗ Error";
+      btn.title = String(e);
+      setTimeout(() => {
+        btn.textContent = original;
+        btn.removeAttribute("title");
+        btn.disabled = false;
+      }, 3000);
+    } finally {
+      // Reset so the same file can be re-picked (no change event on
+      // identical selection otherwise).
+      input.value = "";
+    }
+  });
+}
+
+/// Wire the global "Refresh all values" button — clicks every Value row's
+/// per-row ↻ in sequence. Sequenced, not parallel: parallel reads against
+/// the same ptrace target serialize at the kernel anyway and would race
+/// the master toggle's symbol table; one-at-a-time is both safer and the
+/// user-perceived performance hit is negligible.
+function wireRefreshAll(panel) {
+  const btn = panel.querySelector(".cheat-refresh-all");
+  if (!btn) return;
+  btn.addEventListener("click", async () => {
+    const reads = panel.querySelectorAll(".cheat-runtime-value:not(.cheat-runtime-value-blocked) .cheat-value-read");
+    if (!reads.length) return;
+    btn.disabled = true;
+    const original = btn.textContent;
+    btn.textContent = `Reading 0 / ${reads.length}…`;
+    let done = 0;
+    for (const r of reads) {
+      // Reuse the per-row handler's behaviour — a synthetic click fires
+      // the same async invoke + input update + flash sequence already
+      // wired in wireValueRows, so refresh-all stays a single source of
+      // truth for what a "read" actually does.
+      r.click();
+      done += 1;
+      btn.textContent = `Reading ${done} / ${reads.length}…`;
+      // Small yield so the UI repaints; per-row invokes themselves are
+      // already async and don't block here.
+      await new Promise(r => setTimeout(r, 16));
+    }
+    btn.textContent = original;
+    btn.disabled = false;
+  });
+}
+
+/// Wire expand/collapse on every Header row that owns children. Click
+/// toggles the row's `data-expanded` attribute, which CSS keys off to hide
+/// the sibling `.cheat-tree-children` <ul>. State persists in
+/// LocalStorage scoped by gameId so a closed group stays closed across
+/// reloads (matters for the 100+ entry tables in the FearLess audit).
+function wireTreeCarets(panel, gameId) {
+  panel.querySelectorAll('.cheat-tree-header[data-has-children="true"]').forEach(row => {
+    row.addEventListener("click", () => {
+      const expanded = row.dataset.expanded === "true";
+      const next = !expanded;
+      row.dataset.expanded = next ? "true" : "false";
+      const caret = row.querySelector(".cheat-tree-caret");
+      if (caret) caret.textContent = next ? "▼" : "▶";
+      setExpanded(gameId, row.dataset.uuid, next);
+    });
+  });
+}
+
 function wireRuntimeSwitches(panel, gameId) {
   // Limit to Toggle rows — Value rows have their own `.cheat-runtime-value`
   // container and must not be wired as plain enable/disable switches.
@@ -351,13 +708,63 @@ function wireRuntimeSwitches(panel, gameId) {
         loadCheats(gameId);
       } catch (e) {
         input.checked = !desired;
-        input.title = String(e);
-        setTimeout(() => input.removeAttribute("title"), 3000);
+        if (desired) {
+          // Enable failed. Most static "needs CE" cases are caught up front
+          // (the row renders as a badge, not a toggle), but a cheat can still
+          // fail at runtime — unsupported asm, an AOB that didn't match this
+          // build, a symbol bound only when a sibling is active. Surface a
+          // persistent reason instead of a 3s flash so the user understands
+          // the toggle didn't just bounce.
+          showRuntimeError(input, String(e));
+        } else {
+          input.title = String(e);
+          setTimeout(() => input.removeAttribute("title"), 3000);
+        }
       } finally {
         input.disabled = false;
       }
     });
   });
+}
+
+// Pin a persistent error reason under a toggle row whose enable failed.
+// Replaces the old 3s-tooltip flash. Cleared on the next loadCheats()
+// re-render (i.e. the next time the user interacts or refreshes).
+function showRuntimeError(input, raw) {
+  const row = input.closest(".cheat-runtime-item");
+  if (!row) {
+    input.title = raw;
+    setTimeout(() => input.removeAttribute("title"), 3000);
+    return;
+  }
+  row.classList.add("cheat-runtime-failed");
+  let msg = row.querySelector(".cheat-runtime-error-msg");
+  if (!msg) {
+    msg = document.createElement("div");
+    msg.className = "cheat-runtime-error-msg";
+    row.appendChild(msg);
+  }
+  msg.textContent = `⚠ ${friendlyEnableError(raw)}`;
+  msg.title = raw; // full error on hover
+}
+
+// Translate the executor's raw error into a short, actionable line. The
+// common runtime failures for framework tables all point the user at CE.
+function friendlyEnableError(raw) {
+  const e = raw.toLowerCase();
+  if (e.includes("no match")) {
+    return "pattern not found in memory — table may not match this game build";
+  }
+  if (e.includes("unknown symbol") || e.includes("outside any label")) {
+    return "unresolved symbol — likely needs CE (open the table in Cheat Engine)";
+  }
+  if (e.includes("unsupported") || e.includes("estimate length")) {
+    return "uses an instruction tatu can't assemble yet — open the table in CE";
+  }
+  if (e.includes("lua")) {
+    return "Lua-only script — open the table in Cheat Engine";
+  }
+  return raw.length > 120 ? `${raw.slice(0, 117)}…` : raw;
 }
 
 function wireSearchButton(panel) {
@@ -453,27 +860,41 @@ export async function loadCheats(gameId) {
   if (!panel) return;
 
   try {
-    const [ceStatus, tables, runtimeFeatures, orphans] = await Promise.all([
+    const [ceStatus, tables, runtimeFeatures, orphans, prereqs] = await Promise.all([
       invoke("ce_install_status").catch(() => ({ kind: "not_installed" })),
       invoke("ce_list_tables_for_game", { appId: String(gameId) }).catch(() => []),
       invoke("cheat_runtime_list_features", { appId: String(gameId) }).catch(() => []),
       invoke("cheat_runtime_orphans_list").catch(() => []),
+      // #98 prereqs check. Surface failure as empty list (no banner)
+      // rather than blocking the whole panel — same defensive pattern
+      // as the other four calls above.
+      invoke("cheat_runtime_prereqs_check", { appId: String(gameId) }).catch(() => []),
     ]);
 
     if (state.panelGameId !== gameId) return;
 
     const banner = renderCeBanner(ceStatus);
-    const runtimeSection = renderRuntimeSection(runtimeFeatures);
+    const prereqBanner = renderPrereqBanner(prereqs);
+    const blocked = anyPrereqBlocking(prereqs);
+    // Pass the first .CT table name so "Needs CE" rows can offer a direct
+    // Open-in-CE shortcut. Most games have a single table; when several
+    // exist we point at the first (the user can still use the full list
+    // in the tables section below).
+    const ceTableName = Array.isArray(tables) && tables.length ? tables[0].name : null;
+    const runtimeSection = renderRuntimeSection(runtimeFeatures, gameId, blocked, ceTableName);
     const tablesSection = renderTablesSection(gameId, tables);
     const searchBar = renderSearchBar(gameId);
 
     const orphansBanner = renderOrphansBanner(orphans, gameId);
-    panel.innerHTML = banner + orphansBanner + runtimeSection + tablesSection + searchBar;
+    panel.innerHTML = banner + orphansBanner + prereqBanner + runtimeSection + tablesSection + searchBar;
 
     wireBanner(panel, gameId);
     wireOrphansBanner(panel, gameId);
+    wirePrereqBanner(panel, gameId);
+    wireTreeCarets(panel, gameId);
     wireRuntimeSwitches(panel, gameId);
     wireValueRows(panel, gameId);
+    wireRefreshAll(panel);
     wireTables(panel, gameId);
     wireSearchButton(panel);
   } catch (e) {

@@ -17,6 +17,139 @@ fn parse_aobscanmodule_with_pattern() {
 }
 
 #[test]
+fn parse_reassemble_captures_operand_verbatim() {
+    // The DD2 Fatal Fall Height codecave reassembles the displaced
+    // instruction at the hook site. Case-insensitive dispatch, operand kept
+    // verbatim for execution-time resolution.
+    assert_eq!(
+        classify("reassemble(HeightDieForHumanWorkHook+4)").unwrap(),
+        Statement::Reassemble("HeightDieForHumanWorkHook+4".into())
+    );
+    assert_eq!(
+        classify("reAssemble(0x1400000)").unwrap(),
+        Statement::Reassemble("0x1400000".into())
+    );
+    assert!(matches!(
+        classify("reassemble()"),
+        Err(ParseError::BadCall { .. })
+    ));
+}
+
+#[test]
+fn parse_command_names_are_case_insensitive() {
+    // CE-AA authors (e.g. the Manifold framework on the DD2 table) write
+    // commands in camelCase. The dispatch must normalise case while leaving
+    // the symbol name and byte pattern untouched.
+    let stmt =
+        classify("aobScanModule(IsPlayerInvincibilityHook,DD2.exe,80 7F 15 ? 75 ? 48 8B)").unwrap();
+    assert_eq!(
+        stmt,
+        Statement::AobScanModule {
+            symbol: "IsPlayerInvincibilityHook".into(),
+            scope: "DD2.exe".into(),
+            pattern: "80 7F 15 ? 75 ? 48 8B".into(),
+        }
+    );
+    assert_eq!(
+        classify("unregisterSymbol(foo)").unwrap(),
+        Statement::UnregisterSymbol(NameList::single("foo"))
+    );
+    assert_eq!(
+        classify("AOBSCANMODULE(s,m.exe,90)").unwrap(),
+        Statement::AobScanModule {
+            symbol: "s".into(),
+            scope: "m.exe".into(),
+            pattern: "90".into(),
+        }
+    );
+}
+
+#[test]
+fn parse_symbol_offset_site() {
+    // CE-AA hook injection: `Symbol+N:` anchors writes at a scanned symbol
+    // plus a byte offset (the DD2 Player Invincibility 1-byte patch shape).
+    assert_eq!(
+        classify("IsPlayerInvincibilityHook+3:").unwrap(),
+        Statement::SymbolSite {
+            symbol: "IsPlayerInvincibilityHook".into(),
+            offset: 3,
+        }
+    );
+    assert_eq!(
+        classify("StaminaWorkHook-8:").unwrap(),
+        Statement::SymbolSite {
+            symbol: "StaminaWorkHook".into(),
+            offset: -8,
+        }
+    );
+    // Plain identifier stays a LabelSite (defines, not resolves).
+    assert_eq!(
+        classify("codecave:").unwrap(),
+        Statement::LabelSite("codecave".into())
+    );
+    // Module-relative (`.exe` carries a dot, no `:`) is not a symbol base →
+    // falls through to Raw, unchanged from prior behaviour.
+    assert_eq!(
+        classify("DD2.exe+1062702:").unwrap(),
+        Statement::Raw("DD2.exe+1062702:".into())
+    );
+    // Mono descriptor injection site (`Class:Method+offset:`) — the Enigma
+    // ammo cheat shape. The `:` inside the symbol must not break parsing.
+    assert_eq!(
+        classify("Pistol:Shoot+5f:").unwrap(),
+        Statement::SymbolSite {
+            symbol: "Pistol:Shoot".into(),
+            offset: 0x5f,
+        }
+    );
+    // Namespaced descriptor with no offset.
+    assert_eq!(
+        classify("UnityEngine.Player:Update:").unwrap(),
+        Statement::SymbolSite {
+            symbol: "UnityEngine.Player:Update".into(),
+            offset: 0,
+        }
+    );
+}
+
+#[test]
+fn enigma_ammo_full_script_exposes_mono_site() {
+    // Exact shape of the Enigma "ammo" cheat (ID 26), including the trailing
+    // space after the alloc line, as it appears in the .ct.
+    let src = "[ENABLE]\n\
+        //code from here to '[DISABLE]' will be used to enable the cheat\n\
+        alloc(newmem,2048,Pistol:Shoot+5f) \n\
+        label(returnhere)\n\
+        label(originalcode)\n\
+        label(exit)\n\
+        newmem:\n\
+        originalcode:\n\
+        inc eax\n\
+        mov [rsi+7C],eax\n\
+        exit:\n\
+        jmp returnhere\n\
+        Pistol:Shoot+5f:\n\
+        jmp newmem\n\
+        returnhere:\n\
+        [DISABLE]\n";
+    let script = crate::parser::parse(src).unwrap();
+    let has_site = script.enable.iter().any(|s| {
+        matches!(s, crate::parser::Statement::SymbolSite { symbol, .. } if symbol == "Pistol:Shoot")
+    });
+    assert!(
+        has_site,
+        "no SymbolSite for Pistol:Shoot in {:?}",
+        script.enable
+    );
+    let unresolved =
+        crate::analysis::unresolved_symbols(&script, &std::collections::HashSet::new());
+    assert!(
+        unresolved.contains("Pistol:Shoot"),
+        "Pistol:Shoot missing from unresolved={unresolved:?}"
+    );
+}
+
+#[test]
 fn parse_registersymbol_and_friends() {
     assert_eq!(
         classify("registersymbol(foo)").unwrap(),
@@ -347,6 +480,27 @@ fn alloc_with_bad_size_errors() {
 fn aobscan_with_two_args_errors() {
     let err = classify("aobscanmodule(foo,$process)").unwrap_err();
     assert!(matches!(err, ParseError::BadCall { fn_name, .. } if fn_name == "aobscanmodule"));
+}
+
+#[test]
+fn parse_aobscan_global_two_args() {
+    // CE-AA's 2-arg form for Mono / JIT-emitted targets where the
+    // executable image can't carry the bytes. Enigma of Fear and
+    // similar Unity tables use this almost exclusively.
+    let stmt = classify("aobscan(INJECT,F2 0F 5C C1 F2 0F 5A E8)").unwrap();
+    assert_eq!(
+        stmt,
+        Statement::AobScan {
+            symbol: "INJECT".into(),
+            pattern: "F2 0F 5C C1 F2 0F 5A E8".into(),
+        }
+    );
+}
+
+#[test]
+fn aobscan_with_one_arg_errors() {
+    let err = classify("aobscan(foo)").unwrap_err();
+    assert!(matches!(err, ParseError::BadCall { fn_name, .. } if fn_name == "aobscan"));
 }
 
 #[test]
