@@ -35,3 +35,26 @@
   font-size: 1.1rem; margin: 2rem 0 1rem;
   text-transform: var(--display-transform); letter-spacing: var(--display-tracking);
 }
+
+/* tables.css styles bare `td`/`tbody tr` for the game list: centred columns,
+   the display font on column 3, a pointer cursor and a hover highlight. None of
+   that belongs on a prose table, and all of it applies here because those rules
+   are unscoped — so every one of them is overridden explicitly. */
+.help-table { width: 100%; border-collapse: collapse; margin: 0.8rem 0; }
+.help-table tr { border-bottom: none; cursor: default; }
+.help-table tbody tr:hover { background: transparent; }
+.help-table th {
+  text-align: left; padding: 0.4rem 0.6rem;
+  font-family: var(--font-display); font-size: 0.7rem; font-weight: 700;
+  text-transform: var(--display-transform); letter-spacing: var(--display-tracking);
+  color: var(--fg-muted); border-bottom: 1px solid var(--border);
+}
+.help-table td {
+  text-align: left; vertical-align: top;
+  padding: 0.5rem 0.6rem; line-height: 1.45;
+  font-family: var(--font-body); font-size: 0.82rem; font-weight: 400;
+  color: var(--fg-dim);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.help-table tr:last-child td { border-bottom: none; }
+.help-table td:first-child { color: var(--fg); font-weight: 600; }

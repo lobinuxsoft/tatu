@@ -172,6 +172,56 @@
         Tarda alrededor de un segundo por juego, así que la primera vez conviene dejarlo corriendo.
       </div>
 
+      <h2 class="help-section-heading">De dónde sale cada dato</h2>
+      <div class="help-text">
+        Tatu no tiene base de datos propia: cada dato lo pide en el momento a una fuente
+        distinta. Por eso algunos fallan solos y otros no.
+      </div>
+      <table class="help-table">
+        <tr><th>Dato</th><th>De dónde</th><th>Qué necesita</th></tr>
+        <tr>
+          <td>Biblioteca y horas jugadas</td>
+          <td>API oficial de Steam</td>
+          <td>Tu API key</td>
+        </tr>
+        <tr>
+          <td>Logros</td>
+          <td>API oficial de Steam: la lista del juego y tu progreso</td>
+          <td>API key + <strong>perfil público</strong></td>
+        </tr>
+        <tr>
+          <td>Cromos e insignias</td>
+          <td>Se leen de tu página de cromos en la comunidad de Steam, y las imágenes de
+              las insignias de Steam Card Exchange</td>
+          <td><strong>Perfil e inventario públicos</strong></td>
+        </tr>
+        <tr>
+          <td>Duración (Historia / Main+Extra / 100%)</td>
+          <td>HowLongToBeat</td>
+          <td>Nada — son tiempos que carga su comunidad</td>
+        </tr>
+        <tr>
+          <td>DRM</td>
+          <td>La ficha pública de la tienda de Steam + PCGamingWiki</td>
+          <td>Nada</td>
+        </tr>
+        <tr>
+          <td>Tamaño en disco</td>
+          <td>Los archivos del Steam local (<code>libraryfolders.vdf</code>)</td>
+          <td>Nada, es local</td>
+        </tr>
+      </table>
+      <div class="help-note">
+        Si los logros o los cromos aparecen vacíos, casi siempre es privacidad, no un error:
+        Steam responde <strong>403</strong> cuando el perfil no es público. Se arregla en
+        Steam → Perfil → Editar perfil → Privacidad, poniendo <em>Detalles del juego</em>
+        (y el inventario, para los cromos) en público.
+        <br><br>
+        Los cromos y las insignias se leen de páginas web, no de una API: si Steam o Steam
+        Card Exchange cambian el HTML, eso se rompe hasta que se actualice Tatu. Los logros,
+        la biblioteca y el DRM sí usan APIs y son estables.
+      </div>
+
       <h2 class="help-section-heading">Cheats</h2>
       <div class="help-text" id="helpCheats"></div>
 

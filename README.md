@@ -61,6 +61,24 @@ Tatu reads the library you already own and keeps score. It is not a store and no
 
 **Cheats** are Linux-only; see *Platform support* above.
 
+### Where each field comes from
+
+Tatu keeps no database of its own — every field is fetched from a different source at the time you ask for it, which is why some fail independently of the others.
+
+| Field | Source | Requires |
+|---|---|---|
+| Library, hours played | Steam Web API (`GetOwnedGames`) | API key |
+| Achievements | Steam Web API (`GetSchemaForGame` + `GetPlayerAchievements`) | API key + **public profile** |
+| Trading cards | Scraped from your Steam Community gamecards page | **Public profile and inventory** |
+| Badge art | Scraped from Steam Card Exchange | Nothing |
+| Duration (Main / Main+Extra / 100%) | HowLongToBeat | Nothing — community-submitted times |
+| DRM | Steam Store `appdetails` + PCGamingWiki | Nothing |
+| Size on disk | The local Steam client's `libraryfolders.vdf` | Nothing, it is local |
+
+Empty achievements or cards are almost always privacy rather than a bug: Steam answers **403** for a non-public profile, and Tatu surfaces that verbatim. Fix it under *Steam → Profile → Edit profile → Privacy* by setting **Game details** (and the inventory, for cards) to public.
+
+Cards and badges are scraped from HTML, not read from an API, so a layout change upstream breaks them until Tatu is updated. Library, achievements and DRM go through real APIs and are stable.
+
 ### Where your data lives
 
 One local file, alongside your API key. Tatu has no server and no account of its own — delete the folder and everything is gone. The exact path is shown in *Settings* and in the *Cómo funciona* tab; see [Configuration](#configuration) for the layout.
