@@ -2,8 +2,21 @@
    that window; sizing and closing belong to the window manager, which is the
    whole point — the old modal was a fixed 600px box clamped to 85vh of the
    MAIN window, so it could never use the screen it was on. */
-.detail-window { min-height: 100vh; background: var(--bg-panel); overflow-x: hidden; }
-.detail-window .detail-header-img { border-radius: 0; }
+.detail-window {
+  /* Column layout: cover and tabs keep their natural height, the active tab
+     takes whatever is left. That is what makes the view follow the window
+     instead of the 45vh box it inherited from the old modal. */
+  display: flex; flex-direction: column;
+  height: 100vh; background: var(--bg-panel); overflow: hidden;
+}
+.detail-window > .detail-header,
+.detail-window > .detail-tabs { flex-shrink: 0; }
+.detail-window .detail-header-img {
+  border-radius: 0;
+  /* On a short window the cover would otherwise eat most of the height and
+     leave the tabs a sliver. Cap it and crop rather than letterbox. */
+  max-height: 38vh; object-fit: cover;
+}
 
 .detail-header-img { width: 100%; display: block; border-radius: 12px 12px 0 0; }
 .detail-header { position: relative; }
@@ -19,7 +32,11 @@
 .detail-tab { font-family: var(--font-display); padding: 0.5rem 1rem; cursor: pointer; color: var(--fg-dim); font-size: 0.78rem; font-weight: 700; text-transform: var(--display-transform); letter-spacing: var(--display-tracking); border-bottom: 2px solid transparent; margin-bottom: -2px; transition: all var(--t-fast); user-select: none; }
 .detail-tab:hover { color: var(--fg-strong); }
 .detail-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
-.detail-tab-panel { display: none; padding: 1rem; max-height: 45vh; overflow-y: auto; }
+.detail-tab-panel { display: none; padding: 1rem; }
+/* Only the visible tab participates in the layout, so it is the one that gets
+   the leftover height. `min-height: 0` is what lets a flex child actually
+   shrink and scroll rather than pushing the container taller. */
+.detail-tab-panel.active { display: block; flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .detail-tab-panel.active { display: block; }
 .detail-desc { font-size: 0.82rem; color: var(--fg-dim); margin: 0.5rem 0; line-height: 1.5; }
 .detail-tags { display: flex; flex-wrap: wrap; gap: 0.3rem; margin: 0.5rem 0; }
