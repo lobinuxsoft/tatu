@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.9.0](https://github.com/lobinuxsoft/tatu/compare/v0.8.0...v0.9.0) (2026-08-23)
+
+
+### Features
+
+* **cards:** 3D tilt on hover, real card proportions, capped zoom ([707972e](https://github.com/lobinuxsoft/tatu/commit/707972ee3381146f3a58f045284d94e740f549de))
+* **ui:** click a card or badge to see it full size ([5f3d2aa](https://github.com/lobinuxsoft/tatu/commit/5f3d2aae679897975818f18c64dc1223fe991273))
+* **ui:** give the game detail its own window (closes [#187](https://github.com/lobinuxsoft/tatu/issues/187)) ([2cd63ec](https://github.com/lobinuxsoft/tatu/commit/2cd63ec168b49328c3841fe7689602d81ee496e0))
+
+
+### Bug Fixes
+
+* **ui:** let the detail tabs use the whole window ([0598a87](https://github.com/lobinuxsoft/tatu/commit/0598a87bb9c5b036796b8a74c0234e6b83af458f))
+* **ui:** links, icons, fonts, a detachable detail window, and an app that explains itself ([204190b](https://github.com/lobinuxsoft/tatu/commit/204190b19a9b1251544e11dfe284b770c3549b56))
+* **ui:** stop stranding the window on external links, and explain the app ([a742894](https://github.com/lobinuxsoft/tatu/commit/a74289414c72c38cd1d98aa6e13f19d41b24a596)), closes [#180](https://github.com/lobinuxsoft/tatu/issues/180)
+
+
+### Documentation
+
+* **ui:** explain where achievements, cards, duration and DRM come from ([b53e0d4](https://github.com/lobinuxsoft/tatu/commit/b53e0d49a28bdb4d7d2b196a56d222524618a6e8)), closes [#180](https://github.com/lobinuxsoft/tatu/issues/180)
+
 ## [0.8.0](https://github.com/lobinuxsoft/tatu/compare/v0.7.0...v0.8.0) (2026-08-23)
 
 
