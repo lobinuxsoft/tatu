@@ -19,6 +19,10 @@ export const state = {
   panelOpen: false,
   panelGameId: null,
   hasConfig: false,
+  // False on Windows until the Win32 memory backend lands (#181). The whole
+  // Cheats tab is dropped rather than disabled: the commands behind it are
+  // not registered in that build, so every control would throw on click.
+  cheatsSupported: true,
 };
 
 export const TL = { tool: "Tool", mp: "MP", demo: "Demo" };

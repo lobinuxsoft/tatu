@@ -13,6 +13,12 @@ initTheme();
 
 async function init() {
   try {
+    state.cheatsSupported = await invoke("cheats_supported");
+  } catch (_) {
+    state.cheatsSupported = false;
+  }
+
+  try {
     const data = await invoke("get_state");
     state.G = data.games || [];
     state.completed = new Set(data.completed || []);

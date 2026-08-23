@@ -62,7 +62,10 @@ pub fn parse_shortcuts() -> Result<Vec<NonSteamGame>, String> {
 }
 
 fn shortcuts_path() -> Option<PathBuf> {
-    let steam_dir = dirs::home_dir()?.join(".local/share/Steam/userdata");
+    // Was hardcoded to ~/.local/share/Steam; going through the shared
+    // resolver is what makes non-Steam shortcuts work on Windows and on the
+    // ~/.steam/steam layout alike.
+    let steam_dir = crate::steam::steam_install_dir()?.join("userdata");
     if !steam_dir.exists() {
         return None;
     }
