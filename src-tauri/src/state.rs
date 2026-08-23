@@ -43,6 +43,13 @@ pub struct AppState {
 }
 
 impl AppState {
+    /// Where `state.json` actually lives on this platform. The UI used to
+    /// print a hardcoded `~/.config/backlog-tracker/`, which is a lie on
+    /// Windows.
+    pub fn display_path() -> String {
+        Self::path().display().to_string()
+    }
+
     fn path() -> PathBuf {
         let config = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
         let dir = config.join("backlog-tracker");

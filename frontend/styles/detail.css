@@ -1,9 +1,23 @@
-.detail-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--overlay); z-index: 99; opacity: 0; pointer-events: none; transition: opacity var(--t-mid); }
-.detail-overlay.open { opacity: 1; pointer-events: auto; }
-.detail-panel { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%) scale(0.95); width: 600px; max-width: 90vw; max-height: 85vh; background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--r-xl); z-index: 100; overflow: hidden; box-shadow: 0 8px 32px var(--overlay); opacity: 0; pointer-events: none; transition: opacity var(--t-mid), transform var(--t-mid); }
-.detail-panel.open { opacity: 1; pointer-events: auto; transform: translate(-50%, -50%) scale(1); }
-.detail-close { position: absolute; top: 10px; right: 10px; width: 32px; height: 32px; background: var(--overlay-light); border: 1px solid var(--border); border-radius: var(--r); color: var(--fg-dim); cursor: pointer; font-size: 1.2rem; display: flex; align-items: center; justify-content: center; z-index: 1; }
-.detail-close:hover { color: var(--fg); background: var(--overlay-close-hover); }
+/* Since #187 the detail view is its own OS window (detail.html). It fills
+   that window; sizing and closing belong to the window manager, which is the
+   whole point — the old modal was a fixed 600px box clamped to 85vh of the
+   MAIN window, so it could never use the screen it was on. */
+.detail-window {
+  /* Column layout: cover and tabs keep their natural height, the active tab
+     takes whatever is left. That is what makes the view follow the window
+     instead of the 45vh box it inherited from the old modal. */
+  display: flex; flex-direction: column;
+  height: 100vh; background: var(--bg-panel); overflow: hidden;
+}
+.detail-window > .detail-header,
+.detail-window > .detail-tabs { flex-shrink: 0; }
+.detail-window .detail-header-img {
+  border-radius: 0;
+  /* On a short window the cover would otherwise eat most of the height and
+     leave the tabs a sliver. Cap it and crop rather than letterbox. */
+  max-height: 38vh; object-fit: cover;
+}
+
 .detail-header-img { width: 100%; display: block; border-radius: 12px 12px 0 0; }
 .detail-header { position: relative; }
 .detail-header-info { position: absolute; bottom: 0; left: 0; right: 0; padding: 2rem 1rem 0.8rem; background: linear-gradient(transparent, var(--detail-gradient-end)); }
@@ -18,7 +32,11 @@
 .detail-tab { font-family: var(--font-display); padding: 0.5rem 1rem; cursor: pointer; color: var(--fg-dim); font-size: 0.78rem; font-weight: 700; text-transform: var(--display-transform); letter-spacing: var(--display-tracking); border-bottom: 2px solid transparent; margin-bottom: -2px; transition: all var(--t-fast); user-select: none; }
 .detail-tab:hover { color: var(--fg-strong); }
 .detail-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
-.detail-tab-panel { display: none; padding: 1rem; max-height: 45vh; overflow-y: auto; }
+.detail-tab-panel { display: none; padding: 1rem; }
+/* Only the visible tab participates in the layout, so it is the one that gets
+   the leftover height. `min-height: 0` is what lets a flex child actually
+   shrink and scroll rather than pushing the container taller. */
+.detail-tab-panel.active { display: block; flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .detail-tab-panel.active { display: block; }
 .detail-desc { font-size: 0.82rem; color: var(--fg-dim); margin: 0.5rem 0; line-height: 1.5; }
 .detail-tags { display: flex; flex-wrap: wrap; gap: 0.3rem; margin: 0.5rem 0; }
@@ -41,23 +59,65 @@
 .cards-summary { font-size: 0.82rem; color: var(--fg-dim); margin-bottom: 0.8rem; }
 .cards-section-title { font-size: 0.85rem; font-weight: 600; color: var(--fg); margin: 0.8rem 0 0.5rem; }
 .cards-section-title.foil { color: var(--warning); }
-.cards-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 0.6rem; }
-.card-item { background: var(--bg-3); border: 1px solid var(--border); border-radius: var(--r); padding: 0.4rem; text-align: center; transition: border-color var(--t-fast); }
+/* `perspective` has to live on the grid, not the card: applied per-card every
+   tile would get its own vanishing point and the row would look wrong. */
+.cards-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 0.7rem; perspective: 900px; }
+
+.card-item {
+  position: relative;
+  background: var(--bg-3); border: 1px solid var(--border);
+  border-radius: var(--r); padding: 0.4rem; text-align: center;
+  transform-style: preserve-3d;
+  transform: perspective(900px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)) translateZ(0);
+  transition: transform 220ms ease-out, box-shadow 220ms ease-out, border-color var(--t-fast);
+}
+/* While the pointer is on the card it must track without lag; the transition
+   is only there to settle it back down on the way out. */
+.card-item.tilting {
+  transition: box-shadow 220ms ease-out, border-color var(--t-fast);
+  transform: perspective(900px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)) translateZ(14px) scale(1.04);
+  box-shadow: 0 14px 28px var(--overlay);
+  z-index: 2;
+}
+/* The sheen follows the pointer across the face, which is what sells it as a
+   physical surface catching light rather than a rotating rectangle. */
+.card-item.tilting::after {
+  content: ""; position: absolute; inset: 0;
+  border-radius: var(--r); pointer-events: none;
+  background: radial-gradient(circle at var(--gx, 50%) var(--gy, 50%), rgba(255,255,255,0.22), transparent 55%);
+}
 .card-item:hover { border-color: var(--accent); }
 .card-item.unowned { opacity: 0.35; }
 .card-item.unowned .card-img { filter: grayscale(1); }
 .card-item.foil { border-color: var(--warning-border); background: var(--warning-bg-foil); }
-.card-img { width: 100%; aspect-ratio: 1; object-fit: contain; border-radius: var(--r-sm); }
+/* Steam serves these at 224x261. Forcing a square and letterboxing inside it
+   was making them small and padded; keep the real ratio. */
+.card-img { width: 100%; height: auto; display: block; border-radius: var(--r-sm); }
 .card-name { font-size: 0.68rem; color: var(--fg-strong); margin-top: 0.3rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card-qty { color: var(--accent); font-weight: 600; margin-left: 0.2rem; }
 .badges-section { margin-bottom: 1rem; }
-.badges-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); gap: 0.5rem; }
-.badge-item { text-align: center; padding: 0.4rem; background: var(--bg-3); border: 1px solid var(--border); border-radius: var(--r); transition: border-color var(--t-fast); }
+.badges-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(88px, 1fr)); gap: 0.6rem; perspective: 900px; }
+.badge-item {
+  position: relative;
+  text-align: center; padding: 0.5rem;
+  background: var(--bg-3); border: 1px solid var(--border); border-radius: var(--r);
+  transform: perspective(900px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg));
+  transition: transform 220ms ease-out, box-shadow 220ms ease-out, border-color var(--t-fast);
+}
+.badge-item.tilting {
+  transition: box-shadow 220ms ease-out, border-color var(--t-fast);
+  transform: perspective(900px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)) translateZ(10px) scale(1.05);
+  box-shadow: 0 12px 24px var(--overlay);
+  z-index: 2;
+}
 .badge-item:hover { border-color: var(--accent); }
 .badge-item.not-earned { opacity: 0.4; }
 .badge-item.not-earned .badge-img { filter: grayscale(1); }
 .badge-item.foil { border-color: var(--warning-border); background: var(--warning-bg-foil); }
 .badge-item.foil.not-earned { border-color: var(--border); }
+/* Steam ships these as 80x80 masters and nothing larger exists, so anything
+   above that is just stretched pixels. 64 keeps them crisp on a scaled
+   display, where 80 CSS px is already a 2x upscale. */
 .badge-img { width: 64px; height: 64px; }
 .badge-placeholder { width: 64px; height: 64px; background: var(--border); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; font-weight: 700; color: var(--fg-ghost); margin: 0 auto; }
 .badge-name { font-size: 0.65rem; color: var(--fg-strong); margin-top: 0.2rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
