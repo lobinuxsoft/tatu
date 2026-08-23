@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.8.0](https://github.com/lobinuxsoft/tatu/compare/v0.7.0...v0.8.0) (2026-08-23)
+
+
+### Features
+
+* **windows:** build the tracker on Windows with cheats gated off ([b13da35](https://github.com/lobinuxsoft/tatu/commit/b13da35bb501bb3520e2153dd93d21e5c06614f6)), closes [#180](https://github.com/lobinuxsoft/tatu/issues/180)
+* **windows:** ship a Windows build — release rename + cheats gated off ([bb8515b](https://github.com/lobinuxsoft/tatu/commit/bb8515b60645257c4f0d93261863c29b681522d2))
+
+
+### Documentation
+
+* **release:** rename shipped artifacts to Tatu and enable the Windows leg ([97546c6](https://github.com/lobinuxsoft/tatu/commit/97546c67ebdcf77bb5da96d4ebd1d1dcc76f8896)), closes [#180](https://github.com/lobinuxsoft/tatu/issues/180)
+
 ## [0.7.0](https://github.com/lobinuxsoft/tatu/compare/v0.6.0...v0.7.0) (2026-08-01)
 
 
