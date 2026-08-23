@@ -2,9 +2,13 @@
   "$schema": "https://raw.githubusercontent.com/nicerapp/tauri/dev/core/tauri-utils/schema.json",
   "identifier": "default",
   "description": "Default capability",
-  "windows": ["main"],
+  "windows": [
+    "main",
+    "detail"
+  ],
   "permissions": [
     "core:default",
+    "core:window:allow-set-title",
     "opener:default"
   ]
 }

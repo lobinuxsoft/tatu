@@ -1,5 +1,4 @@
 import { esc } from "../utils.js";
-import { opener } from "../tauri.js";
 
 function drmStatusLabel(info) {
   if (!info || !info.status) return { icon: "", label: "DRM: Desconocido", cls: "tag-drm-unknown" };
@@ -75,19 +74,7 @@ export function renderPreservabilityBlock(info, gameName) {
   let extra = "";
   if (p.key === "alternative" && gameName) {
     const url = gogSearchUrl(gameName);
-    extra = `<div class="pres-action"><a href="${esc(url)}" data-gog-url="${esc(url)}">\u{1F517} Buscar en GOG</a></div>`;
+    extra = `<div class="pres-action"><a href="${esc(url)}">\u{1F517} Buscar en GOG</a></div>`;
   }
   return `<div class="pres-block ${p.cls}"><div class="pres-heading">${p.heading}</div><div class="pres-text">${esc(hint)}</div>${extra}</div>`;
-}
-
-// Attach once on startup: open GOG search URLs via the Tauri opener plugin
-// when the user clicks an `a[data-gog-url]` anchor anywhere in the document.
-export function installGogLinkHandler() {
-  document.addEventListener("click", e => {
-    const a = e.target.closest("a[data-gog-url]");
-    if (!a) return;
-    e.preventDefault();
-    const url = a.getAttribute("data-gog-url");
-    if (url) opener.openUrl(url);
-  });
 }

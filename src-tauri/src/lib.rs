@@ -23,6 +23,8 @@ use cheat_runtime::FreezeRegistry;
 use commands::cheat_runtime_cmd::{ActiveCheats, FrameworkActor};
 
 use state::AppState;
+use tauri::WebviewWindowBuilder;
+use tauri_plugin_opener::OpenerExt;
 
 pub type SharedState = Mutex<AppState>;
 
@@ -53,6 +55,9 @@ macro_rules! tracker_handler {
             commands::disk_cmd::scan_sizes,
             commands::misc_cmd::detect_steam_id,
             commands::misc_cmd::cheats_supported,
+            commands::misc_cmd::state_path,
+            commands::window_cmd::open_detail_window,
+            commands::window_cmd::detail_target,
             $($extra),*
         ]
     };
@@ -63,7 +68,8 @@ pub fn run() {
 
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .manage(Mutex::new(app_state));
+        .manage(Mutex::new(app_state))
+        .manage(commands::window_cmd::DetailTarget::default());
 
     #[cfg(unix)]
     let builder = {
@@ -123,6 +129,98 @@ pub fn run() {
     let builder = builder.invoke_handler(tracker_handler![]);
 
     builder
+        .setup(|app| {
+            // The window is declared with `"create": false` in tauri.conf.json so
+            // it can be built here with a navigation guard attached. Without it a
+            // single external link strands the user: the webview navigates away
+            // from the app and there is no back button and no address bar, so the
+            // only way out is killing the process.
+            let config = app
+                .config()
+                .app
+                .windows
+                .first()
+                .cloned()
+                .expect("tauri.conf.json declares no window");
+
+            let handle = app.handle().clone();
+            WebviewWindowBuilder::from_config(app.handle(), &config)?
+                .on_navigation(move |url| {
+                    if is_app_url(url) {
+                        return true;
+                    }
+                    // Anything pointing outside the app belongs in the user's
+                    // browser. Returning false keeps the webview where it is.
+                    if let Err(e) = handle.opener().open_url(url.as_str(), None::<&str>) {
+                        eprintln!("[opener] failed to open {url}: {e}");
+                    }
+                    false
+                })
+                .build()?;
+
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+/// Whether `url` is the app's own frontend rather than somewhere on the web.
+///
+/// Tauri serves the bundled assets over a custom protocol whose exact shape
+/// differs per platform (`tauri://localhost`, `http://tauri.localhost` on
+/// Windows), and `cargo tauri dev` serves over plain localhost — so the check
+/// is on scheme and host, never on a single hardcoded origin.
+fn is_app_url(url: &tauri::Url) -> bool {
+    match url.scheme() {
+        "http" | "https" => matches!(
+            url.host_str(),
+            Some("localhost" | "tauri.localhost" | "127.0.0.1" | "[::1]")
+        ),
+        // Internal schemes the webview uses for its own bookkeeping. `about:blank`
+        // in particular is what a fresh webview starts on.
+        "tauri" | "asset" | "ipc" | "about" | "blob" | "data" => true,
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_app_url;
+
+    fn url(s: &str) -> tauri::Url {
+        s.parse().expect("test url")
+    }
+
+    #[test]
+    fn app_origins_are_allowed() {
+        for s in [
+            "tauri://localhost/index.html",
+            "http://tauri.localhost/",
+            "https://tauri.localhost/index.html",
+            "http://localhost:1420/",
+            "http://127.0.0.1:1420/",
+            "about:blank",
+        ] {
+            assert!(is_app_url(&url(s)), "{s} should be treated as the app");
+        }
+    }
+
+    #[test]
+    fn the_web_is_refused() {
+        for s in [
+            "https://steamcommunity.com/dev/apikey",
+            "http://steamcommunity.com/dev/apikey",
+            "https://www.gog.com/en/games",
+            "https://localhost.evil.com/",
+        ] {
+            assert!(!is_app_url(&url(s)), "{s} should not navigate in-app");
+        }
+    }
+
+    /// The A-Z jump list renders `<a href="#g-A">`, which resolves against the
+    /// app origin. Refusing it would break in-page navigation.
+    #[test]
+    fn in_page_anchors_stay() {
+        assert!(is_app_url(&url("http://tauri.localhost/#g-A")));
+    }
 }

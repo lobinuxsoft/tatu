@@ -3,7 +3,17 @@ import { state, TL, TC } from "../state.js";
 import { esc, fmtDate, mcColor } from "../utils.js";
 import { doneLoading, startLoading } from "../loading.js";
 import { renderSteam } from "../render/steam.js";
+import { emit } from "../tauri.js";
 import { renderDrmBadge, renderDrmExplanation, renderPreservabilityBlock } from "./drm_view.js";
+
+
+// Caches (DRM, HowLongToBeat, achievements) are refreshed from whichever
+// window the user is looking at. Re-render locally, and tell the other window
+// so the list behind the detail view does not go stale.
+function refreshLibraryViews() {
+  renderSteam();
+  emit("library-updated").catch(() => {});
+}
 
 export async function loadGameDetails(gameId) {
   try {
@@ -112,7 +122,7 @@ export async function loadAchievements(gameId) {
     if (panel) panel.innerHTML = html;
     state.achProgress[gameId] = [done, total];
     doneLoading("logros");
-    renderSteam();
+    refreshLibraryViews();
   } catch (e) {
     doneLoading("logros");
     if (state.panelGameId !== gameId) return;
@@ -199,7 +209,7 @@ export async function loadDrm(gameId) {
   try {
     const info = await invoke("get_game_drm", { appId: gameId });
     state.drmCache[gameId] = info;
-    renderSteam();
+    refreshLibraryViews();
     if (state.panelGameId !== gameId) return;
     const el = document.getElementById("dpDrm");
     if (!el) return;
@@ -236,7 +246,7 @@ export async function loadHltb(gameName, gameId) {
     if (r.completionist_hours > 0) html += `<span class="tag tag-cards">100%: ${r.completionist_hours}h</span>`;
     html += "</div>";
     el.innerHTML = `<span class="detail-info-label">Duracion (HLTB)</span><span class="detail-info-value">${html}</span>`;
-    renderSteam();
+    refreshLibraryViews();
   } catch (_) {
     const el = document.getElementById("dpHltb");
     if (el) { el.querySelector(".detail-info-value").textContent = "Error"; el.querySelector(".detail-info-value").style.color = "#f85149"; }

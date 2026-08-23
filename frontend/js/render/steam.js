@@ -5,6 +5,10 @@ import { renderDrmInlineBadge } from "../panel/drm_view.js";
 export function renderSteam() {
   const content = document.getElementById("content");
   const nav = document.getElementById("lNav");
+  // The detail window shares these modules but has no library list; without
+  // this guard every cache refresh from that window throws on the first
+  // missing element.
+  if (!content) return;
   document.querySelectorAll(".tbtn").forEach(b => b.classList.toggle("on", !!state.tog[b.dataset.t]));
   const cc = { game: 0, mp: 0, tool: 0, demo: 0 };
   state.G.forEach(g => { cc[gCat(g)]++; });

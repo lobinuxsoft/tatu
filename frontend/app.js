@@ -1,9 +1,8 @@
-import { invoke, getVersion } from "./js/tauri.js";
+import { invoke, getVersion, listen } from "./js/tauri.js";
 import { state } from "./js/state.js";
 import { renderSteam } from "./js/render/steam.js";
 import { renderNonSteam } from "./js/render/nonsteam.js";
-import { openDetailPanel, closeDetailPanel } from "./js/panel/detail.js";
-import { installGogLinkHandler } from "./js/panel/drm_view.js";
+import { installExternalLinks } from "./js/links.js";
 import { openImportModal, closeImportModal } from "./js/modals/import.js";
 import { doSync, doSyncNonSteam, doScanSizes, doFetchAllDrm } from "./js/actions.js";
 import { loadSettingsUI, checkConfigWarning, installSettingsHandlers } from "./js/settings.js";
@@ -17,6 +16,10 @@ async function init() {
   } catch (_) {
     state.cheatsSupported = false;
   }
+
+  // Before get_state: if the library fails to load, the help panel is exactly
+  // where the user goes to find out what they were supposed to configure.
+  fillHelpPanel();
 
   try {
     const data = await invoke("get_state");
@@ -52,6 +55,33 @@ async function init() {
     renderNonSteam();
   } catch (e) {
     document.getElementById("content").innerHTML = '<div class="loading" style="color:#f85149">Error: ' + e + '</div>';
+  }
+}
+
+// The help panel states two things this build cannot know at author time:
+// whether cheats exist on this platform, and where state.json really lives.
+async function fillHelpPanel() {
+  const cheats = document.getElementById("helpCheats");
+  if (cheats) {
+    cheats.innerHTML = state.cheatsSupported
+      ? 'Cada juego tiene una pestaña <strong>Cheats</strong> donde podés importar una tabla ' +
+        '<code>.CT</code> de Cheat Engine y activar sus opciones. Sólo aplica sobre un proceso ' +
+        'que arrancaste vos, y los juegos con anti-cheat quedan fuera a propósito.'
+      : 'No disponibles en esta plataforma. El motor de cheats corre sobre <code>ptrace</code>, ' +
+        'que no existe en Windows — por eso la pestaña no aparece. Está en camino un backend ' +
+        'nativo de Windows.';
+  }
+
+  try {
+    const path = await invoke("state_path");
+    for (const id of ["helpStatePath", "settingsStatePath"]) {
+      const el = document.getElementById(id);
+      if (el) el.textContent = path;
+    }
+    const footer = document.getElementById("footerStatePath");
+    if (footer) footer.textContent = "Estado guardado en " + path + " \u2014 ";
+  } catch (_) {
+    // Leave the placeholders rather than showing a wrong path.
   }
 }
 
@@ -137,19 +167,32 @@ document.getElementById("content").addEventListener("click", e => {
   if (!tr) return;
   const cb = tr.querySelector("input[data-id][data-list='steam']");
   if (!cb) return;
-  openDetailPanel(parseInt(cb.dataset.id, 10));
+  // #187: the detail view is its own window, so it can be moved, resized past
+  // this window's bounds, and left open beside the list.
+  invoke("open_detail_window", { appId: parseInt(cb.dataset.id, 10) })
+    .catch(e => console.error("open_detail_window failed", e));
 });
 
-// --- Detail panel ---
-document.getElementById("detailClose").addEventListener("click", closeDetailPanel);
-document.getElementById("detailOverlay").addEventListener("click", closeDetailPanel);
-document.addEventListener("keydown", e => {
-  if (e.key === "Escape" && state.panelOpen) closeDetailPanel();
+// The detail window fills the DRM / HowLongToBeat / achievement caches for
+// whichever game is open there. Re-read state so the list behind it reflects
+// what was just fetched instead of going stale until the next sync.
+listen("library-updated", async () => {
+  try {
+    const data = await invoke("get_state");
+    state.G = data.games || [];
+    state.achProgress = data.ach_progress || {};
+    state.hltbCache = data.hltb_cache || {};
+    state.drmCache = data.drm_cache || {};
+    state.sizeCache = data.size_cache || {};
+    renderSteam();
+  } catch (_) {
+    // A failed refresh just means the list is a sync behind; not worth a toast.
+  }
 });
 
 installSettingsHandlers();
 installThemeSwitcher();
-installGogLinkHandler();
+installExternalLinks();
 
 getVersion().then(v => { document.getElementById("appVersion").textContent = "v" + v; });
 init();
