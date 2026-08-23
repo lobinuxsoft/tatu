@@ -2,10 +2,12 @@ import { invoke, listen } from "./js/tauri.js";
 import { state } from "./js/state.js";
 import { renderDetail } from "./js/panel/detail.js";
 import { installExternalLinks } from "./js/links.js";
+import { installLightbox } from "./js/panel/lightbox.js";
 import { initTheme } from "./js/themes.js";
 
 initTheme();
 installExternalLinks();
+installLightbox();
 
 // This window has no library of its own: the panel modules read titles, hours
 // and completion out of `state`, so it loads the same snapshot the main window
