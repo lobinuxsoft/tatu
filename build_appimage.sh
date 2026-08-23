@@ -1,9 +1,12 @@
 #!/bin/bash
 set -e
 
-APP_NAME="Game Progress Tracker"
-BINARY_NAME="game-progress-tracker"
-DESKTOP_ID="com.lobinux.game-progress-tracker"
+# These must match src-tauri/tauri.conf.json: APP_NAME is productName (the
+# bundler names the AppDir after it), DESKTOP_ID is the identifier. Both had
+# drifted to the pre-rename values and no longer resolved to anything.
+APP_NAME="Tatu"
+BINARY_NAME="tatu-tracker"
+DESKTOP_ID="com.lobinux.tatu-tracker"
 ICON_SOURCE="src-tauri/icons/256x256.png"
 
 RED='\033[0;31m'

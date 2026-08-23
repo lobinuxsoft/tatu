@@ -13,14 +13,24 @@ dirs = "6"
 tauri-plugin-opener = "2"
 regex = "1"
 steam-vdf-parser = "0.1.1"
-cheat-runtime = { path = "../crates/cheat-runtime" }
-ce-launcher = { path = "../crates/ce-launcher" }
 thiserror = "2"
 urlencoding = "2"
+
+# The cheat runtime is the Linux ptrace backend (nix, /proc, ELF symbols).
+# Windows gets the tracker only until tatu-win lands (#181); gating the deps
+# here is what makes `cargo build` on windows-latest even reach the linker.
+[target.'cfg(unix)'.dependencies]
+cheat-runtime = { path = "../crates/cheat-runtime" }
+ce-launcher = { path = "../crates/ce-launcher" }
 # REFramework installer (#98) extracts dinput8.dll from praydog's release
 # zip. ce-launcher already pulls the same crate at the same major version
 # — keep them aligned to avoid two copies in the dep tree.
 zip = "8"
+
+# Steam is relocatable on Windows, so the install dir comes from
+# HKCU\Software\Valve\Steam\SteamPath rather than a guessed Program Files.
+[target.'cfg(windows)'.dependencies]
+winreg = "0.56"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

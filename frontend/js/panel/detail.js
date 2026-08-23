@@ -24,12 +24,12 @@ export function openDetailPanel(gameId) {
       `<div class="detail-tab active" data-dp="info">Info</div>` +
       `<div class="detail-tab" data-dp="logros">Logros</div>` +
       (g.has_cards ? `<div class="detail-tab" data-dp="cromos">Cromos</div>` : ``) +
-      `<div class="detail-tab" data-dp="cheats">Cheats</div>` +
+      (state.cheatsSupported ? `<div class="detail-tab" data-dp="cheats">Cheats</div>` : ``) +
     `</div>` +
     `<div class="detail-tab-panel active" id="dpInfo"><div class="loading"><div class="spinner"></div><br>Cargando info...</div></div>` +
     `<div class="detail-tab-panel" id="dpLogros"><div class="loading"><div class="spinner"></div><br>Cargando logros...</div></div>` +
     (g.has_cards ? `<div class="detail-tab-panel" id="dpCromos"><div class="loading"><div class="spinner"></div><br>Cargando inventario de Steam (puede tardar unos segundos)...</div></div>` : ``) +
-    `<div class="detail-tab-panel" id="dpCheats"><div class="loading"><div class="spinner"></div><br>Cargando cheats...</div></div>`;
+    (state.cheatsSupported ? `<div class="detail-tab-panel" id="dpCheats"><div class="loading"><div class="spinner"></div><br>Cargando cheats...</div></div>` : ``);
 
   document.getElementById("detailOverlay").classList.add("open");
   document.getElementById("detailPanel").classList.add("open");
@@ -49,7 +49,7 @@ export function openDetailPanel(gameId) {
   loadGameDetails(gameId);
   loadAchievements(gameId);
   if (g.has_cards) { startLoading("cromos"); loadCards(gameId); }
-  loadCheats(gameId);
+  if (state.cheatsSupported) loadCheats(gameId);
 }
 
 export function closeDetailPanel() {

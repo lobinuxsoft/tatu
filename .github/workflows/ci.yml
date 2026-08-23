@@ -67,9 +67,11 @@ jobs:
           - target: linux-amd64
             os: ubuntu-latest
             binary: tatu-tracker
-        # windows-amd64 disabled while the tool stays Linux-only.
-        # Re-add `- target: windows-amd64 / os: windows-latest /
-        # binary: tatu-tracker.exe` if/when tracker ships to Windows.
+          # The Windows build is the tracker only: the cheat runtime sits
+          # behind cfg(unix) until tatu-win lands (#181).
+          - target: windows-amd64
+            os: windows-latest
+            binary: tatu-tracker.exe
     steps:
       - uses: actions/checkout@v6
 

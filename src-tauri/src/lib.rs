@@ -4,50 +4,35 @@ mod disk;
 mod drm;
 mod hltb;
 mod inventory;
-mod prereqs;
 mod shortcuts;
 mod state;
 mod steam;
 
-use std::collections::HashMap;
+// Drops the Mono collector DLL into a Proton prefix — cheat path only.
+#[cfg(unix)]
+mod prereqs;
+
 use std::sync::Mutex;
 
+#[cfg(unix)]
+use std::collections::HashMap;
+
+#[cfg(unix)]
 use cheat_runtime::FreezeRegistry;
+#[cfg(unix)]
 use commands::cheat_runtime_cmd::{ActiveCheats, FrameworkActor};
+
 use state::AppState;
 
 pub type SharedState = Mutex<AppState>;
 
-pub fn run() {
-    let app_state = AppState::load();
-    let active_cheats: ActiveCheats = Mutex::new(HashMap::new());
-
-    // One-shot migration of any legacy cheat-core JSON to the manifest format
-    // consumed by `cheat-runtime`. Idempotent: existing manifests are skipped.
-    match cheat_runtime::migrate_default_dirs() {
-        Ok(report) if !report.migrated.is_empty() || !report.unsupported.is_empty() => {
-            eprintln!(
-                "[cheat-runtime migrate] migrated={:?} skipped={:?} unsupported={:?}",
-                report.migrated, report.skipped, report.unsupported
-            );
-        }
-        Ok(_) => {}
-        Err(e) => eprintln!("[cheat-runtime migrate] failed: {e}"),
-    }
-
-    // Post-#134: `.ct` files in `cheat-tables/<appid>/` are parsed on
-    // demand by `load_manifests_for` (no more JSON sidecars), so the
-    // startup auto-import pass was removed. Per-file parse failures now
-    // surface at list time via the loader's stderr log + the import
-    // command's validation toast.
-
-    tauri::Builder::default()
-        .plugin(tauri_plugin_opener::init())
-        .manage(Mutex::new(app_state))
-        .manage(FreezeRegistry::new())
-        .manage(active_cheats)
-        .manage(FrameworkActor::spawn())
-        .invoke_handler(tauri::generate_handler![
+/// The tracker commands every platform gets, plus whatever the caller
+/// appends. Written as a macro because `tauri::generate_handler!` needs the
+/// literal path list — a `#[cfg]` inside its arguments is never expanded, and
+/// keeping two full copies of the list is how they drift apart.
+macro_rules! tracker_handler {
+    ($($extra:path),* $(,)?) => {
+        tauri::generate_handler![
             commands::state_cmd::get_state,
             commands::state_cmd::get_settings,
             commands::state_cmd::save_settings,
@@ -67,27 +52,77 @@ pub fn run() {
             commands::collection_cmd::import_completed_from_collection,
             commands::disk_cmd::scan_sizes,
             commands::misc_cmd::detect_steam_id,
-            commands::ce_cmd::ce_install_status,
-            commands::ce_cmd::ce_install_trigger,
-            commands::ce_cmd::ce_list_tables_for_game,
-            commands::ce_cmd::ce_open_for_game,
-            commands::cheat_runtime_cmd::features::cheat_runtime_list_features,
-            commands::cheat_runtime_cmd::toggles::cheat_runtime_enable,
-            commands::cheat_runtime_cmd::toggles::cheat_runtime_disable,
-            commands::cheat_runtime_cmd::orphans::cheat_runtime_orphans_list,
-            commands::cheat_runtime_cmd::orphans::cheat_runtime_orphans_restore,
-            commands::cheat_runtime_cmd::orphans::cheat_runtime_orphans_dismiss,
-            commands::cheat_runtime_cmd::values::cheat_runtime_value_read,
-            commands::cheat_runtime_cmd::values::cheat_runtime_value_write,
-            commands::cheat_runtime_cmd::values::cheat_runtime_value_freeze,
-            commands::cheat_runtime_cmd::import::cheat_runtime_import_ct,
-            commands::cheat_runtime_cmd::import::cheat_runtime_remove_ct,
-            commands::cheat_runtime_cmd::prereqs::cheat_runtime_prereqs_check,
-            commands::cheat_runtime_cmd::prereqs::cheat_runtime_prereqs_install,
-            commands::cheat_runtime_cmd::prereqs::cheat_runtime_install_mono_collector,
-            commands::cheat_runtime_cmd::prereqs::cheat_runtime_set_winhttp_override,
-            commands::cheat_search_cmd::open_fearless_search,
-        ])
+            commands::misc_cmd::cheats_supported,
+            $($extra),*
+        ]
+    };
+}
+
+pub fn run() {
+    let app_state = AppState::load();
+
+    let builder = tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
+        .manage(Mutex::new(app_state));
+
+    #[cfg(unix)]
+    let builder = {
+        let active_cheats: ActiveCheats = Mutex::new(HashMap::new());
+
+        // One-shot migration of any legacy cheat-core JSON to the manifest format
+        // consumed by `cheat-runtime`. Idempotent: existing manifests are skipped.
+        match cheat_runtime::migrate_default_dirs() {
+            Ok(report) if !report.migrated.is_empty() || !report.unsupported.is_empty() => {
+                eprintln!(
+                    "[cheat-runtime migrate] migrated={:?} skipped={:?} unsupported={:?}",
+                    report.migrated, report.skipped, report.unsupported
+                );
+            }
+            Ok(_) => {}
+            Err(e) => eprintln!("[cheat-runtime migrate] failed: {e}"),
+        }
+
+        // Post-#134: `.ct` files in `cheat-tables/<appid>/` are parsed on
+        // demand by `load_manifests_for` (no more JSON sidecars), so the
+        // startup auto-import pass was removed. Per-file parse failures now
+        // surface at list time via the loader's stderr log + the import
+        // command's validation toast.
+
+        builder
+            .manage(FreezeRegistry::new())
+            .manage(active_cheats)
+            .manage(FrameworkActor::spawn())
+            .invoke_handler(tracker_handler![
+                commands::ce_cmd::ce_install_status,
+                commands::ce_cmd::ce_install_trigger,
+                commands::ce_cmd::ce_list_tables_for_game,
+                commands::ce_cmd::ce_open_for_game,
+                commands::cheat_runtime_cmd::features::cheat_runtime_list_features,
+                commands::cheat_runtime_cmd::toggles::cheat_runtime_enable,
+                commands::cheat_runtime_cmd::toggles::cheat_runtime_disable,
+                commands::cheat_runtime_cmd::orphans::cheat_runtime_orphans_list,
+                commands::cheat_runtime_cmd::orphans::cheat_runtime_orphans_restore,
+                commands::cheat_runtime_cmd::orphans::cheat_runtime_orphans_dismiss,
+                commands::cheat_runtime_cmd::values::cheat_runtime_value_read,
+                commands::cheat_runtime_cmd::values::cheat_runtime_value_write,
+                commands::cheat_runtime_cmd::values::cheat_runtime_value_freeze,
+                commands::cheat_runtime_cmd::import::cheat_runtime_import_ct,
+                commands::cheat_runtime_cmd::import::cheat_runtime_remove_ct,
+                commands::cheat_runtime_cmd::prereqs::cheat_runtime_prereqs_check,
+                commands::cheat_runtime_cmd::prereqs::cheat_runtime_prereqs_install,
+                commands::cheat_runtime_cmd::prereqs::cheat_runtime_install_mono_collector,
+                commands::cheat_runtime_cmd::prereqs::cheat_runtime_set_winhttp_override,
+                commands::cheat_search_cmd::open_fearless_search,
+            ])
+    };
+
+    // No cheat commands are registered here at all, so a stale frontend that
+    // still asks for one gets a hard invoke error instead of a toggle that
+    // pretends to work.
+    #[cfg(not(unix))]
+    let builder = builder.invoke_handler(tracker_handler![]);
+
+    builder
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

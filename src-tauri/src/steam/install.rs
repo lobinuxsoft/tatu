@@ -1,30 +1,66 @@
-use std::fs;
 use std::path::PathBuf;
-use std::sync::OnceLock;
-
-use regex::Regex;
 
 /// Locate the user's Steam client install directory.
 /// Exposed as `pub(crate)` so sibling modules (disk, collections) can reuse
 /// it without re-implementing the platform-specific discovery.
 pub(crate) fn steam_install_dir() -> Option<PathBuf> {
-    // Linux: ~/.local/share/Steam or ~/.steam/steam
-    if let Some(home) = dirs::home_dir() {
-        let primary = home.join(".local/share/Steam");
-        if primary.exists() {
-            return Some(primary);
-        }
-        let alt = home.join(".steam/steam");
-        if alt.exists() {
-            return Some(alt);
+    #[cfg(unix)]
+    {
+        // ~/.local/share/Steam or ~/.steam/steam
+        if let Some(home) = dirs::home_dir() {
+            let primary = home.join(".local/share/Steam");
+            if primary.exists() {
+                return Some(primary);
+            }
+            let alt = home.join(".steam/steam");
+            if alt.exists() {
+                return Some(alt);
+            }
         }
     }
-    // Windows: C:\Program Files (x86)\Steam
-    #[cfg(target_os = "windows")]
+    #[cfg(windows)]
     {
-        let win_path = PathBuf::from(r"C:\Program Files (x86)\Steam");
-        if win_path.exists() {
-            return Some(win_path);
+        // The installer writes the real path to the registry, and it is often
+        // not on C: — Steam is routinely moved to a second drive. Guessing
+        // Program Files first would find a leftover empty dir on those setups.
+        if let Some(from_registry) = windows_steam_path_from_registry() {
+            if from_registry.exists() {
+                return Some(from_registry);
+            }
+        }
+        let default = PathBuf::from(r"C:\Program Files (x86)\Steam");
+        if default.exists() {
+            return Some(default);
+        }
+    }
+    None
+}
+
+/// Read `SteamPath` from the registry. HKCU is written per user by the
+/// client itself; HKLM `InstallPath` is the machine-wide installer value and
+/// only differs when several accounts share one install.
+#[cfg(windows)]
+fn windows_steam_path_from_registry() -> Option<PathBuf> {
+    use winreg::RegKey;
+    use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+
+    let candidates = [
+        (HKEY_CURRENT_USER, r"Software\Valve\Steam", "SteamPath"),
+        (
+            HKEY_LOCAL_MACHINE,
+            r"SOFTWARE\WOW6432Node\Valve\Steam",
+            "InstallPath",
+        ),
+        (HKEY_LOCAL_MACHINE, r"SOFTWARE\Valve\Steam", "InstallPath"),
+    ];
+
+    for (hive, subkey, value) in candidates {
+        if let Ok(key) = RegKey::predef(hive).open_subkey(subkey)
+            && let Ok(path) = key.get_value::<String, _>(value)
+            && !path.is_empty()
+        {
+            // SteamPath uses forward slashes; PathBuf handles both on Windows.
+            return Some(PathBuf::from(path));
         }
     }
     None
@@ -75,7 +111,13 @@ pub fn detect_steam_id() -> Option<String> {
 ///
 /// Failure modes folded into an empty vec: Steam not installed, the
 /// VDF missing or unreadable, no `"path"` entries inside.
+///
+/// Its only consumer is `steam::exe`, which is gated off on Windows until
+/// the Win32 backend lands (#181) — hence the same gate here.
+#[cfg(unix)]
 pub(crate) fn library_paths() -> Vec<PathBuf> {
+    use std::fs;
+
     let Some(steam) = steam_install_dir() else {
         return Vec::new();
     };
@@ -93,7 +135,11 @@ pub(crate) fn library_paths() -> Vec<PathBuf> {
 /// from a `libraryfolders.vdf` blob. Windows-style `\\` separators
 /// are normalised to forward slashes so callers can join them with
 /// `Path::join` portably.
+#[cfg(any(unix, test))]
 pub(crate) fn parse_library_paths(content: &str) -> Vec<String> {
+    use regex::Regex;
+    use std::sync::OnceLock;
+
     static RE: OnceLock<Regex> = OnceLock::new();
     let re = RE.get_or_init(|| Regex::new(r#""path"\s*"([^"]+)""#).expect("static regex"));
     re.captures_iter(content)
