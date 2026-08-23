@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Game Progress Tracker</title>
+<title>Tatu</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Orbitron:wght@500;700;900&family=Outfit:wght@400;500;600;700&family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -12,24 +12,25 @@
 <body>
 <div class="container">
   <header>
-    <h1>Game Progress Tracker</h1>
+    <h1>Tatu</h1>
     <p class="subtitle" id="subtitle">Cargando...</p>
   </header>
 
   <div class="tabs">
     <div class="tab active" data-tab="steam">Steam <span class="tab-count" id="tabSteamCount"></span></div>
     <div class="tab" data-tab="nonsteam">Non-Steam <span class="tab-count" id="tabNonsteamCount"></span></div>
-    <div class="tab" data-tab="settings" style="margin-left:auto; color:#6e7681;">Settings</div>
+    <div class="tab" data-tab="help" style="margin-left:auto;">Cómo funciona</div>
+    <div class="tab" data-tab="settings" style="color:#6e7681;">Settings</div>
   </div>
 
   <!-- STEAM TAB -->
   <div class="tab-panel active" id="panel-steam">
     <div class="sync-bar">
       <span class="sync-info" id="syncInfo"></span>
+      <button class="sync-btn" id="syncBtn" title="Trae tu biblioteca desde Steam: juegos, horas jugadas, género y si tienen cromos.">Sincronizar</button>
+      <button class="sync-btn" id="importBtn" title="Marca como completados los juegos de una colección que ya tengas armada en Steam (por ejemplo: TERMINADOS).">Importar Terminados</button>
       <button class="sync-btn" id="sizeBtn" title="Escanea libraryfolders.vdf y registra el tamaño en disco de cada juego instalado.">Escanear tamaño</button>
-      <button class="sync-btn" id="importBtn" title="Importa una colección de Steam como juegos completados (por ejemplo: TERMINADOS).">Importar colección</button>
       <button class="sync-btn" id="drmBtn" title="Consulta DRM (Steam Store + PCGamingWiki) para todos los juegos sin caché. Tarda ~1s por juego.">Cargar DRM</button>
-      <button class="sync-btn" id="syncBtn">Sincronizar</button>
     </div>
     <div class="stats">
       <div class="stat"><div class="stat-value c1" id="sComp">0</div><div class="stat-label">Completados</div></div>
@@ -87,7 +88,100 @@
       <div class="stat"><div class="stat-value c2" id="nsPend">0</div><div class="stat-label">Pendientes</div></div>
     </div>
     <div class="progress-wrap"><div class="progress-bar" id="nspBar"></div><div class="progress-text" id="nspText">0%</div></div>
-    <div id="nsContent"><div class="empty-state">Dale a "Leer shortcuts.vdf" para cargar tus juegos Non-Steam.</div></div>
+    <div id="nsContent"><div class="empty-state">Dale a "Leer shortcuts.vdf" para cargar tus juegos Non-Steam.<br><br>Son los accesos directos que agregaste al cliente de Steam a mano. Se cuentan aparte de tu biblioteca: Steam no registra horas, logros ni cromos para ellos.</div></div>
+  </div>
+
+  <!-- HELP TAB -->
+  <div class="tab-panel" id="panel-help">
+    <div class="help-wrap">
+      <h2 class="help-section-heading" style="margin-top:0;">Qué hace Tatu</h2>
+      <p class="help-lead">
+        Tatu es un registro de tu backlog: te muestra <strong>los juegos que ya tenés</strong>
+        y te deja marcar cuáles terminaste. No es una tienda ni un lanzador — no compra,
+        no descarga y no abre juegos. Lee tu biblioteca y lleva la cuenta.
+      </p>
+
+      <div class="help-step">
+        <div class="help-num">1</div>
+        <div class="help-body">
+          <div class="help-title">Poné tu API Key y tu Steam ID</div>
+          <div class="help-text">
+            En <strong>Settings</strong>. La key es la <strong>Steam Web API key</strong>, gratis,
+            la generás en
+            <a href="https://steamcommunity.com/dev/apikey">steamcommunity.com/dev/apikey</a>
+            con tu propia cuenta. El Steam ID se detecta solo si tenés Steam instalado.
+            <div class="help-note">
+              Sin esos dos datos Steam no te deja consultar tu propia biblioteca, así que
+              no hay sincronización posible. Se guardan sólo en tu disco y no se mandan a
+              ningún lado que no sea Steam.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="help-step">
+        <div class="help-num">2</div>
+        <div class="help-body">
+          <div class="help-title">Sincronizá</div>
+          <div class="help-text">
+            El botón <strong>Sincronizar</strong> trae tu biblioteca: nombre, horas jugadas,
+            género y si tiene cromos. Sólo aparecen los juegos que <strong>ya son tuyos</strong>.
+            Después, cada juego abre una ficha con logros, cromos, clasificación de DRM y
+            tiempo estimado en HowLongToBeat.
+          </div>
+        </div>
+      </div>
+
+      <div class="help-step">
+        <div class="help-num">3</div>
+        <div class="help-body">
+          <div class="help-title">Marcá lo terminado — o traelo hecho de Steam</div>
+          <div class="help-text">
+            Podés tildar juego por juego, pero si ya tenés una <strong>colección armada en
+            Steam</strong> (por ejemplo una que se llame <code>TERMINADOS</code>), usá
+            <strong>Importar Terminados</strong> y Tatu marca todos esos de una.
+            Es la forma rápida de arrancar con cientos de juegos ya clasificados.
+            <div class="help-note">
+              Las colecciones se leen de la base local del cliente de Steam, así que tenés
+              que tener Steam instalado y haber abierto la cuenta al menos una vez en esta
+              máquina.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="help-step">
+        <div class="help-num">4</div>
+        <div class="help-body">
+          <div class="help-title">Los juegos que no son de Steam van aparte</div>
+          <div class="help-text">
+            La pestaña <strong>Non-Steam</strong> lee los accesos directos que agregaste al
+            cliente de Steam (<code>shortcuts.vdf</code>) con <strong>Leer shortcuts.vdf</strong>.
+            Se listan y se cuentan <strong>por separado</strong>, con su propio progreso:
+            Steam no sabe nada de ellos, así que no tienen horas jugadas, ni logros, ni cromos.
+          </div>
+        </div>
+      </div>
+
+      <h2 class="help-section-heading">Los botones de la barra</h2>
+      <div class="help-text" style="line-height:1.9;">
+        <strong>Sincronizar</strong> — trae la biblioteca desde Steam.<br>
+        <strong>Importar Terminados</strong> — marca como completados los juegos de una colección tuya.<br>
+        <strong>Escanear tamaño</strong> — lee cuánto ocupa en disco cada juego instalado. Es local y va rápido.<br>
+        <strong>Cargar DRM</strong> — consulta Steam y PCGamingWiki para clasificar el DRM de cada juego.
+        Tarda alrededor de un segundo por juego, así que la primera vez conviene dejarlo corriendo.
+      </div>
+
+      <h2 class="help-section-heading">Cheats</h2>
+      <div class="help-text" id="helpCheats"></div>
+
+      <h2 class="help-section-heading">Dónde quedan tus datos</h2>
+      <div class="help-text">
+        Todo vive en un solo archivo local, <code id="helpStatePath">state.json</code>,
+        junto con tu key. Tatu no tiene servidor ni cuenta propia: si borrás esa carpeta,
+        borraste todo.
+      </div>
+    </div>
   </div>
 
   <!-- SETTINGS TAB -->
@@ -113,8 +207,10 @@
           <input type="password" id="cfgApiKey" class="search" style="flex:1; font-family:monospace;" placeholder="Tu API key de Steam...">
           <button class="sync-btn" id="toggleKeyBtn" style="white-space:nowrap;">Mostrar</button>
         </div>
-        <p style="font-size:0.7rem; color:#484f58; margin-top:0.3rem;">
-          Generala en <a href="https://steamcommunity.com/dev/apikey" onclick="event.preventDefault(); window.__TAURI__.opener.openUrl('https://steamcommunity.com/dev/apikey');" style="color:#58a6ff; cursor:pointer;">steamcommunity.com/dev/apikey</a>
+        <p style="font-size:0.7rem; color:var(--fg-ghost); margin-top:0.3rem;">
+          Es la <strong>Steam Web API key</strong> — gratis, la generás con tu propia cuenta en
+          <a href="https://steamcommunity.com/dev/apikey" style="color:var(--accent); cursor:pointer;">steamcommunity.com/dev/apikey</a>.
+          Sin ella Steam no responde qué juegos tenés.
         </p>
       </div>
 
@@ -135,19 +231,19 @@
       </div>
 
       <div style="margin-top:2rem; padding-top:1rem; border-top:1px solid #21262d;">
-        <p style="font-size:0.75rem; color:#484f58;">Los datos se guardan en <code style="color:#8b949e;">~/.config/backlog-tracker/state.json</code></p>
+        <p style="font-size:0.75rem; color:var(--fg-ghost);">Los datos se guardan en <code style="color:var(--fg-dim);" id="settingsStatePath">state.json</code></p>
       </div>
     </div>
   </div>
 
-  <footer>Estado guardado en ~/.config/backlog-tracker/ &mdash; <span id="appVersion"></span></footer>
+  <footer><span id="footerStatePath"></span><span id="appVersion"></span></footer>
 </div>
 
 <div class="global-loading hidden" id="globalLoading"><div class="spinner"></div><div class="global-loading-text">Cargando...</div></div>
 <div class="modal-overlay hidden" id="importOverlay">
   <div class="modal" id="importModal">
     <div class="modal-header">
-      <h3>Importar colección de Steam como completados</h3>
+      <h3>Importar Terminados desde una colección de Steam</h3>
       <button class="modal-close" id="importClose">&times;</button>
     </div>
     <p class="modal-hint">Los juegos de la colección elegida se agregarán al set de completados (no reemplaza los actuales). Solo cuentan los juegos presentes en tu librería sincronizada.</p>

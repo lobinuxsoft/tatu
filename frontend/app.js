@@ -3,7 +3,7 @@ import { state } from "./js/state.js";
 import { renderSteam } from "./js/render/steam.js";
 import { renderNonSteam } from "./js/render/nonsteam.js";
 import { openDetailPanel, closeDetailPanel } from "./js/panel/detail.js";
-import { installGogLinkHandler } from "./js/panel/drm_view.js";
+import { installExternalLinks } from "./js/links.js";
 import { openImportModal, closeImportModal } from "./js/modals/import.js";
 import { doSync, doSyncNonSteam, doScanSizes, doFetchAllDrm } from "./js/actions.js";
 import { loadSettingsUI, checkConfigWarning, installSettingsHandlers } from "./js/settings.js";
@@ -17,6 +17,10 @@ async function init() {
   } catch (_) {
     state.cheatsSupported = false;
   }
+
+  // Before get_state: if the library fails to load, the help panel is exactly
+  // where the user goes to find out what they were supposed to configure.
+  fillHelpPanel();
 
   try {
     const data = await invoke("get_state");
@@ -52,6 +56,33 @@ async function init() {
     renderNonSteam();
   } catch (e) {
     document.getElementById("content").innerHTML = '<div class="loading" style="color:#f85149">Error: ' + e + '</div>';
+  }
+}
+
+// The help panel states two things this build cannot know at author time:
+// whether cheats exist on this platform, and where state.json really lives.
+async function fillHelpPanel() {
+  const cheats = document.getElementById("helpCheats");
+  if (cheats) {
+    cheats.innerHTML = state.cheatsSupported
+      ? 'Cada juego tiene una pestaña <strong>Cheats</strong> donde podés importar una tabla ' +
+        '<code>.CT</code> de Cheat Engine y activar sus opciones. Sólo aplica sobre un proceso ' +
+        'que arrancaste vos, y los juegos con anti-cheat quedan fuera a propósito.'
+      : 'No disponibles en esta plataforma. El motor de cheats corre sobre <code>ptrace</code>, ' +
+        'que no existe en Windows — por eso la pestaña no aparece. Está en camino un backend ' +
+        'nativo de Windows.';
+  }
+
+  try {
+    const path = await invoke("state_path");
+    for (const id of ["helpStatePath", "settingsStatePath"]) {
+      const el = document.getElementById(id);
+      if (el) el.textContent = path;
+    }
+    const footer = document.getElementById("footerStatePath");
+    if (footer) footer.textContent = "Estado guardado en " + path + " \u2014 ";
+  } catch (_) {
+    // Leave the placeholders rather than showing a wrong path.
   }
 }
 
@@ -149,7 +180,7 @@ document.addEventListener("keydown", e => {
 
 installSettingsHandlers();
 installThemeSwitcher();
-installGogLinkHandler();
+installExternalLinks();
 
 getVersion().then(v => { document.getElementById("appVersion").textContent = "v" + v; });
 init();

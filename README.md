@@ -45,6 +45,26 @@ The engine above that backend already does compile for Windows — `tatu-mem` (t
 
 Until it lands, the Windows build does not register the cheat commands at all and the Cheats tab is not rendered.
 
+## How it works
+
+Tatu reads the library you already own and keeps score. It is not a store and not a launcher: it never buys, downloads or starts a game.
+
+**1. Steam Web API key + Steam ID.** In *Settings*. The key is free and you generate it against your own account at [steamcommunity.com/dev/apikey](https://steamcommunity.com/dev/apikey) — without it Steam will not answer which games you own, so nothing can sync. The Steam ID is detected automatically when the Steam client is installed. Both are stored locally, next to the rest of your data.
+
+**2. Sync.** *Sincronizar* pulls your library: titles, hours played, genre, and whether the game issues trading cards. Only games you **already own** appear — there is no browsing, no wishlist, no catalogue. Each game then opens a detail panel with achievements, cards, a DRM classification (Steam Store + PCGamingWiki) and a HowLongToBeat estimate.
+
+**3. Mark what you finished — or import it.** You can tick games one at a time, but if you already keep a **collection in the Steam client** (say one called `TERMINADOS`), *Importar Terminados* marks every game in it as completed in one pass. That is the fast way in when you have hundreds of games already sorted. Collections are read from the Steam client's local database, so Steam must be installed and the account opened at least once on this machine.
+
+**4. Non-Steam games are tracked separately.** The *Non-Steam* tab reads the shortcuts you added to the Steam client by hand (`shortcuts.vdf`) and lists them with their own progress counter. Steam knows nothing about these, so they have no hours, no achievements and no cards — which is exactly why they are not mixed into the main list. Filling in that missing data by hand is [#186](https://github.com/lobinuxsoft/tatu/issues/186).
+
+**Other actions.** *Escanear tamaño* reads how much disk each installed game takes (local, fast). *Cargar DRM* queries Steam and PCGamingWiki to classify every uncached game — roughly a second each, so the first run is worth leaving to churn.
+
+**Cheats** are Linux-only; see *Platform support* above.
+
+### Where your data lives
+
+One local file, alongside your API key. Tatu has no server and no account of its own — delete the folder and everything is gone. The exact path is shown in *Settings* and in the *Cómo funciona* tab; see [Configuration](#configuration) for the layout.
+
 ## Architecture
 
 ```
