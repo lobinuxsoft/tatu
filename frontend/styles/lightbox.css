@@ -12,7 +12,10 @@
 .lightbox.hidden { display: none; }
 
 .lightbox-img {
-  max-width: 100%; max-height: 80%;
+  /* Height is set from JS against the source resolution: max-* alone only
+     caps, so a 224x261 card would sit at natural size in a large window,
+     while a flat 70vh would shred an 80x80 badge. */
+  width: auto; max-width: 92vw; max-height: 70vh;
   object-fit: contain;
   border-radius: var(--r-lg);
   box-shadow: 0 8px 32px var(--overlay);

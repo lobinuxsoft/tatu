@@ -3,11 +3,13 @@ import { state } from "./js/state.js";
 import { renderDetail } from "./js/panel/detail.js";
 import { installExternalLinks } from "./js/links.js";
 import { installLightbox } from "./js/panel/lightbox.js";
+import { installCardTilt } from "./js/panel/card_tilt.js";
 import { initTheme } from "./js/themes.js";
 
 initTheme();
 installExternalLinks();
 installLightbox();
+installCardTilt();
 
 // This window has no library of its own: the panel modules read titles, hours
 // and completion out of `state`, so it loads the same snapshot the main window
