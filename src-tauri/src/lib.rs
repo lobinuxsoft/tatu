@@ -56,6 +56,8 @@ macro_rules! tracker_handler {
             commands::misc_cmd::detect_steam_id,
             commands::misc_cmd::cheats_supported,
             commands::misc_cmd::state_path,
+            commands::window_cmd::open_detail_window,
+            commands::window_cmd::detail_target,
             $($extra),*
         ]
     };
@@ -66,7 +68,8 @@ pub fn run() {
 
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .manage(Mutex::new(app_state));
+        .manage(Mutex::new(app_state))
+        .manage(commands::window_cmd::DetailTarget::default());
 
     #[cfg(unix)]
     let builder = {
