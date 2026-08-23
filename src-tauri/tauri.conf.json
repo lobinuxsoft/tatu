@@ -1,6 +1,6 @@
 {
   "$schema": "https://raw.githubusercontent.com/nicerapp/tauri/dev/core/tauri-config-schema/schema.json",
-  "productName": "Tatu Tracker",
+  "productName": "Tatu",
   "version": "0.7.0",
   "identifier": "com.lobinux.tatu-tracker",
   "build": {
@@ -34,7 +34,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "Game Progress Tracker",
+        "title": "Tatu",
         "width": 960,
         "height": 800,
         "resizable": true,

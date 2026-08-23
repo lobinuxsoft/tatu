@@ -1,105 +1,105 @@
 # Tatu
 
 <div align="center">
-  <strong>Steam backlog tracker with an Aurora-style cheat backend under Proton/Wine.</strong>
+  <strong>Steam backlog tracker with a native Linux cheat runtime.</strong>
 
   [![License](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
   [![Rust](https://img.shields.io/badge/Rust-stable-DEA584?logo=rust)](https://www.rust-lang.org/)
   [![Tauri](https://img.shields.io/badge/Tauri-v2-FFC131?logo=tauri)](https://tauri.app/)
-  [![SolidJS](https://img.shields.io/badge/SolidJS-1.x-2C4F7C?logo=solid)](https://www.solidjs.com/)
 </div>
 
 > **Tatu** = *armadillo* in Guaraní. Sibling project to [Yryvu](https://github.com/lobinuxsoft/yryvu) (vulture, a Git client).
 
 ## Overview
 
-Tatu is a desktop application for tracking what is in your Steam backlog and applying single-player cheats to games you own. The cheat layer is a clean-room re-implementation of the in-process pattern used by Aurora-style trainers, ported to a Linux host through a Win32 bridge running under Proton + Steam Linux Runtime.
+Tatu is a desktop application for tracking what is in your Steam backlog and applying single-player cheats to games you own. The cheat layer is a clean-room re-implementation of the CheatEngine Auto-Assembler engine driving a native Linux `ptrace` backend — a Proton game is an ordinary Linux process from the kernel's point of view, so no Wine-side component is involved.
 
 ### What Tatu is
 
-- A **backlog tracker** for the games you own on Steam (progress, time invested, notes).
-- A **single-player cheat host** that applies CheatEngine-style memory patches via a Win32 worker running inside the same Proton container as the game.
-- A **Steam compatibility tool** (`tatu-launcher`) so the bridge handoff is reachable from the Steam UI — pick *Properties → Compatibility → Tatu Launcher* and the rest is transparent.
+- A **backlog tracker** for the games you own on Steam (progress, achievements, trading cards, DRM, size on disk).
+- A **single-player cheat host** that applies CheatEngine-style memory patches to a process you launched yourself.
 
 ### What Tatu is NOT
 
 - **NOT a piracy tool.** Tatu does not crack DRM, distribute games, or interact with multiplayer state. It only operates on local processes you launched yourself.
 - **NOT a multiplayer cheat.** Online games with anti-cheat (EAC / BattlEye / Vanguard) are explicitly out of scope — Tatu detects and refuses, no bypass attempts.
-- **NOT a Cheat Engine fork.** The cheat-runtime crate is a clean re-implementation that consumes `.CT` tables, not a wrapper around `cheatengine.exe`.
+- **NOT a Cheat Engine fork.** The engine is a clean re-implementation that consumes `.CT` tables, not a wrapper around `cheatengine.exe`.
 
 ### Key Features
 
-- **Steam library integration** — reads owned games, install state, and play time.
-- **`.CT` import** — opens existing Cheat Engine tables and surfaces toggles in the tracker UI.
-- **Aurora-style cheat backend** — `tatu-bridge.exe` runs as a Win32 worker inside the same Proton invocation as the game (shared SLR container + wineserver), so `OpenProcess` / `VirtualAllocEx` / `WriteProcessMemory` / `ReadProcessMemory` all see the game's PID natively.
-- **Linux ptrace fallback** — `cheat-runtime` keeps a ptrace-based backend for native Linux games (no bridge needed).
-- **Steam compat tool packaging** — `tatu-launcher` is a drop-in for `~/.steam/root/compatibilitytools.d/` that delegates to the user's real Proton (Experimental / GE / etc.); the per-game Proton picker stays meaningful.
-- **Orphan-hook recovery** — persistent undo log of every code patch so an interrupted session can be rolled back cleanly.
+- **Steam library integration** — owned games, install state, play time, achievements, trading cards, DRM classification and size on disk.
+- **`.CT` import** — parses existing Cheat Engine tables and surfaces their toggles in the tracker UI.
+- **Native Linux cheat runtime** — `cheat-runtime` drives `process_vm_readv` / `process_vm_writev` and `ptrace`, against native ELF games and Proton games alike.
+- **Orphan-hook recovery** — persistent undo log of every code patch, so an interrupted session can be rolled back cleanly.
+
+## Platform support
+
+| | Linux | Windows |
+|---|---|---|
+| Backlog tracker | ✅ | ✅ |
+| Cheats | ✅ | ❌ hidden |
+
+The tracker is portable. The cheat runtime is not: it is built on `ptrace`, `process_vm_readv`, `/proc/<pid>/maps` and ELF symbol lookup, none of which exist on Windows.
+
+The engine above that backend already does compile for Windows — `tatu-mem` (the `MemoryAccess` trait, AOB scan, pointer-chain walk, CE address expressions) and `tatu-engine` (Auto-Assembler parser, x86_64 assembler, executor) are OS-agnostic by construction. What is missing is the Win32 sibling of the Linux backend, tracked in [#181](https://github.com/lobinuxsoft/tatu/issues/181).
+
+Until it lands, the Windows build does not register the cheat commands at all and the Cheats tab is not rendered.
 
 ## Architecture
 
 ```
-┌────────────────────────────────┐         IPC (named pipe)         ┌──────────────────────────────┐
-│        Tatu Tracker            │◄────────────────────────────────►│      tatu-bridge (Win32)     │
-│   (Linux Tauri + SolidJS)      │                                  │   inside one Proton invoke   │
-│                                │                                  │   ┌────────────────────────┐ │
-│ - Steam library                │                                  │   │     game.exe           │ │
-│ - .CT parser                   │                                  │   │  (CreateProcess child) │ │
-│ - Cheat UI + activations       │                                  │   └────────────────────────┘ │
-│ - Persistent undo log          │                                  │ OpenProcess + memory ops     │
-└────────────────────────────────┘                                  └──────────────────────────────┘
-            ▲
-            │ Linux ptrace backend (fallback for native games)
-            ▼
-   /proc/<pid>/mem via cheat-runtime
+┌──────────────────────────────┐
+│        tatu-tracker          │   Tauri 2 + vanilla ES modules
+│  Steam library · .CT import  │
+│  cheat toggles · undo log    │
+└──────────────┬───────────────┘
+               │
+        ┌──────▼───────┐
+        │ tatu-engine  │   CE Auto-Assembler parser + x86_64 assembler
+        └──────┬───────┘   + executor.  OS-agnostic.
+               │
+        ┌──────▼───────┐
+        │  tatu-mem    │   MemoryAccess trait, AOB scan, pointer chains,
+        └──────┬───────┘   CE address expressions.  OS-agnostic.
+               │
+   ┌───────────┴────────────┐
+   │                        │
+┌──▼─────────────┐   ┌──────▼──────────┐
+│ cheat-runtime  │   │   tatu-win      │   #181, not written yet
+│ ptrace backend │   │ Win32 backend   │
+└────────────────┘   └─────────────────┘
 ```
 
 | Component | Role |
 |-----------|------|
-| **tatu-tracker** | Desktop app (Tauri + SolidJS). Steam library view, `.CT` import, per-game cheat toggles, orphan recovery UI. |
-| **tatu-bridge** | Win32 binary (cross-compiled with mingw-w64). Two modes: `--launch` (bootstrap — CreateProcess `self --connect` and the real game.exe inside one Proton invocation) and `--connect` (the cheat worker — talks Win32 APIs against the game). |
-| **tatu-launcher** | Linux ELF. Steam compatibility tool that swaps `<game.exe>` for `<tatu-bridge.exe --launch game.exe>` on opted-in appids; passthrough on every other verb / unopted game so the per-game Proton picker stays intact. |
-| **tatu-proto** | Wire types shared by tracker and bridge. Bincode 2 + Serde. |
-| **cheat-runtime** | Pure-logic engine (`.CT` parser, AOB scanner, code patcher, codecave allocator, pointer-chain walker). Linux ptrace backend, will be shared with the Win32 bridge via a `MemoryAccess` trait. |
-| **ce-launcher** | Linux launcher for [Cheat Engine](https://www.cheatengine.org/) running under its own Wine prefix — useful for editing `.CT` tables that Tatu then consumes. |
+| **tatu-tracker** | Desktop app (Tauri 2, `src-tauri/`). Steam library view, `.CT` import, per-game cheat toggles, orphan recovery UI. The frontend under `frontend/` is plain ES modules — no bundler, no framework. |
+| **tatu-mem** | Backend-agnostic memory primitives: the `MemoryAccess` trait plus the pure logic built on it — AOB pattern scan, pointer-chain walk, typed read/write, CE address-expression parser. |
+| **tatu-engine** | Backend-agnostic CE Auto-Assembler engine: script parser, x86_64 assembler (`iced-x86`), and the executor state machine. |
+| **cheat-runtime** | The Linux backend. `process_vm_readv`/`writev`, `ptrace` attach and POKEDATA, region enumeration from `/proc/<pid>/maps`, ELF symbol lookup, codecave allocator, freeze worker, orphan-hook persistence. |
+| **cheat-mono-collector** | Proxy DLL dropped next to a Unity game so Proton loads it; reports Mono/IL2CPP class and field offsets back over a loopback socket. |
+| **ce-launcher** | Installs and launches [Cheat Engine](https://www.cheatengine.org/) for Linux — useful for authoring the `.CT` tables Tatu then consumes. |
 
 ## Status
 
-Tatu is **early-stage and not yet production-ready**. The Win32 bridge has been smoke-validated end-to-end (1000/1000 round-trips, 0 variance, 42 µs avg under Ender Magnolia + Proton Experimental), but a full Steam UI flow is still in flight (see [#106](https://github.com/lobinuxsoft/tatu/issues/106)).
+Tatu is **early-stage and not yet production-ready**. The tracker is usable day to day; the cheat runtime works but coverage varies by game and engine.
 
-No public releases have been cut yet — the version listed in `Cargo.toml` reflects pre-release work.
-
-## Backend selection
-
-Tatu ships two cheat backends; the tracker picks one per game. The bridge under Wine is the **preferred** path for every Windows game and the only path that handles modern engines correctly; the Linux ptrace runtime is a **fallback** kept alive for native Linux titles where the bridge cannot apply.
-
-| Game runs as… | Preferred backend | Why |
-|---|---|---|
-| Windows binary under Proton/Wine | **`tatu-bridge` (Bridge)** | `OpenProcess` / `VirtualAllocEx` / `WriteProcessMemory` are native Win32 calls under Wine; cross-process `WriteProcessMemory` plus `SuspendThread` + `FlushInstructionCache` is the only safe way to patch `.text` on Win64 (kernel auto-lifts protection but the i-cache stays stale, see PR [#121](https://github.com/lobinuxsoft/tatu/pull/121)). |
-| Linux native ELF | `cheat-runtime` (Linux ptrace) | No wineprefix exists; the bridge has nothing to attach to. `process_vm_writev` + `PTRACE_ATTACH` is the only available primitive. |
-| Anti-cheat (EAC / BattlEye / Vanguard) | **Refused** | Out of scope (see "What Tatu is NOT"). Tracker detects and refuses both backends. |
-
-The toggle is per-game and lives in the cheats panel banner — *Switch to Tatu* installs the compat tool drop-in idempotently, patches Steam's `CompatToolMapping`, and persists the bridge choice in the tracker state. *Revert to Linux* flips the routing only; `config.vdf` stays at whatever the user last set so a manual Proton-GE override survives toggling cheats off.
-
-**Why the bridge wins for Proton games.** `process_vm_writev` over an emulated Win64 address space lands at file-mapped pages whose protection bits Wine has not synchronised with the kernel's actual mapping; cross-process patches succeed silently and corrupt the i-cache. Doing the patch from a Win32 worker inside the same Proton invocation hits `WriteProcessMemory`'s atomic `SuspendThread` + `VirtualProtect` + `FlushInstructionCache` cycle that the platform actually guarantees. For Unreal Engine titles in particular, anything else risks `FMallocBinned2` canary mismatches after a few seconds of combat.
+The Wine-side bridge (`tatu-bridge`, `tatu-launcher`, `tatu-proto`) described in earlier revisions of this file was removed in [#128](https://github.com/lobinuxsoft/tatu/issues/128) — a Proton game is a normal Linux process, so the whole Win32 detour bought nothing that `ptrace` did not already give.
 
 ## Building from source
 
 ### Requirements
 
 - Rust stable: <https://rustup.rs>
-- Bun: <https://bun.sh>
-- mingw-w64 cross toolchain (for `tatu-bridge.exe`)
+- Linux only: WebKitGTK and GTK3 development headers (see below). The frontend needs no toolchain — it is plain ES modules served straight out of `frontend/`.
 
 ### Platform dependencies
 
 | Platform | Dependencies |
 |----------|--------------|
-| Bazzite / Fedora Atomic | `rpm-ostree install mingw64-gcc mingw64-gcc-c++ mingw64-winpthreads-static webkit2gtk4.1-devel gtk3-devel` |
-| Ubuntu / Debian | `apt install gcc-mingw-w64-x86-64 libwebkit2gtk-4.1-dev libgtk-3-dev pkg-config build-essential` |
-| Arch | `pacman -S mingw-w64-gcc webkit2gtk-4.1 gtk3 pkgconf base-devel` |
-
-Add the Windows Rust target once: `rustup target add x86_64-pc-windows-gnu`.
+| Bazzite / Fedora Atomic | `rpm-ostree install webkit2gtk4.1-devel gtk3-devel` |
+| Ubuntu / Debian | `apt install libwebkit2gtk-4.1-dev libgtk-3-dev pkg-config build-essential` |
+| Arch | `pacman -S webkit2gtk-4.1 gtk3 pkgconf base-devel` |
+| Windows | None beyond the MSVC toolchain. WebView2 ships with Windows 10/11. |
 
 ### Build
 
@@ -107,25 +107,28 @@ Add the Windows Rust target once: `rustup target add x86_64-pc-windows-gnu`.
 git clone https://github.com/lobinuxsoft/tatu
 cd tatu
 
-# Tracker (Tauri desktop app)
-cd src-tauri && cargo tauri dev   # development
-cd src-tauri && cargo tauri build # release
-
-# Win32 bridge (cross-compile)
-./scripts/build-tatu-bridge.sh    # → target/dist/tatu-bridge.exe
-
-# Steam compat tool drop-in
-./scripts/build-tatu-launcher.sh  # → target/dist/tatu-launcher/
-target/dist/tatu-launcher/install.sh
+cargo build --release -p tatu-tracker   # → target/release/tatu-tracker
+cargo test --workspace
 ```
 
-After `install.sh`, restart Steam and pick *Tatu Launcher* in a game's *Properties → Compatibility*. The opt-in per-appid lives in `~/.config/tatu/launcher.toml` (template seeded by the installer).
+`target/` lives at the workspace root, not under `src-tauri/`.
+
+To produce the Linux AppImage locally:
+
+```sh
+./build_appimage.sh                     # → dist/appimage/Tatu_<version>_x86_64.AppImage
+```
 
 ## Configuration
 
-- **Tracker**: `~/.config/com.lobinux.tatu-tracker/` (Linux), `%APPDATA%\com.lobinux.tatu-tracker\` (Windows)
-- **Steam compat tool**: `~/.steam/root/compatibilitytools.d/tatu-launcher/`
-- **Launcher config**: `~/.config/tatu/launcher.toml`
+Everything lives under the platform config dir — `$XDG_CONFIG_HOME` (`~/.config`) on Linux, `%APPDATA%` on Windows — in a `backlog-tracker/` subtree kept from the pre-rename days:
+
+| Path | Contents |
+|---|---|
+| `backlog-tracker/state.json` | Library, completion flags, API key, caches |
+| `backlog-tracker/cheat-tables/<app_id>/` | Imported `.CT` files (Linux only) |
+| `backlog-tracker/trainers/<app_id>/` | Parsed cheat manifests (Linux only) |
+| `backlog-tracker/active-hooks/` | Undo log of live code patches (Linux only) |
 
 ## Versioning
 
@@ -136,18 +139,15 @@ Tatu uses [SemVer](https://semver.org/). Releases are managed by [release-please
 ```
 tatu/
 ├── Cargo.toml                          # Workspace root
-├── src-tauri/                          # tatu-tracker (Tauri + SolidJS)
+├── src-tauri/                          # tatu-tracker (Tauri 2 backend + commands)
+├── frontend/                           # Plain ES modules, no bundler
 ├── crates/
-│   ├── tatu-bridge/                    # Win32 PE (--launch + --connect modes)
-│   ├── tatu-launcher/                  # Linux ELF Steam compat tool
-│   ├── tatu-proto/                     # Wire types (bincode 2 + serde)
-│   ├── cheat-runtime/                  # Pure-logic cheat engine + Linux ptrace backend
-│   ├── cheat-runtime-extension/        # Cheat-runtime extension hooks
-│   └── ce-launcher/                    # Wine launcher for Cheat Engine itself
-├── tools/
-│   └── tatu-launcher/                  # Drop-in payload (toolmanifest.vdf, install.sh, ...)
-├── scripts/                            # Build helpers (bridge, launcher)
-└── tests/                              # Workspace-level integration tests
+│   ├── tatu-mem/                       # MemoryAccess trait + backend-agnostic primitives
+│   ├── tatu-engine/                    # CE Auto-Assembler parser, assembler, executor
+│   ├── cheat-runtime/                  # Linux ptrace backend
+│   ├── cheat-mono-collector/           # Unity Mono/IL2CPP offset collector (proxy DLL)
+│   └── ce-launcher/                    # Cheat Engine for Linux installer/launcher
+└── build_appimage.sh                   # Local AppImage packaging
 ```
 
 ## Contributing
@@ -185,7 +185,7 @@ If you find Tatu useful, consider supporting development:
 
 ## Credits
 
-- Built with [Tauri](https://tauri.app/) + [SolidJS](https://www.solidjs.com/)
+- Built with [Tauri](https://tauri.app/)
 - Cheat backend pattern inspired by [Aurora](https://www.cheathappens.com/) (clean-room re-implementation)
 - Cheat Engine integration via the `.CT` table format
 - Steam compatibility tool patterned after [Luxtorpeda](https://github.com/luxtorpeda-dev/luxtorpeda)
