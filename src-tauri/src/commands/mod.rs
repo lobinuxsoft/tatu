@@ -8,6 +8,7 @@ pub mod cheat_runtime_cmd;
 #[cfg(unix)]
 pub mod cheat_search_cmd;
 
+pub mod cartridge_cmd;
 pub mod collection_cmd;
 pub mod detail_cmd;
 pub mod disk_cmd;
