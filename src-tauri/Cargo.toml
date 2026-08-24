@@ -26,11 +26,23 @@ ce-launcher = { path = "../crates/ce-launcher" }
 # zip. ce-launcher already pulls the same crate at the same major version
 # — keep them aligned to avoid two copies in the dep tree.
 zip = "8"
+# Cartridge drive enumeration (#193) talks to udisks2 over D-Bus. This is a
+# maintained wrapper around zbus rather than hand-rolled proxies — no sudo,
+# same service the desktop's own Settings > Storage UI uses.
+udisks2 = "0.3"
 
 # Steam is relocatable on Windows, so the install dir comes from
 # HKCU\Software\Valve\Steam\SteamPath rather than a guessed Program Files.
 [target.'cfg(windows)'.dependencies]
 winreg = "0.56"
+# Cartridge drive enumeration (#193): GetLogicalDrives/GetDriveTypeW and
+# volume info are raw Win32 calls, same crate cheat-mono-collector already
+# uses for its Windows-only build.
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+    "Win32_System_WindowsProgramming",
+] }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

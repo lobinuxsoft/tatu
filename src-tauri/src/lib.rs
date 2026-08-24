@@ -1,4 +1,5 @@
 mod achievements;
+mod cartridge;
 mod commands;
 mod disk;
 mod drm;
@@ -53,6 +54,8 @@ macro_rules! tracker_handler {
             commands::collection_cmd::list_steam_collections,
             commands::collection_cmd::import_completed_from_collection,
             commands::disk_cmd::scan_sizes,
+            commands::cartridge_cmd::list_removable_drives,
+            commands::cartridge_cmd::has_cartridge_structure,
             commands::misc_cmd::detect_steam_id,
             commands::misc_cmd::cheats_supported,
             commands::misc_cmd::state_path,
