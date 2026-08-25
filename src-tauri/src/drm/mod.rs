@@ -4,7 +4,7 @@ mod sources;
 mod types;
 mod vendors;
 
-pub use types::{DrmInfo, DrmStatus};
+pub use types::{DrmInfo, DrmStatus, Preservability};
 
 use classify::{RawDrm, merge};
 use sources::{fetch_from_pcgamingwiki, fetch_from_steam};

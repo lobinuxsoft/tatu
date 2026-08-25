@@ -4,6 +4,8 @@ use std::path::Path;
 use md5::{Digest, Md5};
 use serde::{Deserialize, Serialize};
 
+use crate::drm::Preservability;
+
 /// Filename of the marker Tatu writes at a cartridge's root once it has been
 /// formatted (#194). No paths inside it — Linux and Windows resolve the
 /// Steam library path for the same physical drive differently, so baking one
@@ -24,6 +26,10 @@ pub const CARTRIDGE_LABEL: &str = "64M3_C4R7R1D63";
 pub struct CartridgeApp {
     pub app_id: u64,
     pub name: String,
+    /// From `drm::DrmInfo` at install time (#195) — `Easy` is what makes an
+    /// app a #199 (Goldberg injection) candidate; the UI (#196) shows the
+    /// rest as-is.
+    pub preservability: Preservability,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -88,6 +94,8 @@ fn compute_checksum(
         input.push_str(&app.app_id.to_string());
         input.push('=');
         input.push_str(&app.name);
+        input.push('/');
+        input.push_str(&format!("{:?}", app.preservability));
     }
 
     let mut hasher = Md5::new();
@@ -125,6 +133,22 @@ pub fn write_marker(mount_point: &Path) -> Result<(), String> {
         .map_err(|e| format!("Cannot write {MARKER_FILENAME}: {e}"))
 }
 
+/// Add (or replace, by app_id) one app entry on an existing cartridge's
+/// marker and rewrite it — the checksum is always recomputed, never
+/// preserved from the old file. Called once #195's `poll_install_status`
+/// sees Steam report the install fully done.
+pub fn add_app(mount_point: &Path, app: CartridgeApp) -> Result<(), String> {
+    let mut marker = read_marker(mount_point)
+        .ok_or_else(|| format!("{} has no valid cartridge marker", mount_point.display()))?;
+    marker.apps.retain(|a| a.app_id != app.app_id);
+    marker.apps.push(app);
+
+    let rebuilt = CartridgeMarker::new(marker.apps, marker.created_at);
+    let json = serde_json::to_string_pretty(&rebuilt).map_err(|e| e.to_string())?;
+    fs::write(mount_point.join(MARKER_FILENAME), json)
+        .map_err(|e| format!("Cannot write {MARKER_FILENAME}: {e}"))
+}
+
 #[allow(dead_code)]
 fn now_secs() -> u64 {
     std::time::SystemTime::now()
@@ -137,6 +161,14 @@ fn now_secs() -> u64 {
 mod tests {
     use super::*;
 
+    fn app(app_id: u64, name: &str) -> CartridgeApp {
+        CartridgeApp {
+            app_id,
+            name: name.to_string(),
+            preservability: Preservability::Unknown,
+        }
+    }
+
     #[test]
     fn absent_marker_is_not_a_cartridge() {
         let dir = tempfile::tempdir().unwrap();
@@ -146,13 +178,7 @@ mod tests {
     #[test]
     fn valid_marker_is_a_cartridge() {
         let dir = tempfile::tempdir().unwrap();
-        let marker = CartridgeMarker::new(
-            vec![CartridgeApp {
-                app_id: 379720,
-                name: "DOOM".to_string(),
-            }],
-            0,
-        );
+        let marker = CartridgeMarker::new(vec![app(379720, "DOOM")], 0);
         fs::write(
             dir.path().join(MARKER_FILENAME),
             serde_json::to_string(&marker).unwrap(),
@@ -172,10 +198,7 @@ mod tests {
     fn tampered_marker_is_not_trusted() {
         let dir = tempfile::tempdir().unwrap();
         let mut marker = CartridgeMarker::new(Vec::new(), 0);
-        marker.apps.push(CartridgeApp {
-            app_id: 999,
-            name: "sneaked in after the checksum".to_string(),
-        });
+        marker.apps.push(app(999, "sneaked in after the checksum"));
         fs::write(
             dir.path().join(MARKER_FILENAME),
             serde_json::to_string(&marker).unwrap(),
@@ -199,32 +222,40 @@ mod tests {
 
     #[test]
     fn checksum_ignores_app_order() {
-        let a = CartridgeMarker::new(
-            vec![
-                CartridgeApp {
-                    app_id: 1,
-                    name: "A".to_string(),
-                },
-                CartridgeApp {
-                    app_id: 2,
-                    name: "B".to_string(),
-                },
-            ],
-            0,
-        );
-        let b = CartridgeMarker::new(
-            vec![
-                CartridgeApp {
-                    app_id: 2,
-                    name: "B".to_string(),
-                },
-                CartridgeApp {
-                    app_id: 1,
-                    name: "A".to_string(),
-                },
-            ],
-            0,
-        );
+        let a = CartridgeMarker::new(vec![app(1, "A"), app(2, "B")], 0);
+        let b = CartridgeMarker::new(vec![app(2, "B"), app(1, "A")], 0);
         assert_eq!(a.checksum, b.checksum);
+    }
+
+    #[test]
+    fn add_app_appends_and_stays_trusted() {
+        let dir = tempfile::tempdir().unwrap();
+        write_marker(dir.path()).unwrap();
+
+        add_app(dir.path(), app(379720, "DOOM")).unwrap();
+        let marker = read_marker(dir.path()).expect("still trustworthy after add_app");
+        assert_eq!(marker.apps, vec![app(379720, "DOOM")]);
+    }
+
+    #[test]
+    fn add_app_replaces_same_app_id() {
+        let dir = tempfile::tempdir().unwrap();
+        write_marker(dir.path()).unwrap();
+
+        add_app(dir.path(), app(1, "Old Name")).unwrap();
+        add_app(
+            dir.path(),
+            CartridgeApp {
+                app_id: 1,
+                name: "New Name".to_string(),
+                preservability: Preservability::Easy,
+            },
+        )
+        .unwrap();
+
+        let marker = read_marker(dir.path()).unwrap();
+        assert_eq!(marker.apps.len(), 1);
+        assert_eq!(marker.apps[0].name, "New Name");
+        assert_eq!(marker.apps[0].preservability, Preservability::Easy);
     }
 }

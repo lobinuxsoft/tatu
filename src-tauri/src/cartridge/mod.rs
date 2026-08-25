@@ -3,6 +3,7 @@
 // as of #193 — `disk.rs` is Steam library *size estimation*, unrelated
 // despite the similar name.
 mod drives;
+mod install;
 mod marker;
 
 // Windows has no verified, non-elevated, silent format API (#194) — see the
@@ -14,8 +15,9 @@ mod format;
 pub use drives::{RemovableDrive, list_removable_drives};
 #[cfg(unix)]
 pub use format::format_as_cartridge;
+pub use install::{install_url, is_registered_library, poll_install_status};
 pub use marker::has_cartridge_structure;
 
 // CartridgeApp/CartridgeMarker/read_marker/MARKER_FILENAME are the schema
-// #195/#196 (install progress, marker refresh) build on. Not re-exported
-// here — nothing outside this module calls them until those land.
+// #196 (marker refresh in the UI) builds on. Not re-exported here — nothing
+// outside this module calls them until that lands.
