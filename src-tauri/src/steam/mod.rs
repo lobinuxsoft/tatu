@@ -17,6 +17,6 @@ pub use collections::{
 pub(crate) use exe::detect_game_exe;
 pub use games::{Game, fetch_details_for, fetch_games, fetch_single_detail};
 pub use install::detect_steam_id;
-pub(crate) use install::steam_install_dir;
+pub(crate) use install::{library_paths, steam_install_dir};
 #[cfg(unix)]
 pub(crate) use launch_options::{LaunchOptOutcome, set_winhttp_override};
