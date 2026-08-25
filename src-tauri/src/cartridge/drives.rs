@@ -121,9 +121,10 @@ pub async fn list_removable_drives() -> Result<Vec<RemovableDrive>, String> {
 }
 
 /// D-Bus byte-array properties (device path, mount point) are NUL-terminated
-/// C strings; strip the terminator before decoding.
+/// C strings; strip the terminator before decoding. `pub(super)`: #194's
+/// format module needs it too, to match a device path against a BlockProxy.
 #[cfg(unix)]
-fn bytes_to_string(bytes: &[u8]) -> String {
+pub(super) fn bytes_to_string(bytes: &[u8]) -> String {
     let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
     String::from_utf8_lossy(&bytes[..end]).into_owned()
 }

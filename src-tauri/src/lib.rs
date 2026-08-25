@@ -122,6 +122,7 @@ pub fn run() {
                 commands::cheat_runtime_cmd::prereqs::cheat_runtime_install_mono_collector,
                 commands::cheat_runtime_cmd::prereqs::cheat_runtime_set_winhttp_override,
                 commands::cheat_search_cmd::open_fearless_search,
+                commands::cartridge_cmd::format_as_cartridge,
             ])
     };
 

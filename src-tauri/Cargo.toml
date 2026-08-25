@@ -15,6 +15,9 @@ regex = "1"
 steam-vdf-parser = "0.1.1"
 thiserror = "2"
 urlencoding = "2"
+# Cartridge marker self-check (#194): MD5 over the marker's own fields, not
+# the installed games — RustCrypto's maintained implementation.
+md-5 = "0.11"
 
 # The cheat runtime is the Linux ptrace backend (nix, /proc, ELF symbols).
 # Windows gets the tracker only until tatu-win lands (#181); gating the deps
