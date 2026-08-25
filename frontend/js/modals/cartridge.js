@@ -53,12 +53,16 @@ async function showDriveList(gameId, gameName) {
 
     let html = "";
     for (const { drive, ready } of rows) {
-      const disabled = drive.mount_point ? "" : " disabled";
-      const tag = !drive.mount_point
-        ? `<span class="drive-tag drive-tag-blank">Sin montar</span>`
-        : ready
-          ? `<span class="drive-tag drive-tag-ready">Cartucho existente</span>`
-          : `<span class="drive-tag drive-tag-blank">Vacío</span>`;
+      // Read-only blocks both formatting (blank drive) and installing
+      // (steamapps/ needs write access), so it's a dead end either way.
+      const disabled = !drive.mount_point || drive.read_only ? " disabled" : "";
+      const tag = drive.read_only
+        ? `<span class="drive-tag drive-tag-blank">🔒 Solo lectura</span>`
+        : !drive.mount_point
+          ? `<span class="drive-tag drive-tag-blank">Sin montar</span>`
+          : ready
+            ? `<span class="drive-tag drive-tag-ready">Cartucho existente</span>`
+            : `<span class="drive-tag drive-tag-blank">Vacío</span>`;
       html +=
         `<div class="collection-row${disabled}" data-id="${esc(drive.id)}">` +
         `<span class="collection-name">${esc(drive.label || "Sin nombre")}</span>` +
