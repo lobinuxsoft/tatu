@@ -1,6 +1,5 @@
 use std::fs;
-use std::path::Path;
-use std::sync::OnceLock;
+use std::path::{Path, PathBuf};
 
 use regex::Regex;
 
@@ -41,13 +40,11 @@ pub fn poll_install_status(
     name: &str,
     preservability: Preservability,
 ) -> Result<bool, String> {
-    let manifest = mount_point
-        .join("steamapps")
-        .join(format!("appmanifest_{app_id}.acf"));
+    let manifest = appmanifest_path(mount_point, app_id);
     let Ok(content) = fs::read_to_string(&manifest) else {
         return Ok(false);
     };
-    let Some(flags) = parse_state_flags(&content) else {
+    let Some(flags) = acf_field(&content, "StateFlags").and_then(|f| f.parse::<u32>().ok()) else {
         return Ok(false);
     };
     if flags != 4 {
@@ -60,15 +57,27 @@ pub fn poll_install_status(
             app_id,
             name: name.to_string(),
             preservability,
+            standalone: false,
         },
     )?;
     Ok(true)
 }
 
-fn parse_state_flags(acf: &str) -> Option<u32> {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    let re = RE.get_or_init(|| Regex::new(r#""StateFlags"\s*"(\d+)""#).expect("static regex"));
-    re.captures(acf)?[1].parse().ok()
+/// Path to Steam's own per-app manifest on a cartridge — shared with #199's
+/// Goldberg injection, which also needs `installdir` off the same file.
+pub(super) fn appmanifest_path(mount_point: &Path, app_id: u64) -> PathBuf {
+    mount_point
+        .join("steamapps")
+        .join(format!("appmanifest_{app_id}.acf"))
+}
+
+/// Reads one `"field" "value"` pair out of a Steam ACF/VDF file. Compiles a
+/// fresh regex per call — this runs at most a few times per install poll or
+/// injection, never in a hot loop, so a per-field static cache would be
+/// complexity with no measurable benefit.
+pub(super) fn acf_field(content: &str, field: &str) -> Option<String> {
+    let re = Regex::new(&format!(r#""{field}"\s*"([^"]*)""#)).ok()?;
+    Some(re.captures(content)?[1].to_string())
 }
 
 #[cfg(test)]
@@ -84,14 +93,20 @@ mod tests {
     #[test]
     fn state_flags_four_is_fully_installed() {
         let acf = r#""AppState" { "appid" "1" "StateFlags" "4" }"#;
-        assert_eq!(parse_state_flags(acf), Some(4));
+        assert_eq!(acf_field(acf, "StateFlags").as_deref(), Some("4"));
     }
 
     #[test]
     fn state_flags_mid_download_is_not_four() {
         // Update started + update required, per Steam's own bitmask.
         let acf = r#""AppState" { "appid" "1" "StateFlags" "1026" }"#;
-        assert_eq!(parse_state_flags(acf), Some(1026));
+        assert_eq!(acf_field(acf, "StateFlags").as_deref(), Some("1026"));
+    }
+
+    #[test]
+    fn installdir_is_read_from_the_manifest() {
+        let acf = r#""AppState" { "appid" "1" "installdir" "DOOM" "StateFlags" "4" }"#;
+        assert_eq!(acf_field(acf, "installdir").as_deref(), Some("DOOM"));
     }
 
     #[test]

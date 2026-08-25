@@ -23,10 +23,10 @@ pub(crate) fn steam_install_dir() -> Option<PathBuf> {
         // The installer writes the real path to the registry, and it is often
         // not on C: — Steam is routinely moved to a second drive. Guessing
         // Program Files first would find a leftover empty dir on those setups.
-        if let Some(from_registry) = windows_steam_path_from_registry() {
-            if from_registry.exists() {
-                return Some(from_registry);
-            }
+        if let Some(from_registry) = windows_steam_path_from_registry()
+            && from_registry.exists()
+        {
+            return Some(from_registry);
         }
         let default = PathBuf::from(r"C:\Program Files (x86)\Steam");
         if default.exists() {

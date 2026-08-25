@@ -3,6 +3,7 @@
 // as of #193 — `disk.rs` is Steam library *size estimation*, unrelated
 // despite the similar name.
 mod drives;
+mod goldberg;
 mod install;
 mod marker;
 
@@ -15,6 +16,7 @@ mod format;
 pub use drives::{RemovableDrive, list_removable_drives};
 #[cfg(unix)]
 pub use format::format_as_cartridge;
+pub use goldberg::inject_goldberg;
 pub use install::{install_url, is_registered_library, poll_install_status};
 pub use marker::has_cartridge_structure;
 
