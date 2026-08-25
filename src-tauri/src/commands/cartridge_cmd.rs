@@ -1,6 +1,7 @@
 use std::path::Path;
 
-use tauri::{AppHandle, State};
+use tauri::path::BaseDirectory;
+use tauri::{AppHandle, Manager, State};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::SharedState;
@@ -71,6 +72,46 @@ pub fn poll_install_status(
     };
 
     cartridge::poll_install_status(app_id, Path::new(&mount_point), &name, preservability)
+}
+
+/// Swaps in the vendored Goldberg emulator for an `Easy`-classified app
+/// already recorded on the cartridge by #195. Templates ship as Tauri
+/// resources (`vendor/goldberg/`) rather than compiled into the binary —
+/// see #199.
+#[tauri::command]
+pub fn inject_goldberg(
+    app: AppHandle,
+    state: State<'_, SharedState>,
+    app_id: u64,
+    mount_point: String,
+) -> Result<(), String> {
+    let preservability = {
+        let s = state.lock().map_err(|e| e.to_string())?;
+        s.drm_cache
+            .get(&app_id)
+            .map(|info| info.preservability.clone())
+            .unwrap_or_default()
+    };
+
+    let template_x86 = app
+        .path()
+        .resolve("vendor/goldberg/x86/steam_api.dll", BaseDirectory::Resource)
+        .map_err(|e| e.to_string())?;
+    let template_x64 = app
+        .path()
+        .resolve(
+            "vendor/goldberg/x64/steam_api64.dll",
+            BaseDirectory::Resource,
+        )
+        .map_err(|e| e.to_string())?;
+
+    cartridge::inject_goldberg(
+        Path::new(&mount_point),
+        app_id,
+        preservability,
+        &template_x86,
+        &template_x64,
+    )
 }
 
 // No verified non-elevated, silent format API on Windows yet (#194) —

@@ -30,6 +30,13 @@ pub struct CartridgeApp {
     /// app a #199 (Goldberg injection) candidate; the UI (#196) shows the
     /// rest as-is.
     pub preservability: Preservability,
+    /// Set once #199's Goldberg injection has run for this app — lets the
+    /// UI (#196) show "playable standalone" without re-probing the install.
+    /// Deliberately left out of the checksum below: it's UI metadata, not
+    /// part of what the checksum protects (the cartridge's identity and app
+    /// list), so adding it can't invalidate a marker written before #199.
+    #[serde(default)]
+    pub standalone: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -149,6 +156,25 @@ pub fn add_app(mount_point: &Path, app: CartridgeApp) -> Result<(), String> {
         .map_err(|e| format!("Cannot write {MARKER_FILENAME}: {e}"))
 }
 
+/// Flip `standalone` on an already-recorded app and rewrite the marker.
+/// Called once #199's Goldberg injection finishes for that app; errors if
+/// the app was never recorded by #195's `add_app` in the first place.
+pub fn set_standalone(mount_point: &Path, app_id: u64) -> Result<(), String> {
+    let mut marker = read_marker(mount_point)
+        .ok_or_else(|| format!("{} has no valid cartridge marker", mount_point.display()))?;
+    let Some(app) = marker.apps.iter_mut().find(|a| a.app_id == app_id) else {
+        return Err(format!(
+            "App {app_id} is not recorded on this cartridge yet"
+        ));
+    };
+    app.standalone = true;
+
+    let rebuilt = CartridgeMarker::new(marker.apps, marker.created_at);
+    let json = serde_json::to_string_pretty(&rebuilt).map_err(|e| e.to_string())?;
+    fs::write(mount_point.join(MARKER_FILENAME), json)
+        .map_err(|e| format!("Cannot write {MARKER_FILENAME}: {e}"))
+}
+
 #[allow(dead_code)]
 fn now_secs() -> u64 {
     std::time::SystemTime::now()
@@ -166,6 +192,7 @@ mod tests {
             app_id,
             name: name.to_string(),
             preservability: Preservability::Unknown,
+            standalone: false,
         }
     }
 
@@ -249,6 +276,7 @@ mod tests {
                 app_id: 1,
                 name: "New Name".to_string(),
                 preservability: Preservability::Easy,
+                standalone: false,
             },
         )
         .unwrap();
@@ -257,5 +285,24 @@ mod tests {
         assert_eq!(marker.apps.len(), 1);
         assert_eq!(marker.apps[0].name, "New Name");
         assert_eq!(marker.apps[0].preservability, Preservability::Easy);
+    }
+
+    #[test]
+    fn set_standalone_flips_the_flag_and_stays_trusted() {
+        let dir = tempfile::tempdir().unwrap();
+        write_marker(dir.path()).unwrap();
+        add_app(dir.path(), app(379720, "DOOM")).unwrap();
+
+        set_standalone(dir.path(), 379720).unwrap();
+
+        let marker = read_marker(dir.path()).expect("still trustworthy after set_standalone");
+        assert!(marker.apps[0].standalone);
+    }
+
+    #[test]
+    fn set_standalone_rejects_an_app_never_recorded() {
+        let dir = tempfile::tempdir().unwrap();
+        write_marker(dir.path()).unwrap();
+        assert!(set_standalone(dir.path(), 1).is_err());
     }
 }

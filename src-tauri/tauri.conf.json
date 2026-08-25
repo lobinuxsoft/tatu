@@ -11,6 +11,11 @@
     "targets": [
       "appimage"
     ],
+    "resources": [
+      "vendor/goldberg/x64/steam_api64.dll",
+      "vendor/goldberg/x86/steam_api.dll",
+      "vendor/goldberg/LICENSE"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
