@@ -24,6 +24,7 @@ pub fn get_state(state: State<'_, SharedState>) -> Result<serde_json::Value, Str
         "non_steam": s.non_steam,
         "steam_api_key": s.steam_api_key,
         "steam_id": s.steam_id,
+        "steamgriddb_api_key": s.steamgriddb_api_key,
         "ach_progress": ach_progress,
         "hltb_cache": s.hltb_cache,
         "drm_cache": s.drm_cache,
@@ -37,6 +38,7 @@ pub fn get_settings(state: State<'_, SharedState>) -> Result<serde_json::Value, 
     Ok(serde_json::json!({
         "steam_api_key": s.steam_api_key,
         "steam_id": s.steam_id,
+        "steamgriddb_api_key": s.steamgriddb_api_key,
     }))
 }
 
@@ -44,11 +46,13 @@ pub fn get_settings(state: State<'_, SharedState>) -> Result<serde_json::Value, 
 pub fn save_settings(
     steam_api_key: String,
     steam_id: String,
+    steamgriddb_api_key: String,
     state: State<'_, SharedState>,
 ) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     s.steam_api_key = steam_api_key;
     s.steam_id = steam_id;
+    s.steamgriddb_api_key = steamgriddb_api_key;
     s.save();
     Ok(())
 }

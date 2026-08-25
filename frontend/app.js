@@ -32,7 +32,7 @@ async function init() {
     state.NS = data.non_steam || [];
     state.completedNS = new Set(data.completed_nonsteam || []);
 
-    loadSettingsUI(data.steam_api_key, data.steam_id);
+    loadSettingsUI(data.steam_api_key, data.steam_id, data.steamgriddb_api_key);
 
     if (!data.steam_id) {
       try {

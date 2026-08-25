@@ -2,6 +2,7 @@
 // standard Steam library so Steam's own client handles the download. New
 // as of #193 — `disk.rs` is Steam library *size estimation*, unrelated
 // despite the similar name.
+mod assets;
 mod drives;
 mod goldberg;
 mod install;
@@ -13,6 +14,7 @@ mod marker;
 #[cfg(unix)]
 mod format;
 
+pub use assets::fetch_cartridge_art;
 pub use drives::{RemovableDrive, list_removable_drives};
 #[cfg(unix)]
 pub use format::format_as_cartridge;

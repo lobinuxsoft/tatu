@@ -27,6 +27,11 @@ pub struct AppState {
     pub steam_api_key: String,
     #[serde(default)]
     pub steam_id: String,
+    /// SteamGridDB API key (#205), used to cache cover art onto a cartridge
+    /// at install time — separate key from `steam_api_key` above, different
+    /// service, own free signup.
+    #[serde(default)]
+    pub steamgriddb_api_key: String,
     #[serde(default)]
     pub achievement_cache: HashMap<u64, GameAchievements>,
     #[serde(default)]
