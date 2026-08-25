@@ -32,6 +32,13 @@ pub async fn format_as_cartridge(
         ));
     }
 
+    // Gate 3: a read-only drive (write-protect switch, failed dirty-bit
+    // check) would fail deep inside udisks2's Format call with a raw D-Bus
+    // error — catch it here with a message that actually says why.
+    if current.read_only {
+        return Err(format!("{device} is read-only — refusing to format"));
+    }
+
     let client = udisks2::Client::new()
         .await
         .map_err(|e| format!("Cannot connect to udisks2: {e}"))?;

@@ -5,6 +5,7 @@ import { doneLoading, startLoading } from "../loading.js";
 import { renderSteam } from "../render/steam.js";
 import { emit } from "../tauri.js";
 import { renderDrmBadge, renderDrmExplanation, renderPreservabilityBlock } from "./drm_view.js";
+import { openCartridgeModal } from "../modals/cartridge.js";
 
 
 // Caches (DRM, HowLongToBeat, achievements) are refreshed from whichever
@@ -62,7 +63,9 @@ export async function loadGameDetails(gameId) {
     html += `<div id="dpDrm" class="detail-info-row"><span class="detail-info-label">DRM</span><span class="detail-info-value" style="color:#6e7681">Consultando...</span></div>`;
 
     if (!html) html = `<div class="ach-empty">No hay detalles disponibles.</div>`;
+    html = `<div class="detail-info-row"><button class="cartridge-btn" id="cartridgeBtn">💾 Instalar en cartucho</button></div>` + html;
     infoEl.innerHTML = html;
+    document.getElementById("cartridgeBtn").onclick = () => openCartridgeModal(gameId);
     loadHltb(g.name, gameId);
     loadDrm(gameId);
 

@@ -5,11 +5,17 @@ import { installExternalLinks } from "./js/links.js";
 import { installLightbox } from "./js/panel/lightbox.js";
 import { installCardTilt } from "./js/panel/card_tilt.js";
 import { initTheme } from "./js/themes.js";
+import { closeCartridgeModal } from "./js/modals/cartridge.js";
 
 initTheme();
 installExternalLinks();
 installLightbox();
 installCardTilt();
+
+document.getElementById("cartridgeClose").addEventListener("click", closeCartridgeModal);
+document.getElementById("cartridgeOverlay").addEventListener("click", e => {
+  if (e.target.id === "cartridgeOverlay") closeCartridgeModal();
+});
 
 // This window has no library of its own: the panel modules read titles, hours
 // and completion out of `state`, so it loads the same snapshot the main window

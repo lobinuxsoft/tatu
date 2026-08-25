@@ -9,6 +9,12 @@ pub struct RemovableDrive {
     pub label: String,
     pub total_bytes: u64,
     pub mount_point: Option<String>,
+    /// Whether the OS itself already reports this drive as read-only (a
+    /// hardware write-protect switch, a filesystem that failed a dirty-bit
+    /// check, etc.) — detected, never set, by either platform's own query.
+    /// `format_as_cartridge` refuses one of these outright rather than
+    /// letting udisks2/the filesystem fail mid-operation with a raw error.
+    pub read_only: bool,
 }
 
 /// Enumerate removable drives only — never a fixed/internal disk. This is
@@ -96,6 +102,7 @@ pub async fn list_removable_drives() -> Result<Vec<RemovableDrive>, String> {
                 label: block.id_label().await.unwrap_or_default(),
                 total_bytes: block.size().await.unwrap_or(0),
                 mount_point,
+                read_only: block.read_only().await.unwrap_or(false),
             },
             has_fs: filesystem.is_some(),
         });
@@ -134,6 +141,7 @@ pub async fn list_removable_drives() -> Result<Vec<RemovableDrive>, String> {
     use windows_sys::Win32::Storage::FileSystem::{
         GetDiskFreeSpaceExW, GetDriveTypeW, GetLogicalDrives, GetVolumeInformationW,
     };
+    use windows_sys::Win32::System::SystemServices::FILE_READ_ONLY_VOLUME;
     use windows_sys::Win32::System::WindowsProgramming::DRIVE_REMOVABLE;
 
     let mut drives = Vec::new();
@@ -157,6 +165,7 @@ pub async fn list_removable_drives() -> Result<Vec<RemovableDrive>, String> {
         }
 
         let mut label_buf = [0u16; 261]; // MAX_PATH + 1
+        let mut fs_flags: u32 = 0;
         let got_label = unsafe {
             GetVolumeInformationW(
                 root.as_ptr(),
@@ -164,18 +173,23 @@ pub async fn list_removable_drives() -> Result<Vec<RemovableDrive>, String> {
                 label_buf.len() as u32,
                 std::ptr::null_mut(),
                 std::ptr::null_mut(),
-                std::ptr::null_mut(),
+                &mut fs_flags,
                 std::ptr::null_mut(),
                 0,
             )
         };
-        let label = if got_label != 0 {
+        let (label, read_only) = if got_label != 0 {
             let end = label_buf.iter().position(|&c| c == 0).unwrap_or(0);
-            String::from_utf16_lossy(&label_buf[..end])
+            (
+                String::from_utf16_lossy(&label_buf[..end]),
+                fs_flags & FILE_READ_ONLY_VOLUME != 0,
+            )
         } else {
             // No filesystem yet (unformatted media) — still a valid,
-            // listable removable drive for #194 to format.
-            String::new()
+            // listable removable drive for #194 to format. `fs_flags` was
+            // never written on this path, so it can't be trusted for
+            // read_only either — a blank drive isn't write-protected.
+            (String::new(), false)
         };
 
         let mut total_bytes: u64 = 0;
@@ -194,6 +208,7 @@ pub async fn list_removable_drives() -> Result<Vec<RemovableDrive>, String> {
             label,
             total_bytes,
             mount_point: Some(root_str),
+            read_only,
         });
     }
 
