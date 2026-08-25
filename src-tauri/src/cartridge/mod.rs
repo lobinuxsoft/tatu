@@ -5,10 +5,17 @@
 mod drives;
 mod marker;
 
+// Windows has no verified, non-elevated, silent format API (#194) — see the
+// PR discussion. Only the Linux path (udisks2 Block.Format, no sudo) exists
+// so far.
+#[cfg(unix)]
+mod format;
+
 pub use drives::{RemovableDrive, list_removable_drives};
+#[cfg(unix)]
+pub use format::format_as_cartridge;
 pub use marker::has_cartridge_structure;
 
-// CartridgeApp/CartridgeMarker/read_marker/MARKER_FILENAME/MARKER_FORMAT_VERSION
-// are the schema #194 (format writer) and #195/#196 (install progress,
-// marker refresh) build on. Not re-exported here — nothing outside this
-// module calls them until those land; add the `pub use` when they do.
+// CartridgeApp/CartridgeMarker/read_marker/MARKER_FILENAME are the schema
+// #195/#196 (install progress, marker refresh) build on. Not re-exported
+// here — nothing outside this module calls them until those land.
