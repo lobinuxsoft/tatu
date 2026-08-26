@@ -159,3 +159,13 @@ pub async fn format_as_cartridge(
 ) -> Result<(), String> {
     cartridge::format_as_cartridge(&device, &expected_label, expected_bytes).await
 }
+
+/// Mounts an already-formatted cartridge that shows up unmounted — a drive
+/// reconnected after its first format, or one the desktop's own automounter
+/// never picked up. Windows drives are always mounted with a letter, so
+/// this has no meaning there (same gate as `format_as_cartridge`).
+#[cfg(unix)]
+#[tauri::command]
+pub async fn mount_cartridge(device: String) -> Result<String, String> {
+    cartridge::mount_cartridge(&device).await
+}

@@ -18,7 +18,7 @@ mod format;
 pub use assets::{fetch_cartridge_art, fetch_cartridge_description};
 pub use drives::{RemovableDrive, list_removable_drives};
 #[cfg(unix)]
-pub use format::format_as_cartridge;
+pub use format::{format_as_cartridge, mount_cartridge};
 pub use goldberg::inject_goldberg;
 pub use install::{install_url, is_registered_library, poll_install_status};
 pub use marker::has_cartridge_structure;
