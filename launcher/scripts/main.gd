@@ -30,7 +30,6 @@ const GRID_ART_EXTENSIONS: Array[String] = ["png", "jpg", "jpeg", "webp"]
 # rescale them, not leave them stuck at whatever size they started at.
 const CARD_HEIGHT_RATIO := 0.62
 const CARD_GAP_RATIO := 0.06
-const CAROUSEL_GAP := 32
 const SCROLL_DURATION := 0.32
 const SIDE_PANEL_WIDTH := 300
 const SIDE_PANEL_MARGIN := 24
@@ -40,6 +39,7 @@ var _selected_index: int = 0
 var _cards: Array[GameCard] = []
 
 var _empty_state: Label
+var _background: TextureRect
 var _carousel_clip: Control
 var _carousel_row: HBoxContainer
 var _info_name: Label
@@ -115,28 +115,34 @@ func _move_selection(delta: int) -> void:
 	_update_selection(true)
 
 func _build_layout() -> void:
-	var root := HBoxContainer.new()
-	root.set_anchors_preset(Control.PRESET_FULL_RECT)
-	# Gap between each side panel and the carousel — without it, a card
-	# clipped right at that boundary reads as cutting into the panel
-	# instead of an intentional partially-visible neighbor.
-	root.add_theme_constant_override("separation", CAROUSEL_GAP)
-	add_child(root)
+	# Full-screen backdrop: the selected app's own cover art, blown up and
+	# blurred, first child so everything else draws on top of it.
+	_background = TextureRect.new()
+	_background.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_background.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_background.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	_background.modulate = Color(0.55, 0.55, 0.6)
+	_background.material = ShaderMaterial.new()
+	_background.material.shader = load("res://shaders/box_blur.gdshader")
+	add_child(_background)
+
+	# The carousel spans the FULL screen — the glass side panels overlay on
+	# top of its edges rather than living in separate side-by-side columns,
+	# so a card visibly slides (and softens through the glass shader) behind
+	# them instead of stopping short at a hard-clipped gap.
+	_carousel_clip = Control.new()
+	_carousel_clip.clip_contents = true
+	_carousel_clip.set_anchors_preset(Control.PRESET_FULL_RECT)
+	add_child(_carousel_clip)
+
+	_carousel_row = HBoxContainer.new()
+	_carousel_clip.add_child(_carousel_row)
 
 	_info_name = Label.new()
 	_info_name.add_theme_font_size_override("font_size", 22)
 	_info_description = Label.new()
 	_info_description.autowrap_mode = TextServer.AUTOWRAP_WORD
-	root.add_child(_side_panel([_info_name, _info_description]))
-
-	_carousel_clip = Control.new()
-	_carousel_clip.clip_contents = true
-	_carousel_clip.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_carousel_clip.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	root.add_child(_carousel_clip)
-
-	_carousel_row = HBoxContainer.new()
-	_carousel_clip.add_child(_carousel_row)
+	add_child(_glass_panel(Control.PRESET_LEFT_WIDE, [_info_name, _info_description]))
 
 	_action_launch = Label.new()
 	_action_launch.text = "[A] / Enter — Ejecutar sin Steam"
@@ -144,7 +150,7 @@ func _build_layout() -> void:
 	_action_add_to_steam = Label.new()
 	_action_add_to_steam.text = "[B] / S — Agregar a Steam"
 	_action_add_to_steam.autowrap_mode = TextServer.AUTOWRAP_WORD
-	root.add_child(_side_panel([_action_launch, _action_add_to_steam]))
+	add_child(_glass_panel(Control.PRESET_RIGHT_WIDE, [_action_launch, _action_add_to_steam]))
 
 	_empty_state = Label.new()
 	_empty_state.text = "No hay juegos instalados en este cartucho."
@@ -152,12 +158,25 @@ func _build_layout() -> void:
 	_empty_state.set_anchors_preset(Control.PRESET_CENTER)
 	add_child(_empty_state)
 
-func _side_panel(children: Array) -> Control:
+## A fixed-width strip pinned to the given edge (PRESET_LEFT_WIDE or
+## PRESET_RIGHT_WIDE), rendering whatever is already on screen behind it —
+## blurred and tinted — via glass_panel.gdshader, added AFTER the carousel
+## so that shader's SCREEN_TEXTURE capture actually includes the cards.
+func _glass_panel(preset: LayoutPreset, children: Array) -> Control:
+	var glass := ColorRect.new()
+	glass.set_anchors_preset(preset)
+	if preset == Control.PRESET_LEFT_WIDE:
+		glass.offset_right = SIDE_PANEL_WIDTH
+	else:
+		glass.offset_left = -SIDE_PANEL_WIDTH
+	glass.material = ShaderMaterial.new()
+	glass.material.shader = load("res://shaders/glass_panel.gdshader")
+
 	var margin := MarginContainer.new()
-	margin.custom_minimum_size = Vector2(SIDE_PANEL_WIDTH, 0)
-	margin.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
 	for side in ["left", "top", "right", "bottom"]:
 		margin.add_theme_constant_override("margin_%s" % side, SIDE_PANEL_MARGIN)
+	glass.add_child(margin)
 
 	var panel := VBoxContainer.new()
 	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -167,7 +186,7 @@ func _side_panel(children: Array) -> Control:
 		panel.add_child(child)
 
 	margin.add_child(panel)
-	return margin
+	return glass
 
 func _cartridge_root() -> String:
 	# Hitting Play in the editor runs the Godot editor binary itself, which
@@ -230,9 +249,23 @@ func _update_selection(animate: bool) -> void:
 	var app_id := int(app.get("app_id", 0))
 	_info_name.text = String(app.get("name", "?"))
 	_info_description.text = _description_of(app_id)
+	_update_background(app_id)
 
 	var standalone := bool(app.get("standalone", false))
 	_action_launch.modulate = Color.WHITE if standalone else Color(1, 1, 1, 0.4)
+
+## The blurred backdrop reuses the same cover art the selected card already
+## shows — no separate asset, no separate cache.
+func _update_background(app_id: int) -> void:
+	var path := _grid_art_path(app_id)
+	if path.is_empty():
+		_background.texture = null
+		return
+	var image := Image.new()
+	if image.load(path) != OK:
+		_background.texture = null
+		return
+	_background.texture = ImageTexture.create_from_image(image)
 
 ## Moves the whole row so the selected card's center lands on the clip
 ## area's center. The row's OWN sizing/spacing comes for free from being a
