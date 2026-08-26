@@ -1,28 +1,32 @@
 class_name GameCard
 extends Button
-## One cover-art card in the launcher grid (#204). Hover AND keyboard/gamepad
-## focus trigger the same scale animation, so a gamepad-only player gets the
-## same feedback a mouse player does.
+## One cover-art card in the launcher's carousel (#204). Purely visual plus
+## click-to-select — the carousel (main.gd) drives which card is "selected"
+## (scale/dim) and owns the only two actions that exist (launch, add to
+## Steam), since those apply to whichever card sits centered, not to
+## whichever one has mouse/keyboard focus.
 
-signal launch_requested(app_id: int)
+signal clicked(index: int)
 
-const HOVER_SCALE := Vector2(1.08, 1.08)
-const HOVER_DURATION := 0.12
+const SELECTED_SCALE := Vector2(1.25, 1.25)
+const IDLE_SCALE := Vector2(0.85, 0.85)
+const SELECT_DURATION := 0.15
 
-var _app_id: int = 0
-var _tween: Tween
+var index: int = 0
 var _art: TextureRect
 var _name_label: Label
+var _tween: Tween
 
 func _init() -> void:
 	custom_minimum_size = Vector2(200, 260)
+	size = custom_minimum_size
+	pivot_offset = custom_minimum_size / 2.0
 	flat = true
-	focus_mode = Control.FOCUS_ALL
+	focus_mode = Control.FOCUS_NONE
 
-	# Button is a plain Control, not a Container — it never stretches a child
-	# to fill it the way a Container would. Without this, the box shrinks to
-	# its content's minimum width and everything renders bunched at the
-	# button's top-left corner instead of filling/centering in the card.
+	# Button is a plain Control, not a Container — it never stretches a
+	# child to fill it. Anchor explicitly or content shrinks to its own
+	# minimum size and renders bunched at the top-left corner.
 	var box := VBoxContainer.new()
 	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	box.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -44,19 +48,23 @@ func _init() -> void:
 	box.add_child(_name_label)
 
 func _ready() -> void:
-	pivot_offset = size / 2.0
-	resized.connect(func() -> void: pivot_offset = size / 2.0)
+	pressed.connect(func() -> void: clicked.emit(index))
 
-	pressed.connect(func() -> void: launch_requested.emit(_app_id))
-	mouse_entered.connect(_grow)
-	focus_entered.connect(_grow)
-	mouse_exited.connect(_maybe_shrink)
-	focus_exited.connect(_maybe_shrink)
-
-func setup(app_id: int, display_name: String, art_path: String) -> void:
-	_app_id = app_id
+func setup(i: int, display_name: String, art_path: String) -> void:
+	index = i
 	_name_label.text = display_name
 	_load_art(art_path)
+
+## Called by the carousel every time the selection changes — this card does
+## not track its own selected state.
+func set_selected(selected: bool) -> void:
+	var target_scale := SELECTED_SCALE if selected else IDLE_SCALE
+	var target_modulate := Color.WHITE if selected else Color(1, 1, 1, 0.5)
+	if _tween:
+		_tween.kill()
+	_tween = create_tween().set_parallel(true)
+	_tween.tween_property(self, "scale", target_scale, SELECT_DURATION).set_trans(Tween.TRANS_SINE)
+	_tween.tween_property(self, "modulate", target_modulate, SELECT_DURATION)
 
 func _load_art(path: String) -> void:
 	if path.is_empty():
@@ -67,16 +75,3 @@ func _load_art(path: String) -> void:
 		push_warning("Cannot load cover art at %s: error %d" % [path, err])
 		return
 	_art.texture = ImageTexture.create_from_image(image)
-
-func _grow() -> void:
-	_animate_scale(HOVER_SCALE)
-
-func _maybe_shrink() -> void:
-	if not is_hovered() and not has_focus():
-		_animate_scale(Vector2.ONE)
-
-func _animate_scale(target: Vector2) -> void:
-	if _tween:
-		_tween.kill()
-	_tween = create_tween()
-	_tween.tween_property(self, "scale", target, HOVER_DURATION).set_trans(Tween.TRANS_SINE)

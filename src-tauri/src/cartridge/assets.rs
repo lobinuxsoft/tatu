@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -14,6 +15,18 @@ struct GridsResponse {
 #[derive(Debug, Deserialize)]
 struct GridImage {
     url: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct AppDetailsEntry {
+    success: bool,
+    data: Option<AppDetailsData>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AppDetailsData {
+    #[serde(default)]
+    short_description: String,
 }
 
 /// Caches this app's top SteamGridDB cover art at `assets/<app_id>/grid.<ext>`
@@ -76,6 +89,52 @@ fn fetch_cartridge_art_sync(api_key: &str, mount_point: &Path, app_id: u64) -> R
     fs::create_dir_all(&dir).map_err(|e| format!("Cannot create {}: {e}", dir.display()))?;
     fs::write(dir.join(format!("grid.{ext}")), bytes)
         .map_err(|e| format!("Cannot write grid art: {e}"))
+}
+
+/// Caches this app's short store description at
+/// `assets/<app_id>/description.txt` on the cartridge — the carousel's info
+/// panel (#204) reads this local file, same offline-first reasoning as the
+/// cover art above. Steam's `appdetails` endpoint is public, no API key.
+pub async fn fetch_cartridge_description(mount_point: PathBuf, app_id: u64) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || fetch_cartridge_description_sync(&mount_point, app_id))
+        .await
+        .map_err(|e| format!("Task error: {e}"))?
+}
+
+fn fetch_cartridge_description_sync(mount_point: &Path, app_id: u64) -> Result<(), String> {
+    let agent = ureq::Agent::new_with_config(
+        ureq::config::Config::builder()
+            .timeout_global(Some(Duration::from_secs(15)))
+            .build(),
+    );
+
+    let mut response: HashMap<String, AppDetailsEntry> = agent
+        .get(format!(
+            "https://store.steampowered.com/api/appdetails?appids={app_id}"
+        ))
+        .call()
+        .map_err(|e| format!("Steam appdetails request failed: {e}"))?
+        .into_body()
+        .read_json()
+        .map_err(|e| format!("Steam appdetails response parse failed: {e}"))?;
+
+    let Some(entry) = response.remove(&app_id.to_string()) else {
+        return Ok(());
+    };
+    let Some(description) = entry
+        .success
+        .then_some(entry.data)
+        .flatten()
+        .map(|d| d.short_description)
+        .filter(|d| !d.is_empty())
+    else {
+        return Ok(());
+    };
+
+    let dir = mount_point.join("assets").join(app_id.to_string());
+    fs::create_dir_all(&dir).map_err(|e| format!("Cannot create {}: {e}", dir.display()))?;
+    fs::write(dir.join("description.txt"), description)
+        .map_err(|e| format!("Cannot write description: {e}"))
 }
 
 /// The file extension off a SteamGridDB image URL, falling back to `png` —

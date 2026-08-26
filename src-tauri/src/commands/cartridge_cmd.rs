@@ -130,6 +130,14 @@ pub async fn fetch_cartridge_art(
     cartridge::fetch_cartridge_art(api_key, PathBuf::from(mount_point), app_id).await
 }
 
+/// Caches this app's short Steam store description onto the cartridge
+/// (#205), for the launcher's info panel (#204). Public endpoint, no API
+/// key. Same best-effort treatment as `fetch_cartridge_art`.
+#[tauri::command]
+pub async fn fetch_cartridge_description(app_id: u64, mount_point: String) -> Result<(), String> {
+    cartridge::fetch_cartridge_description(PathBuf::from(mount_point), app_id).await
+}
+
 // No verified non-elevated, silent format API on Windows yet (#194) —
 // gated off there rather than shipped on a guess.
 #[cfg(unix)]

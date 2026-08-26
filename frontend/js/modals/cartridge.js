@@ -194,6 +194,7 @@ async function finishInstall(gameId, gameName, mountPoint) {
   // failure of the install — the launcher (#204) just shows no cover art
   // for this entry.
   invoke("fetch_cartridge_art", { appId: gameId, mountPoint }).catch(() => {});
+  invoke("fetch_cartridge_description", { appId: gameId, mountPoint }).catch(() => {});
 
   if (!easy) {
     el.innerHTML = `<div class="import-result import-result-ok">✓ "${esc(gameName)}" instalado en el cartucho. Jugable desde Steam.</div>`;
