@@ -14,7 +14,7 @@ mod marker;
 #[cfg(unix)]
 mod format;
 
-pub use assets::fetch_cartridge_art;
+pub use assets::{fetch_cartridge_art, fetch_cartridge_description};
 pub use drives::{RemovableDrive, list_removable_drives};
 #[cfg(unix)]
 pub use format::format_as_cartridge;
