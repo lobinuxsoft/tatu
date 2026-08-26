@@ -190,6 +190,11 @@ async function finishInstall(gameId, gameName, mountPoint) {
   const info = state.drmCache[gameId];
   const easy = info && info.preservability && info.preservability.kind === "easy";
 
+  // Best effort, no API key configured or no art on SteamGridDB is not a
+  // failure of the install — the launcher (#204) just shows no cover art
+  // for this entry.
+  invoke("fetch_cartridge_art", { appId: gameId, mountPoint }).catch(() => {});
+
   if (!easy) {
     el.innerHTML = `<div class="import-result import-result-ok">✓ "${esc(gameName)}" instalado en el cartucho. Jugable desde Steam.</div>`;
     return;

@@ -1,9 +1,10 @@
 import { invoke } from "./tauri.js";
 import { state } from "./state.js";
 
-export function loadSettingsUI(apiKey, steamId) {
+export function loadSettingsUI(apiKey, steamId, sgdbApiKey) {
   document.getElementById("cfgApiKey").value = apiKey || "";
   document.getElementById("cfgSteamId").value = steamId || "";
+  document.getElementById("cfgSgdbApiKey").value = sgdbApiKey || "";
   state.hasConfig = !!(apiKey && steamId);
 }
 
@@ -23,6 +24,13 @@ export function installSettingsHandlers() {
   document.getElementById("toggleKeyBtn").addEventListener("click", () => {
     const inp = document.getElementById("cfgApiKey");
     const btn = document.getElementById("toggleKeyBtn");
+    if (inp.type === "password") { inp.type = "text"; btn.textContent = "Ocultar"; }
+    else { inp.type = "password"; btn.textContent = "Mostrar"; }
+  });
+
+  document.getElementById("toggleSgdbKeyBtn").addEventListener("click", () => {
+    const inp = document.getElementById("cfgSgdbApiKey");
+    const btn = document.getElementById("toggleSgdbKeyBtn");
     if (inp.type === "password") { inp.type = "text"; btn.textContent = "Ocultar"; }
     else { inp.type = "password"; btn.textContent = "Mostrar"; }
   });
@@ -47,9 +55,10 @@ export function installSettingsHandlers() {
   document.getElementById("saveSettingsBtn").addEventListener("click", async () => {
     const key = document.getElementById("cfgApiKey").value.trim();
     const id = document.getElementById("cfgSteamId").value.trim();
+    const sgdbKey = document.getElementById("cfgSgdbApiKey").value.trim();
     const msg = document.getElementById("settingsMsg");
     try {
-      await invoke("save_settings", { steamApiKey: key, steamId: id });
+      await invoke("save_settings", { steamApiKey: key, steamId: id, steamgriddbApiKey: sgdbKey });
       state.hasConfig = !!(key && id);
       checkConfigWarning();
       msg.style.color = "#2ea043";

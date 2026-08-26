@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use tauri::path::BaseDirectory;
 use tauri::{AppHandle, Manager, State};
@@ -112,6 +112,22 @@ pub fn inject_goldberg(
         &template_x86,
         &template_x64,
     )
+}
+
+/// Caches this app's SteamGridDB cover art onto the cartridge (#205). Best
+/// effort: the caller treats a failure here as a warning, never a reason to
+/// undo an install that already succeeded.
+#[tauri::command]
+pub async fn fetch_cartridge_art(
+    state: State<'_, SharedState>,
+    app_id: u64,
+    mount_point: String,
+) -> Result<(), String> {
+    let api_key = {
+        let s = state.lock().map_err(|e| e.to_string())?;
+        s.steamgriddb_api_key.clone()
+    };
+    cartridge::fetch_cartridge_art(api_key, PathBuf::from(mount_point), app_id).await
 }
 
 // No verified non-elevated, silent format API on Windows yet (#194) —

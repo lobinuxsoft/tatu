@@ -1,0 +1,124 @@
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+use serde::Deserialize;
+
+#[derive(Debug, Deserialize)]
+struct GridsResponse {
+    success: bool,
+    #[serde(default)]
+    data: Vec<GridImage>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GridImage {
+    url: String,
+}
+
+/// Caches this app's top SteamGridDB cover art at `assets/<app_id>/grid.<ext>`
+/// on the cartridge (#205). The launcher (#204) only ever reads this local
+/// file, never SteamGridDB directly — the destination machine may be offline
+/// when it runs.
+///
+/// No art found for this app is not an error: the install this is attached
+/// to already succeeded, and an empty `assets/<app_id>/` just means the
+/// launcher falls back to no cover art for that entry.
+pub async fn fetch_cartridge_art(
+    api_key: String,
+    mount_point: PathBuf,
+    app_id: u64,
+) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || fetch_cartridge_art_sync(&api_key, &mount_point, app_id))
+        .await
+        .map_err(|e| format!("Task error: {e}"))?
+}
+
+fn fetch_cartridge_art_sync(api_key: &str, mount_point: &Path, app_id: u64) -> Result<(), String> {
+    if api_key.is_empty() {
+        return Err("No SteamGridDB API key configured".to_string());
+    }
+
+    let agent = ureq::Agent::new_with_config(
+        ureq::config::Config::builder()
+            .timeout_global(Some(Duration::from_secs(15)))
+            .build(),
+    );
+
+    let grids: GridsResponse = agent
+        .get(format!(
+            "https://www.steamgriddb.com/api/v2/grids/steam/{app_id}"
+        ))
+        .header("Authorization", &format!("Bearer {api_key}"))
+        .call()
+        .map_err(|e| format!("SteamGridDB request failed: {e}"))?
+        .into_body()
+        .read_json()
+        .map_err(|e| format!("SteamGridDB response parse failed: {e}"))?;
+
+    if !grids.success {
+        return Err("SteamGridDB reported an unsuccessful request".to_string());
+    }
+    let Some(image) = grids.data.first() else {
+        return Ok(());
+    };
+
+    let ext = extension_of(&image.url);
+    let bytes = agent
+        .get(&image.url)
+        .call()
+        .map_err(|e| format!("Cover art download failed: {e}"))?
+        .into_body()
+        .read_to_vec()
+        .map_err(|e| format!("Cover art read failed: {e}"))?;
+
+    let dir = mount_point.join("assets").join(app_id.to_string());
+    fs::create_dir_all(&dir).map_err(|e| format!("Cannot create {}: {e}", dir.display()))?;
+    fs::write(dir.join(format!("grid.{ext}")), bytes)
+        .map_err(|e| format!("Cannot write grid art: {e}"))
+}
+
+/// The file extension off a SteamGridDB image URL, falling back to `png` —
+/// every format the API actually serves (png/jpg/webp) round-trips through
+/// this fine, and a wrong guess here only costs a mislabeled-but-still-valid
+/// image file, never a crash.
+fn extension_of(url: &str) -> String {
+    url.rsplit('.')
+        .next()
+        .filter(|ext| ext.len() <= 4 && ext.chars().all(|c| c.is_ascii_alphanumeric()))
+        .unwrap_or("png")
+        .to_lowercase()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extension_is_read_from_the_url() {
+        assert_eq!(
+            extension_of("https://cdn2.steamgriddb.com/grid/abc.png"),
+            "png"
+        );
+        assert_eq!(
+            extension_of("https://cdn2.steamgriddb.com/grid/abc.jpeg"),
+            "jpeg"
+        );
+    }
+
+    #[test]
+    fn a_url_with_no_recognizable_extension_falls_back_to_png() {
+        assert_eq!(extension_of("https://cdn2.steamgriddb.com/grid/abc"), "png");
+        assert_eq!(
+            extension_of("https://cdn2.steamgriddb.com/grid/abc.verylongstuff"),
+            "png"
+        );
+    }
+
+    #[test]
+    fn missing_api_key_is_refused_before_any_request() {
+        let dir = tempfile::tempdir().unwrap();
+        let err = fetch_cartridge_art_sync("", dir.path(), 1).unwrap_err();
+        assert!(err.contains("No SteamGridDB API key"));
+    }
+}

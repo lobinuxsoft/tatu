@@ -275,6 +275,21 @@
         </p>
       </div>
 
+      <h2 style="color:var(--accent); font-size:1.2rem; margin-bottom:1rem;">Arte de cartuchos (SteamGridDB)</h2>
+
+      <div style="margin-bottom:1.2rem;">
+        <label style="display:block; font-size:0.8rem; color:#8b949e; margin-bottom:0.3rem;">SteamGridDB API Key</label>
+        <div style="display:flex; gap:0.4rem;">
+          <input type="password" id="cfgSgdbApiKey" class="search" style="flex:1; font-family:monospace;" placeholder="Tu API key de SteamGridDB...">
+          <button class="sync-btn" id="toggleSgdbKeyBtn" style="white-space:nowrap;">Mostrar</button>
+        </div>
+        <p style="font-size:0.7rem; color:var(--fg-ghost); margin-top:0.3rem;">
+          Gratis, la generás con tu propia cuenta en
+          <a href="https://www.steamgriddb.com/profile/preferences/api" style="color:var(--accent); cursor:pointer;">steamgriddb.com/profile/preferences/api</a>.
+          Sin ella, instalar un juego en un cartucho no cachea su carátula.
+        </p>
+      </div>
+
       <div style="display:flex; gap:0.5rem; align-items:center;">
         <button class="sync-btn" id="saveSettingsBtn" style="background:#238636; border-color:#2ea043; color:#fff; padding:0.5rem 1.2rem; font-size:0.85rem;">Guardar</button>
         <span id="settingsMsg" style="font-size:0.8rem; color:#2ea043;"></span>
