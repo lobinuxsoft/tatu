@@ -27,7 +27,8 @@ const ASPECT_RATIO := 220.0 / 330.0
 const NAME_OVERLAY_HEIGHT_RATIO := 56.0 / 330.0
 const CORNER_RADIUS := 18
 const SELECTED_SCALE := Vector2(1.08, 1.08)
-const SELECT_DURATION := 0.15
+const SELECT_DURATION := 0.4
+const FONT_DISPLAY := "res://assets/fonts/Rajdhani-SemiBold.ttf"
 
 var index: int = 0
 var _panel: PanelContainer
@@ -39,6 +40,11 @@ var _tween: Tween
 func _init() -> void:
 	flat = true
 	focus_mode = Control.FOCUS_NONE
+	# STOP (the default) would swallow a press-and-drag that starts on top
+	# of a card before it ever reaches the carousel's own drag handling —
+	# PASS lets both this card's own `pressed` AND the carousel's drag-to-
+	# browse see the same gesture.
+	mouse_filter = Control.MOUSE_FILTER_PASS
 
 	# Drop shadow, behind everything, same footprint as the card.
 	var shadow_style := StyleBoxFlat.new()
@@ -85,6 +91,7 @@ func _init() -> void:
 	_art.add_child(_name_overlay)
 
 	_name_label = Label.new()
+	_name_label.add_theme_font_override("font", load(FONT_DISPLAY))
 	_name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_name_label.autowrap_mode = TextServer.AUTOWRAP_WORD
 	_name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -119,8 +126,8 @@ func set_selected(selected: bool) -> void:
 		_tween.kill()
 	_tween = create_tween().set_parallel(true)
 	_tween.tween_property(self, "scale", target_scale, SELECT_DURATION) \
-		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	_tween.tween_property(self, "modulate", target_modulate, SELECT_DURATION) \
+		.set_trans(Tween.TRANS_BOUNCE).set_ease(Tween.EASE_OUT)
+	_tween.tween_property(self, "modulate", target_modulate, SELECT_DURATION * 0.6) \
 		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 
 func _load_art(path: String) -> void:
