@@ -55,7 +55,9 @@ func _load_art(path: String) -> void:
 	if path.is_empty():
 		return
 	var image := Image.new()
-	if image.load(path) != OK:
+	var err := image.load(path)
+	if err != OK:
+		push_warning("Cannot load cover art at %s: error %d" % [path, err])
 		return
 	_art.texture = ImageTexture.create_from_image(image)
 
