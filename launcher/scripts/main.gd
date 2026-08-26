@@ -25,8 +25,13 @@ extends Control
 
 const MARKER_FILENAME := ".tatu-cartridge.json"
 const GRID_ART_EXTENSIONS: Array[String] = ["png", "jpg", "jpeg", "webp"]
-const CARD_GAP := 40
-const SCROLL_DURATION := 0.2
+# Cards size off the carousel area's own height, not a fixed pixel value —
+# resizing the window (or running on a different screen entirely) has to
+# rescale them, not leave them stuck at whatever size they started at.
+const CARD_HEIGHT_RATIO := 0.62
+const CARD_GAP_RATIO := 0.06
+const CAROUSEL_GAP := 32
+const SCROLL_DURATION := 0.32
 const SIDE_PANEL_WIDTH := 300
 const SIDE_PANEL_MARGIN := 24
 
@@ -46,6 +51,7 @@ var _scroll_tween: Tween
 func _ready() -> void:
 	_register_input_actions()
 	_build_layout()
+	_carousel_clip.resized.connect(_on_carousel_resized)
 	_apps = _load_apps()
 	_empty_state.visible = _apps.is_empty()
 	_carousel_clip.visible = not _apps.is_empty()
@@ -57,7 +63,25 @@ func _ready() -> void:
 	# frame after they're all added — centering the scroll any earlier
 	# would compute against a stale (zero) position for the first card.
 	await get_tree().process_frame
+	_resize_cards()
 	_update_selection(false)
+
+## Re-sizes every card off the carousel area's CURRENT height and
+## re-centers without animating — called on the initial layout and again
+## every time the window (or just this area) is resized.
+func _resize_cards() -> void:
+	if _cards.is_empty():
+		return
+	var card_height := _carousel_clip.size.y * CARD_HEIGHT_RATIO
+	_carousel_row.add_theme_constant_override("separation", int(card_height * CARD_GAP_RATIO))
+	for card in _cards:
+		card.resize(card_height)
+
+func _on_carousel_resized() -> void:
+	if _apps.is_empty():
+		return
+	_resize_cards()
+	_center_on_selected(false)
 
 func _register_input_actions() -> void:
 	_ensure_action("card_launch", KEY_ENTER, JOY_BUTTON_A)
@@ -93,6 +117,10 @@ func _move_selection(delta: int) -> void:
 func _build_layout() -> void:
 	var root := HBoxContainer.new()
 	root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	# Gap between each side panel and the carousel — without it, a card
+	# clipped right at that boundary reads as cutting into the panel
+	# instead of an intentional partially-visible neighbor.
+	root.add_theme_constant_override("separation", CAROUSEL_GAP)
 	add_child(root)
 
 	_info_name = Label.new()
@@ -108,7 +136,6 @@ func _build_layout() -> void:
 	root.add_child(_carousel_clip)
 
 	_carousel_row = HBoxContainer.new()
-	_carousel_row.add_theme_constant_override("separation", CARD_GAP)
 	_carousel_clip.add_child(_carousel_row)
 
 	_action_launch = Label.new()
@@ -222,7 +249,8 @@ func _center_on_selected(animate: bool) -> void:
 		_carousel_row.position = target
 		return
 	_scroll_tween = create_tween()
-	_scroll_tween.tween_property(_carousel_row, "position", target, SCROLL_DURATION)
+	_scroll_tween.tween_property(_carousel_row, "position", target, SCROLL_DURATION) \
+		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 
 func _on_launch_requested() -> void:
 	var app_id := int(_apps[_selected_index].get("app_id", 0))

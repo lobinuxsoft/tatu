@@ -20,7 +20,11 @@ extends Button
 
 signal clicked(index: int)
 
-const CARD_SIZE := Vector2(220, 330)
+## width / height — Steam's own library-capsule proportion. The carousel
+## (main.gd) decides the actual pixel size from the window's own height, so
+## this is only ever used as a ratio, never a fixed pixel constant.
+const ASPECT_RATIO := 220.0 / 330.0
+const NAME_OVERLAY_HEIGHT_RATIO := 56.0 / 330.0
 const CORNER_RADIUS := 18
 const SELECTED_SCALE := Vector2(1.08, 1.08)
 const SELECT_DURATION := 0.15
@@ -33,9 +37,6 @@ var _name_label: Label
 var _tween: Tween
 
 func _init() -> void:
-	custom_minimum_size = CARD_SIZE
-	size = CARD_SIZE
-	pivot_offset = CARD_SIZE / 2.0
 	flat = true
 	focus_mode = Control.FOCUS_NONE
 
@@ -80,10 +81,6 @@ func _init() -> void:
 	_name_overlay.visible = false
 	_name_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_name_overlay.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	# PRESET_BOTTOM_WIDE pins top+bottom anchors to the same ratio (1.0),
-	# so its actual height comes only from this offset — the preset alone
-	# leaves it zero-height.
-	_name_overlay.offset_top = -56
 	_name_overlay.add_theme_stylebox_override("panel", overlay_style)
 	_art.add_child(_name_overlay)
 
@@ -101,6 +98,18 @@ func setup(i: int, display_name: String, art_path: String) -> void:
 	_name_label.text = display_name
 	_load_art(art_path)
 
+## Sizes this card off a target HEIGHT, deriving width from ASPECT_RATIO —
+## called by the carousel whenever the window/carousel area is resized, so
+## cards scale with the screen instead of staying a fixed pixel size.
+func resize(height: float) -> void:
+	var new_size := Vector2(height * ASPECT_RATIO, height)
+	custom_minimum_size = new_size
+	size = new_size
+	pivot_offset = new_size / 2.0
+	# PRESET_BOTTOM_WIDE (set once in _init) pins top+bottom anchors to the
+	# same ratio, so its actual height only ever comes from this offset.
+	_name_overlay.offset_top = -height * NAME_OVERLAY_HEIGHT_RATIO
+
 ## Called by the carousel every time the selection changes — this card does
 ## not track its own selected state.
 func set_selected(selected: bool) -> void:
@@ -109,8 +118,10 @@ func set_selected(selected: bool) -> void:
 	if _tween:
 		_tween.kill()
 	_tween = create_tween().set_parallel(true)
-	_tween.tween_property(self, "scale", target_scale, SELECT_DURATION).set_trans(Tween.TRANS_SINE)
-	_tween.tween_property(self, "modulate", target_modulate, SELECT_DURATION)
+	_tween.tween_property(self, "scale", target_scale, SELECT_DURATION) \
+		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	_tween.tween_property(self, "modulate", target_modulate, SELECT_DURATION) \
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 
 func _load_art(path: String) -> void:
 	if path.is_empty():
