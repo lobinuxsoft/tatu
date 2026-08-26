@@ -36,6 +36,13 @@ func _build_layout() -> void:
 	scroll.add_child(_grid)
 
 func _cartridge_root() -> String:
+	# Hitting Play in the editor runs the Godot editor binary itself, which
+	# never has a real cartridge next to it — the empty state would be the
+	# ONLY reachable outcome otherwise. test_cartridge/ is a fixture for
+	# iterating on the grid/animations; an exported build never takes this
+	# branch, `OS.has_feature("editor")` is false there.
+	if OS.has_feature("editor"):
+		return ProjectSettings.globalize_path("res://test_cartridge")
 	return OS.get_executable_path().get_base_dir()
 
 func _load_apps() -> Array:
