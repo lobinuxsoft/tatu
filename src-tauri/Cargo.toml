@@ -18,6 +18,11 @@ urlencoding = "2"
 # Cartridge marker self-check (#194): MD5 over the marker's own fields, not
 # the installed games — RustCrypto's maintained implementation.
 md-5 = "0.11"
+# Verifying the vendored Proton/Steam Linux Runtime downloads (#206) against
+# their own published SHA256/SHA512 sums — same RustCrypto family as md-5.
+sha2 = "0.10"
+# Extracting umu-run out of umu-launcher's zipapp release tarball (#206).
+tar = "0.4"
 # Goldberg injection (#199): PE section scan to detect a SteamStub wrapper
 # before swapping steam_api(64).dll — detection only, no unpacking, so the
 # "pe" feature is all this needs.

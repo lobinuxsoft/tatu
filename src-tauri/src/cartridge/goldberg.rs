@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use goblin::pe::PE;
 
 use crate::drm::Preservability;
+use crate::steam::pick_main_exe_in;
 
 use super::install::{acf_field, appmanifest_path};
 use super::marker::set_standalone;
@@ -62,7 +63,18 @@ pub fn inject_goldberg(
     fs::write(install_dir.join("steam_appid.txt"), app_id.to_string())
         .map_err(|e| format!("Cannot write steam_appid.txt: {e}"))?;
 
-    set_standalone(mount_point, app_id)
+    // The launcher (#204/#206/#207) has no Steam client to ask which .exe to
+    // run — resolve it once here, the same heuristic already used for the
+    // cheat-runtime feature, and record it on the marker.
+    let exe_name = pick_main_exe_in(&install_dir)?;
+    let exe_path = install_dir
+        .join(&exe_name)
+        .strip_prefix(mount_point)
+        .map_err(|_| "Resolved exe path escaped the cartridge root".to_string())?
+        .to_string_lossy()
+        .replace('\\', "/");
+
+    set_standalone(mount_point, app_id, exe_path)
 }
 
 /// `steamapps/common/<installdir>`, where `installdir` comes from the same
@@ -190,6 +202,7 @@ mod tests {
                 name: "Test Game".to_string(),
                 preservability: Preservability::Easy,
                 standalone: false,
+                exe_path: String::new(),
             },
         )
         .unwrap();
@@ -229,6 +242,7 @@ mod tests {
         let install_dir = dir.path().join("steamapps").join("common").join("DOOM");
         let original = install_dir.join("steam_api64.dll");
         fs::write(&original, b"real steam api").unwrap();
+        fs::write(install_dir.join("DOOM.exe"), vec![0u8; 1024]).unwrap();
 
         inject_goldberg(dir.path(), 379720, Preservability::Easy, &x86, &x64).unwrap();
 
@@ -244,6 +258,7 @@ mod tests {
 
         let marker = read_marker(dir.path()).unwrap();
         assert!(marker.apps[0].standalone);
+        assert_eq!(marker.apps[0].exe_path, "steamapps/common/DOOM/DOOM.exe");
     }
 
     #[test]
@@ -259,6 +274,11 @@ mod tests {
         fs::create_dir_all(&nested).unwrap();
         let original = nested.join("steam_api64.dll");
         fs::write(&original, b"real steam api").unwrap();
+        fs::write(
+            nested.join("NestedGame-Win64-Shipping.exe"),
+            vec![0u8; 1024],
+        )
+        .unwrap();
 
         inject_goldberg(dir.path(), 1, Preservability::Easy, &x86, &x64).unwrap();
 

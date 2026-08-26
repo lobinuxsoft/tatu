@@ -37,6 +37,14 @@ pub struct CartridgeApp {
     /// list), so adding it can't invalidate a marker written before #199.
     #[serde(default)]
     pub standalone: bool,
+    /// Cartridge-relative path (forward slashes, always — read by the
+    /// cross-platform Godot launcher) to the main `.exe`, resolved once by
+    /// [`crate::steam::exe::pick_main_exe_in`] at the same moment Goldberg
+    /// injection runs (#206/#207): the launcher has no Steam client to ask,
+    /// so it has to already know exactly which file to hand to Proton or
+    /// run directly. Same out-of-checksum reasoning as `standalone` above.
+    #[serde(default)]
+    pub exe_path: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -156,10 +164,11 @@ pub fn add_app(mount_point: &Path, app: CartridgeApp) -> Result<(), String> {
         .map_err(|e| format!("Cannot write {MARKER_FILENAME}: {e}"))
 }
 
-/// Flip `standalone` on an already-recorded app and rewrite the marker.
-/// Called once #199's Goldberg injection finishes for that app; errors if
-/// the app was never recorded by #195's `add_app` in the first place.
-pub fn set_standalone(mount_point: &Path, app_id: u64) -> Result<(), String> {
+/// Flip `standalone` on an already-recorded app, record its resolved main
+/// `.exe` path, and rewrite the marker. Called once #199's Goldberg
+/// injection finishes for that app; errors if the app was never recorded by
+/// #195's `add_app` in the first place.
+pub fn set_standalone(mount_point: &Path, app_id: u64, exe_path: String) -> Result<(), String> {
     let mut marker = read_marker(mount_point)
         .ok_or_else(|| format!("{} has no valid cartridge marker", mount_point.display()))?;
     let Some(app) = marker.apps.iter_mut().find(|a| a.app_id == app_id) else {
@@ -168,6 +177,7 @@ pub fn set_standalone(mount_point: &Path, app_id: u64) -> Result<(), String> {
         ));
     };
     app.standalone = true;
+    app.exe_path = exe_path;
 
     let rebuilt = CartridgeMarker::new(marker.apps, marker.created_at);
     let json = serde_json::to_string_pretty(&rebuilt).map_err(|e| e.to_string())?;
@@ -193,6 +203,7 @@ mod tests {
             name: name.to_string(),
             preservability: Preservability::Unknown,
             standalone: false,
+            exe_path: String::new(),
         }
     }
 
@@ -277,6 +288,7 @@ mod tests {
                 name: "New Name".to_string(),
                 preservability: Preservability::Easy,
                 standalone: false,
+                exe_path: String::new(),
             },
         )
         .unwrap();
@@ -293,16 +305,22 @@ mod tests {
         write_marker(dir.path()).unwrap();
         add_app(dir.path(), app(379720, "DOOM")).unwrap();
 
-        set_standalone(dir.path(), 379720).unwrap();
+        set_standalone(
+            dir.path(),
+            379720,
+            "steamapps/common/DOOM/DOOM.exe".to_string(),
+        )
+        .unwrap();
 
         let marker = read_marker(dir.path()).expect("still trustworthy after set_standalone");
         assert!(marker.apps[0].standalone);
+        assert_eq!(marker.apps[0].exe_path, "steamapps/common/DOOM/DOOM.exe");
     }
 
     #[test]
     fn set_standalone_rejects_an_app_never_recorded() {
         let dir = tempfile::tempdir().unwrap();
         write_marker(dir.path()).unwrap();
-        assert!(set_standalone(dir.path(), 1).is_err());
+        assert!(set_standalone(dir.path(), 1, String::new()).is_err());
     }
 }

@@ -58,6 +58,14 @@ const ICON_ADD_TO_STEAM: Array[String] = [
 	"res://assets/input_prompts/steamdeck_button_b.png",
 ]
 
+# #206: umu-run + Proton + Steam Linux Runtime, bundled onto the cartridge
+# by Tatu's runtime.rs at the same moment Goldberg injection runs — must
+# match those filenames/pins exactly, or the launcher extracts nothing.
+const CARTRIDGE_RUNTIME_SUBDIR := "runtime/linux"
+const RUNTIME_ARCHIVE := "SteamLinuxRuntime_4.tar.xz"
+const PROTON_ARCHIVE := "GE-Proton11-5-x86_64.tar.gz"
+const PROTON_DIRNAME := "GE-Proton11-5-x86_64"
+
 var _apps: Array = []
 var _selected_index: int = 0
 var _cards: Array[GameCard] = []
@@ -487,14 +495,106 @@ func _center_on_selected(animate: bool) -> void:
 		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 
 func _on_launch_requested() -> void:
-	var app_id := int(_apps[_selected_index].get("app_id", 0))
-	var standalone := bool(_apps[_selected_index].get("standalone", false))
-	if not standalone:
+	var app: Dictionary = _apps[_selected_index]
+	var app_id := int(app.get("app_id", 0))
+	if not bool(app.get("standalone", false)):
 		push_warning("App %d needs Steam — #206/#207 only cover standalone launches" % app_id)
 		return
-	# Execution paths (#206 Linux, #207 Windows) own how a game actually
-	# launches — this issue only owns the UI and the manifest read.
-	push_warning("Launch requested for app %d — no execution path wired yet (#206/#207)" % app_id)
+
+	var exe_relative := String(app.get("exe_path", ""))
+	if exe_relative.is_empty():
+		push_warning("App %d has no exe_path on the marker — Goldberg injection (#199) never ran" % app_id)
+		return
+	var exe_path := _cartridge_root().path_join(exe_relative)
+
+	if OS.get_name() != "Linux":
+		push_warning("Standalone launch on %s not wired yet (#207)" % OS.get_name())
+		return
+	_launch_via_proton(app_id, exe_path)
+
+## Runs a Goldberg-patched exe through umu-run (#206) — adopted rather than
+## hand-rolling a Proton invocation: it replicates Steam's own runtime
+## container so the game behaves the same as it would through Steam,
+## without needing Steam installed. See runtime.rs on the Tatu side for why
+## this specific tool and the exact files it bundles onto the cartridge.
+func _launch_via_proton(app_id: int, exe_path: String) -> void:
+	if not _ensure_linux_runtime_deployed():
+		return
+
+	var wineprefix := _tatu_local_dir().path_join("wineprefix").path_join(str(app_id))
+	DirAccess.make_dir_recursive_absolute(wineprefix)
+
+	OS.set_environment("GAMEID", "umu-default")
+	OS.set_environment("STORE", "none")
+	OS.set_environment("PROTONPATH", _umu_compat_dir().path_join(PROTON_DIRNAME))
+	OS.set_environment("WINEPREFIX", wineprefix)
+	# The whole point of bundling the runtime on the cartridge is that the
+	# destination machine never needs network access — this stops umu-run
+	# from trying to check for a newer Steam Linux Runtime on its own.
+	OS.set_environment("UMU_RUNTIME_UPDATE", "0")
+
+	var pid := OS.create_process(_tatu_local_dir().path_join("umu-run"), [exe_path])
+	if pid <= 0:
+		push_warning("Failed to launch app %d via umu-run" % app_id)
+
+func _tatu_local_dir() -> String:
+	return OS.get_environment("HOME").path_join(".local/share/tatu")
+
+func _umu_local_dir() -> String:
+	return OS.get_environment("HOME").path_join(".local/share/umu")
+
+func _umu_compat_dir() -> String:
+	return _umu_local_dir().path_join("compatibilitytools")
+
+## Copies umu-run + extracts the bundled Proton and Steam Linux Runtime from
+## the cartridge (#206's Tatu-side, runtime.rs) onto this machine's local
+## disk — Proton needs a real filesystem location, not everything works
+## run-in-place from removable media. A no-op past the first call on a given
+## machine: the marker file means every subsequent launch just reuses what's
+## already deployed, cartridge or no cartridge plugged in.
+func _ensure_linux_runtime_deployed() -> bool:
+	var local := _tatu_local_dir()
+	var deployed_marker := local.path_join(".runtime-deployed")
+	if FileAccess.file_exists(deployed_marker):
+		return true
+
+	var cartridge_runtime := _cartridge_root().path_join(CARTRIDGE_RUNTIME_SUBDIR)
+	var umu_run_src := cartridge_runtime.path_join("umu-run")
+	if not FileAccess.file_exists(umu_run_src):
+		push_warning("No Linux runtime bundled on this cartridge (#206)")
+		return false
+
+	DirAccess.make_dir_recursive_absolute(local)
+	var umu_run_dst := local.path_join("umu-run")
+	DirAccess.copy_absolute(umu_run_src, umu_run_dst)
+	OS.execute("chmod", ["+x", umu_run_dst])
+
+	var umu_local := _umu_local_dir()
+	DirAccess.make_dir_recursive_absolute(umu_local)
+	# --strip-components=1: the archive's own top-level SteamLinuxRuntime_4/
+	# folder becomes $HOME/.local/share/umu's CONTENTS directly, matching
+	# what umu-run itself expects (and what its own installer does).
+	if not _extract_tar(cartridge_runtime.path_join(RUNTIME_ARCHIVE), umu_local, true):
+		return false
+
+	var compat_dir := _umu_compat_dir()
+	DirAccess.make_dir_recursive_absolute(compat_dir)
+	if not _extract_tar(cartridge_runtime.path_join(PROTON_ARCHIVE), compat_dir, false):
+		return false
+
+	var marker := FileAccess.open(deployed_marker, FileAccess.WRITE)
+	marker.store_string(PROTON_DIRNAME)
+	return true
+
+func _extract_tar(archive_path: String, dest_dir: String, strip_top_level: bool) -> bool:
+	var args := ["-xf", archive_path, "-C", dest_dir]
+	if strip_top_level:
+		args.append("--strip-components=1")
+	var output := []
+	var code := OS.execute("tar", args, output, true)
+	if code != 0:
+		push_warning("Failed to extract %s: %s" % [archive_path, output])
+	return code == 0
 
 func _on_add_to_steam_requested() -> void:
 	var app_id := int(_apps[_selected_index].get("app_id", 0))

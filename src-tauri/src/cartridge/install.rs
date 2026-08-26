@@ -58,6 +58,7 @@ pub fn poll_install_status(
             name: name.to_string(),
             preservability,
             standalone: false,
+            exe_path: String::new(),
         },
     )?;
     Ok(true)

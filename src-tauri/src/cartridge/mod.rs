@@ -7,6 +7,7 @@ mod drives;
 mod goldberg;
 mod install;
 mod marker;
+mod runtime;
 
 // Windows has no verified, non-elevated, silent format API (#194) — see the
 // PR discussion. Only the Linux path (udisks2 Block.Format, no sudo) exists
@@ -21,6 +22,7 @@ pub use format::format_as_cartridge;
 pub use goldberg::inject_goldberg;
 pub use install::{install_url, is_registered_library, poll_install_status};
 pub use marker::has_cartridge_structure;
+pub use runtime::bundle_linux_runtime;
 
 // CartridgeApp/CartridgeMarker/read_marker/MARKER_FILENAME are the schema
 // #196 (marker refresh in the UI) builds on. Not re-exported here — nothing
