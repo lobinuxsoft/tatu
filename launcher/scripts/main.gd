@@ -363,6 +363,16 @@ func _snap_to_nearest_card() -> void:
 	_update_selection(true)
 
 func _cartridge_root() -> String:
+	# Dev-only escape hatch: point the editor-flavored binary at a REAL
+	# cartridge mount point (e.g. `--cartridge-root=/run/media/.../CART`)
+	# instead of the fixture below — lets #206/#207's execution paths be
+	# smoke-tested against real Steam data without needing an exported
+	# build + export templates just to flip OS.has_feature("editor") off.
+	# Never reachable on a real exported binary (no matching arg exists).
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--cartridge-root="):
+			return arg.trim_prefix("--cartridge-root=")
+
 	# Hitting Play in the editor runs the Godot editor binary itself, which
 	# never has a real cartridge next to it — the empty state would be the
 	# ONLY reachable outcome otherwise. test_cartridge/ is a fixture for
