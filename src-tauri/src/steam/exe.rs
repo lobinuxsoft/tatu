@@ -42,20 +42,28 @@ pub fn detect_game_exe(app_id: &str) -> Result<String, String> {
         return Ok(exe);
     }
     let install_path = find_install_path(app_id)?;
-    // UE games bury the shipping exe at <Game>/Binaries/Win64/<Game>-Win64-Shipping.exe
-    // (depth 3 from install root). Depth 5 leaves margin for engines that nest deeper.
-    let exes = enumerate_exes(&install_path, 5);
-    if exes.is_empty() {
-        return Err(format!("no .exe files under {}", install_path.display()));
-    }
-    let chosen = pick_main_exe(&exes).ok_or_else(|| {
-        format!(
-            "could not select a main .exe under {}",
-            install_path.display()
-        )
-    })?;
+    let chosen = pick_main_exe_in(&install_path)?;
     let _ = cache_detection(app_id, &chosen);
     Ok(chosen)
+}
+
+/// Resolve the main `.exe` filename under an already-known install
+/// directory — reused by cartridge Goldberg injection (#206), which
+/// already has the cartridge's own install dir and has no source-machine
+/// Steam library to search via [`find_install_path`].
+pub(crate) fn pick_main_exe_in(install_dir: &Path) -> Result<String, String> {
+    // UE games bury the shipping exe at <Game>/Binaries/Win64/<Game>-Win64-Shipping.exe
+    // (depth 3 from install root). Depth 5 leaves margin for engines that nest deeper.
+    let exes = enumerate_exes(install_dir, 5);
+    if exes.is_empty() {
+        return Err(format!("no .exe files under {}", install_dir.display()));
+    }
+    pick_main_exe(&exes).ok_or_else(|| {
+        format!(
+            "could not select a main .exe under {}",
+            install_dir.display()
+        )
+    })
 }
 
 fn override_path(app_id: &str) -> Option<PathBuf> {

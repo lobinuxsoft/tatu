@@ -138,6 +138,16 @@ pub async fn fetch_cartridge_description(app_id: u64, mount_point: String) -> Re
     cartridge::fetch_cartridge_description(PathBuf::from(mount_point), app_id).await
 }
 
+/// Bundles the shared umu-run + Proton + Steam Linux Runtime files onto the
+/// cartridge (#206) — only needed once an "Easy" (Goldberg-patched) game
+/// exists on it, so this is called right alongside `inject_goldberg`. A
+/// no-op copy after the first call for a given cartridge; the real fetch
+/// happens at most once per Tatu install, cached outside the cartridge.
+#[tauri::command]
+pub async fn bundle_linux_runtime(mount_point: String) -> Result<(), String> {
+    cartridge::bundle_linux_runtime(PathBuf::from(mount_point)).await
+}
+
 // No verified non-elevated, silent format API on Windows yet (#194) —
 // gated off there rather than shipped on a guess.
 #[cfg(unix)]

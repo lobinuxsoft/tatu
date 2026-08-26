@@ -1,0 +1,3 @@
+#!/bin/sh
+echo "ARGS:$@" >> "$HOME/.local/share/tatu/umu-run.log"
+echo "GAMEID=$GAMEID STORE=$STORE PROTONPATH=$PROTONPATH WINEPREFIX=$WINEPREFIX UMU_RUNTIME_UPDATE=$UMU_RUNTIME_UPDATE" >> "$HOME/.local/share/tatu/umu-run.log"

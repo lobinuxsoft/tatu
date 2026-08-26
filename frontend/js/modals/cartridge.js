@@ -204,7 +204,6 @@ async function finishInstall(gameId, gameName, mountPoint) {
   el.innerHTML = `<div class="loading"><div class="spinner"></div><br>Preparando modo standalone (Goldberg)...</div>`;
   try {
     await invoke("inject_goldberg", { appId: gameId, mountPoint });
-    el.innerHTML = `<div class="import-result import-result-ok">✓ "${esc(gameName)}" instalado y jugable standalone (sin Steam) vía Proton.</div>`;
   } catch (e) {
     // The install itself already succeeded — a failed Goldberg step (e.g. a
     // SteamStub wrapper #199 doesn't unpack) is a warning, not a failure of
@@ -212,5 +211,20 @@ async function finishInstall(gameId, gameName, mountPoint) {
     el.innerHTML =
       `<div class="import-result import-result-ok">✓ "${esc(gameName)}" instalado, jugable desde Steam.</div>` +
       `<div class="cartridge-warn">No se pudo preparar el modo standalone: ${esc(String(e))}</div>`;
+    return;
+  }
+
+  // Goldberg alone isn't enough to run standalone on Linux — the launcher
+  // (#204) also needs umu-run + Proton + its Steam Linux Runtime bundled
+  // on the cartridge (#206). Only the first "Easy" game on a cartridge
+  // actually triggers a download; every one after just copies the cache.
+  el.innerHTML = `<div class="loading"><div class="spinner"></div><br>Preparando runtime de Linux (Proton)...</div>`;
+  try {
+    await invoke("bundle_linux_runtime", { mountPoint });
+    el.innerHTML = `<div class="import-result import-result-ok">✓ "${esc(gameName)}" instalado y jugable standalone (sin Steam) vía Proton.</div>`;
+  } catch (e) {
+    el.innerHTML =
+      `<div class="import-result import-result-ok">✓ "${esc(gameName)}" instalado, jugable desde Steam.</div>` +
+      `<div class="cartridge-warn">No se pudo preparar el runtime de Linux: ${esc(String(e))}</div>`;
   }
 }

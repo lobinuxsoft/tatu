@@ -62,6 +62,7 @@ macro_rules! tracker_handler {
             commands::cartridge_cmd::inject_goldberg,
             commands::cartridge_cmd::fetch_cartridge_art,
             commands::cartridge_cmd::fetch_cartridge_description,
+            commands::cartridge_cmd::bundle_linux_runtime,
             commands::misc_cmd::detect_steam_id,
             commands::misc_cmd::cheats_supported,
             commands::misc_cmd::state_path,
