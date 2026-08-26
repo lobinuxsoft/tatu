@@ -213,7 +213,11 @@ func _build_layout() -> void:
 
 	_action_launch = _action_hint(ICON_LAUNCH, "Ejecutar sin Steam")
 	_action_add_to_steam = _action_hint(ICON_ADD_TO_STEAM, "Agregar a Steam")
-	add_child(_glass_panel(Control.PRESET_RIGHT_WIDE, [_action_launch, _action_add_to_steam]))
+	# Bottom-anchored, not centered in the panel's full height — these two
+	# actions read as a fixed HUD element, not something that drifts
+	# vertically as the info panel's own description text wraps to more or
+	# fewer lines on the opposite side.
+	add_child(_glass_panel(Control.PRESET_RIGHT_WIDE, [_action_launch, _action_add_to_steam], BoxContainer.ALIGNMENT_END))
 
 	_empty_state = Label.new()
 	_empty_state.text = "No hay juegos instalados en este cartucho."
@@ -226,7 +230,7 @@ func _build_layout() -> void:
 ## via glass_panel.gdshader, added AFTER the carousel so that shader's
 ## SCREEN_TEXTURE capture actually includes the cards. Width and margin are
 ## set once here and rewritten by _resize_layout() on every resize.
-func _glass_panel(preset: LayoutPreset, children: Array) -> Control:
+func _glass_panel(preset: LayoutPreset, children: Array, vbox_alignment := BoxContainer.ALIGNMENT_CENTER) -> Control:
 	var glass := ColorRect.new()
 	glass.set_anchors_preset(preset)
 	glass.material = ShaderMaterial.new()
@@ -245,7 +249,7 @@ func _glass_panel(preset: LayoutPreset, children: Array) -> Control:
 
 	var panel := VBoxContainer.new()
 	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	panel.alignment = BoxContainer.ALIGNMENT_CENTER
+	panel.alignment = vbox_alignment
 	panel.add_theme_constant_override("separation", 18)
 	for child: Control in children:
 		panel.add_child(child)

@@ -8,10 +8,11 @@ extends Button
 ## compatible with this project's AGPL-3.0) — a real, actively maintained,
 ## gamepad-native Godot 4 launcher solving this exact screen. Three ideas
 ## borrowed directly: portrait aspect ratio with STRETCH_KEEP_ASPECT_COVERED
-## (art always fills the tile, no letterbox gaps), a name label that only
-## exists as a bottom overlay for a game with no cached cover art (the art
-## itself is the identity when one exists — no separate label to keep
-## aligned across cards), and a StyleBoxFlat drop shadow behind the panel.
+## (art always fills the tile, no letterbox gaps), a name label as a bottom
+## overlay ALWAYS shown (a card with real art still needs its title
+## readable — an earlier pass only showed it for art-less cards, hiding the
+## name on every card that actually had cover art), and a StyleBoxFlat drop
+## shadow behind the panel.
 ##
 ## Because the label lives INSIDE the fixed-aspect panel instead of below
 ## it, scaling the whole card on selection (Control.scale) is safe here —
@@ -84,7 +85,6 @@ func _init() -> void:
 	overlay_style.content_margin_top = 8
 	overlay_style.content_margin_bottom = 8
 	_name_overlay = PanelContainer.new()
-	_name_overlay.visible = false
 	_name_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_name_overlay.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
 	_name_overlay.add_theme_stylebox_override("panel", overlay_style)
@@ -130,14 +130,14 @@ func set_selected(selected: bool) -> void:
 	_tween.tween_property(self, "modulate", target_modulate, SELECT_DURATION * 0.6) \
 		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 
+## The name overlay stays visible whether or not art loads — a card with art
+## still needs its title readable at a glance, same as Steam's own capsules.
 func _load_art(path: String) -> void:
 	if path.is_empty():
-		_name_overlay.visible = true
 		return
 	var image := Image.new()
 	var err := image.load(path)
 	if err != OK:
 		push_warning("Cannot load cover art at %s: error %d" % [path, err])
-		_name_overlay.visible = true
 		return
 	_art.texture = ImageTexture.create_from_image(image)
