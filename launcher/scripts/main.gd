@@ -7,14 +7,26 @@ extends Control
 ## button + a keyboard key rather than needing on-screen buttons to
 ## navigate to.
 ##
+## The carousel is a real HBoxContainer of cards (gets spacing/sizing right
+## for free — an earlier hand-rolled version positioned each card by hand
+## and had cards bleeding past the side panels, see PR #211's history)
+## sitting inside a plain clipped Control. A ScrollContainer was tried in
+## between: it cannot scroll a card to center-screen when the total row is
+## NARROWER than the viewport (a small cartridge with few games) — its
+## scroll_horizontal clamps to 0, so nothing short of overflowing content
+## can ever be centered. Animating the ROW's own position instead has no
+## such floor. Studied ShadowBlip/OpenGamepadUI (GPL-3.0, compatible with
+## this project's AGPL-3.0) before rewriting this — a real, maintained,
+## gamepad-native Godot launcher building the exact same kind of screen.
+##
 ## Never re-verifies the marker's checksum: yaguarete_os#314 already does
 ## that before autorunning this binary, so redoing it here would just
 ## duplicate that trust boundary for no benefit.
 
 const MARKER_FILENAME := ".tatu-cartridge.json"
 const GRID_ART_EXTENSIONS: Array[String] = ["png", "jpg", "jpeg", "webp"]
-const CARD_SPACING := 240.0
-const MOVE_DURATION := 0.18
+const CARD_GAP := 40
+const SCROLL_DURATION := 0.2
 const SIDE_PANEL_WIDTH := 300
 const SIDE_PANEL_MARGIN := 24
 
@@ -24,11 +36,12 @@ var _cards: Array[GameCard] = []
 
 var _empty_state: Label
 var _carousel_clip: Control
-var _carousel_track: Control
+var _carousel_row: HBoxContainer
 var _info_name: Label
 var _info_description: Label
 var _action_launch: Label
 var _action_add_to_steam: Label
+var _scroll_tween: Tween
 
 func _ready() -> void:
 	_register_input_actions()
@@ -40,11 +53,11 @@ func _ready() -> void:
 		_add_card(i, _apps[i])
 	if _apps.is_empty():
 		return
-	# Containers (the HBoxContainer split below) only settle sizes one idle
-	# frame after their children change — reading _carousel_clip.size any
-	# earlier would compute the carousel's center against a stale size.
+	# The HBoxContainer only settles each card's real position one idle
+	# frame after they're all added — centering the scroll any earlier
+	# would compute against a stale (zero) position for the first card.
 	await get_tree().process_frame
-	_update_selection()
+	_update_selection(false)
 
 func _register_input_actions() -> void:
 	_ensure_action("card_launch", KEY_ENTER, JOY_BUTTON_A)
@@ -75,7 +88,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _move_selection(delta: int) -> void:
 	_selected_index = wrapi(_selected_index + delta, 0, _apps.size())
-	_update_selection()
+	_update_selection(true)
 
 func _build_layout() -> void:
 	var root := HBoxContainer.new()
@@ -94,9 +107,9 @@ func _build_layout() -> void:
 	_carousel_clip.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	root.add_child(_carousel_clip)
 
-	_carousel_track = Control.new()
-	_carousel_track.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_carousel_clip.add_child(_carousel_track)
+	_carousel_row = HBoxContainer.new()
+	_carousel_row.add_theme_constant_override("separation", CARD_GAP)
+	_carousel_clip.add_child(_carousel_row)
 
 	_action_launch = Label.new()
 	_action_launch.text = "[A] / Enter — Ejecutar sin Steam"
@@ -155,14 +168,14 @@ func _load_apps() -> Array:
 func _add_card(i: int, app: Dictionary) -> void:
 	var app_id := int(app.get("app_id", 0))
 	var card := GameCard.new()
-	_carousel_track.add_child(card)
+	_carousel_row.add_child(card)
 	card.setup(i, String(app.get("name", "?")), _grid_art_path(app_id))
 	card.clicked.connect(_on_card_clicked)
 	_cards.append(card)
 
 func _on_card_clicked(index: int) -> void:
 	_selected_index = index
-	_update_selection()
+	_update_selection(true)
 
 func _grid_art_path(app_id: int) -> String:
 	var dir := _cartridge_root().path_join("assets").path_join(str(app_id))
@@ -178,19 +191,13 @@ func _description_of(app_id: int) -> String:
 		return ""
 	return FileAccess.get_file_as_string(path)
 
-func _update_selection() -> void:
+func _update_selection(animate: bool) -> void:
 	if _apps.is_empty():
 		return
 
-	var center := _carousel_track.size.x / 2.0
 	for i in _cards.size():
-		var card := _cards[i]
-		var offset := i - _selected_index
-		var target_x := center + offset * CARD_SPACING - card.custom_minimum_size.x / 2.0
-		var target_y := (_carousel_track.size.y - card.custom_minimum_size.y) / 2.0
-		var tween := create_tween()
-		tween.tween_property(card, "position", Vector2(target_x, target_y), MOVE_DURATION)
-		card.set_selected(i == _selected_index)
+		_cards[i].set_selected(i == _selected_index)
+	_center_on_selected(animate)
 
 	var app: Dictionary = _apps[_selected_index]
 	var app_id := int(app.get("app_id", 0))
@@ -199,6 +206,23 @@ func _update_selection() -> void:
 
 	var standalone := bool(app.get("standalone", false))
 	_action_launch.modulate = Color.WHITE if standalone else Color(1, 1, 1, 0.4)
+
+## Moves the whole row so the selected card's center lands on the clip
+## area's center. The row's OWN sizing/spacing comes for free from being a
+## real HBoxContainer — this only ever touches the row's outer position,
+## never an individual card's.
+func _center_on_selected(animate: bool) -> void:
+	var card := _cards[_selected_index]
+	var target_x := _carousel_clip.size.x / 2.0 - (card.position.x + card.size.x / 2.0)
+	var target_y := (_carousel_clip.size.y - _carousel_row.size.y) / 2.0
+	var target := Vector2(target_x, target_y)
+	if _scroll_tween:
+		_scroll_tween.kill()
+	if not animate:
+		_carousel_row.position = target
+		return
+	_scroll_tween = create_tween()
+	_scroll_tween.tween_property(_carousel_row, "position", target, SCROLL_DURATION)
 
 func _on_launch_requested() -> void:
 	var app_id := int(_apps[_selected_index].get("app_id", 0))

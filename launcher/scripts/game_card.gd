@@ -1,51 +1,97 @@
 class_name GameCard
 extends Button
-## One cover-art card in the launcher's carousel (#204). Purely visual plus
-## click-to-select — the carousel (main.gd) drives which card is "selected"
-## (scale/dim) and owns the only two actions that exist (launch, add to
-## Steam), since those apply to whichever card sits centered, not to
-## whichever one has mouse/keyboard focus.
+## One card in the launcher's carousel (#204) — a portrait cover-art tile,
+## rounded corners + drop shadow, matching Steam's own library-capsule
+## proportions rather than a landscape thumbnail.
+##
+## Design adapted from ShadowBlip/OpenGamepadUI's card.tscn (GPL-3.0,
+## compatible with this project's AGPL-3.0) — a real, actively maintained,
+## gamepad-native Godot 4 launcher solving this exact screen. Three ideas
+## borrowed directly: portrait aspect ratio with STRETCH_KEEP_ASPECT_COVERED
+## (art always fills the tile, no letterbox gaps), a name label that only
+## exists as a bottom overlay for a game with no cached cover art (the art
+## itself is the identity when one exists — no separate label to keep
+## aligned across cards), and a StyleBoxFlat drop shadow behind the panel.
+##
+## Because the label lives INSIDE the fixed-aspect panel instead of below
+## it, scaling the whole card on selection (Control.scale) is safe here —
+## an earlier version scaled a card with an EXTERNAL label underneath and
+## the two drifted apart differently per card (see PR #211's history).
 
 signal clicked(index: int)
 
-const SELECTED_SCALE := Vector2(1.25, 1.25)
-const IDLE_SCALE := Vector2(0.85, 0.85)
+const CARD_SIZE := Vector2(220, 330)
+const CORNER_RADIUS := 18
+const SELECTED_SCALE := Vector2(1.08, 1.08)
 const SELECT_DURATION := 0.15
 
 var index: int = 0
+var _panel: PanelContainer
 var _art: TextureRect
+var _name_overlay: PanelContainer
 var _name_label: Label
 var _tween: Tween
 
 func _init() -> void:
-	custom_minimum_size = Vector2(200, 260)
-	size = custom_minimum_size
-	pivot_offset = custom_minimum_size / 2.0
+	custom_minimum_size = CARD_SIZE
+	size = CARD_SIZE
+	pivot_offset = CARD_SIZE / 2.0
 	flat = true
 	focus_mode = Control.FOCUS_NONE
 
-	# Button is a plain Control, not a Container — it never stretches a
-	# child to fill it. Anchor explicitly or content shrinks to its own
-	# minimum size and renders bunched at the top-left corner.
-	var box := VBoxContainer.new()
-	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	box.set_anchors_preset(Control.PRESET_FULL_RECT)
-	add_child(box)
+	# Drop shadow, behind everything, same footprint as the card.
+	var shadow_style := StyleBoxFlat.new()
+	shadow_style.bg_color = Color(0, 0, 0, 0)
+	shadow_style.set_corner_radius_all(CORNER_RADIUS)
+	shadow_style.shadow_color = Color(0, 0, 0, 0.45)
+	shadow_style.shadow_size = 16
+	shadow_style.shadow_offset = Vector2(0, 6)
+	var shadow := PanelContainer.new()
+	shadow.show_behind_parent = true
+	shadow.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	shadow.set_anchors_preset(Control.PRESET_FULL_RECT)
+	shadow.add_theme_stylebox_override("panel", shadow_style)
+	add_child(shadow)
+
+	var panel_style := StyleBoxFlat.new()
+	panel_style.bg_color = Color(0.16, 0.16, 0.18)
+	panel_style.set_corner_radius_all(CORNER_RADIUS)
+
+	_panel = PanelContainer.new()
+	_panel.clip_contents = true
+	_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_panel.add_theme_stylebox_override("panel", panel_style)
+	add_child(_panel)
 
 	_art = TextureRect.new()
-	_art.custom_minimum_size = Vector2(0, 200)
-	_art.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_art.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	_art.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	_art.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
 	_art.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	box.add_child(_art)
+	_panel.add_child(_art)
+
+	var overlay_style := StyleBoxFlat.new()
+	overlay_style.bg_color = Color(0.1, 0.1, 0.12, 0.75)
+	overlay_style.content_margin_left = 10
+	overlay_style.content_margin_right = 10
+	overlay_style.content_margin_top = 8
+	overlay_style.content_margin_bottom = 8
+	_name_overlay = PanelContainer.new()
+	_name_overlay.visible = false
+	_name_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_name_overlay.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	# PRESET_BOTTOM_WIDE pins top+bottom anchors to the same ratio (1.0),
+	# so its actual height comes only from this offset — the preset alone
+	# leaves it zero-height.
+	_name_overlay.offset_top = -56
+	_name_overlay.add_theme_stylebox_override("panel", overlay_style)
+	_art.add_child(_name_overlay)
 
 	_name_label = Label.new()
 	_name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_name_label.autowrap_mode = TextServer.AUTOWRAP_WORD
-	_name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	box.add_child(_name_label)
+	_name_overlay.add_child(_name_label)
 
 func _ready() -> void:
 	pressed.connect(func() -> void: clicked.emit(index))
@@ -58,8 +104,8 @@ func setup(i: int, display_name: String, art_path: String) -> void:
 ## Called by the carousel every time the selection changes — this card does
 ## not track its own selected state.
 func set_selected(selected: bool) -> void:
-	var target_scale := SELECTED_SCALE if selected else IDLE_SCALE
-	var target_modulate := Color.WHITE if selected else Color(1, 1, 1, 0.5)
+	var target_scale := SELECTED_SCALE if selected else Vector2.ONE
+	var target_modulate := Color.WHITE if selected else Color(1, 1, 1, 0.6)
 	if _tween:
 		_tween.kill()
 	_tween = create_tween().set_parallel(true)
@@ -68,10 +114,12 @@ func set_selected(selected: bool) -> void:
 
 func _load_art(path: String) -> void:
 	if path.is_empty():
+		_name_overlay.visible = true
 		return
 	var image := Image.new()
 	var err := image.load(path)
 	if err != OK:
 		push_warning("Cannot load cover art at %s: error %d" % [path, err])
+		_name_overlay.visible = true
 		return
 	_art.texture = ImageTexture.create_from_image(image)
