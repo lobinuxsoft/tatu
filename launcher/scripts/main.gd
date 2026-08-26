@@ -24,7 +24,7 @@ extends Control
 ## duplicate that trust boundary for no benefit.
 
 const MARKER_FILENAME := ".tatu-cartridge.json"
-const GRID_ART_EXTENSIONS: Array[String] = ["png", "jpg", "jpeg", "webp"]
+const IMAGE_EXTENSIONS: Array[String] = ["png", "jpg", "jpeg", "webp"]
 # Cards size off the carousel area's own height, not a fixed pixel value —
 # resizing the window (or running on a different screen entirely) has to
 # rescale them, not leave them stuck at whatever size they started at.
@@ -70,7 +70,11 @@ var _info_name: Label
 var _info_description: Label
 var _action_launch: Control
 var _action_add_to_steam: Control
+var _gallery: ScreenshotGallery
+var _viewer: Control
+var _viewer_image: TextureRect
 var _scroll_tween: Tween
+var _panel_content_width := 0.0
 
 var _left_glass: ColorRect
 var _left_margin: MarginContainer
@@ -128,6 +132,8 @@ func _resize_layout() -> void:
 	for side in ["left", "top", "right", "bottom"]:
 		_left_margin.add_theme_constant_override("margin_%s" % side, panel_margin)
 		_right_margin.add_theme_constant_override("margin_%s" % side, panel_margin)
+	_panel_content_width = panel_width - panel_margin * 2.0
+	_gallery.resize(_panel_content_width)
 
 	if _cards.is_empty():
 		return
@@ -145,6 +151,12 @@ func _on_carousel_resized() -> void:
 func _register_input_actions() -> void:
 	_ensure_action("card_launch", KEY_ENTER, JOY_BUTTON_A)
 	_ensure_action("card_add_to_steam", KEY_S, JOY_BUTTON_B)
+	# ui_up/ui_down are built-in (arrow keys + D-pad/stick already wired by
+	# Godot's default input map) — the screenshot gallery reuses them
+	# directly rather than registering its own, same as the carousel
+	# already reuses ui_left/ui_right instead of custom actions.
+	_ensure_action("gallery_select", KEY_X, JOY_BUTTON_X)
+	_ensure_action("gallery_close", KEY_ESCAPE, JOY_BUTTON_B)
 
 func _ensure_action(action: StringName, key: int, joy_button: int) -> void:
 	if InputMap.has_action(action):
@@ -158,12 +170,25 @@ func _ensure_action(action: StringName, key: int, joy_button: int) -> void:
 	InputMap.action_add_event(action, joy_event)
 
 func _unhandled_input(event: InputEvent) -> void:
+	# The enlarged viewer is a modal — while it's open, it owns input
+	# exclusively (no carousel navigation leaking through behind it). #214's
+	# bonus-content gallery reuses this exact same trap.
+	if _viewer.visible:
+		if event.is_action_pressed("gallery_close") or event.is_action_pressed("gallery_select"):
+			_close_viewer()
+		return
 	if _apps.is_empty():
 		return
 	if event.is_action_pressed("ui_left"):
 		_move_selection(-1)
 	elif event.is_action_pressed("ui_right"):
 		_move_selection(1)
+	elif event.is_action_pressed("ui_up"):
+		_gallery.move_selection(-1)
+	elif event.is_action_pressed("ui_down"):
+		_gallery.move_selection(1)
+	elif event.is_action_pressed("gallery_select"):
+		_open_viewer(_gallery.selected_path())
 	elif event.is_action_pressed("card_launch"):
 		_on_launch_requested()
 	elif event.is_action_pressed("card_add_to_steam"):
@@ -213,17 +238,35 @@ func _build_layout() -> void:
 
 	_action_launch = _action_hint(ICON_LAUNCH, "Ejecutar sin Steam")
 	_action_add_to_steam = _action_hint(ICON_ADD_TO_STEAM, "Agregar a Steam")
-	# Bottom-anchored, not centered in the panel's full height — these two
-	# actions read as a fixed HUD element, not something that drifts
-	# vertically as the info panel's own description text wraps to more or
-	# fewer lines on the opposite side.
-	add_child(_glass_panel(Control.PRESET_RIGHT_WIDE, [_action_launch, _action_add_to_steam], BoxContainer.ALIGNMENT_END))
+	_gallery = ScreenshotGallery.new()
+	_gallery.thumbnail_activated.connect(_open_viewer)
+	# The gallery is the only EXPAND_FILL child here, so it absorbs all
+	# leftover vertical space above the two action rows — those stay
+	# bottom-anchored regardless of how many (or how few) screenshots the
+	# selected game has.
+	add_child(_glass_panel(Control.PRESET_RIGHT_WIDE, [_gallery, _action_launch, _action_add_to_steam], BoxContainer.ALIGNMENT_END))
 
 	_empty_state = Label.new()
 	_empty_state.text = "No hay juegos instalados en este cartucho."
 	_empty_state.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_empty_state.set_anchors_preset(Control.PRESET_CENTER)
 	add_child(_empty_state)
+
+	# Full-screen modal, built last so it draws on top of everything else —
+	# hidden until a screenshot is activated.
+	_viewer = ColorRect.new()
+	_viewer.color = Color(0, 0, 0, 0.85)
+	_viewer.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_viewer.visible = false
+	_viewer_image = TextureRect.new()
+	_viewer_image.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_viewer_image.offset_left = 80
+	_viewer_image.offset_top = 80
+	_viewer_image.offset_right = -80
+	_viewer_image.offset_bottom = -80
+	_viewer_image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	_viewer.add_child(_viewer_image)
+	add_child(_viewer)
 
 ## A strip pinned to the given edge (PRESET_LEFT_WIDE or PRESET_RIGHT_WIDE),
 ## rendering whatever is already on screen behind it — blurred and tinted —
@@ -348,11 +391,44 @@ func _on_card_clicked(index: int) -> void:
 
 func _grid_art_path(app_id: int) -> String:
 	var dir := _cartridge_root().path_join("assets").path_join(str(app_id))
-	for ext in GRID_ART_EXTENSIONS:
+	for ext in IMAGE_EXTENSIONS:
 		var candidate := dir.path_join("grid.%s" % ext)
 		if FileAccess.file_exists(candidate):
 			return candidate
 	return ""
+
+## #213's screenshots (Tatu-side pipeline not built yet — this reads
+## whatever the fixture/cartridge already has under screenshots/, same as
+## _grid_art_path already does for grid.*). Sorted by filename so the
+## gallery order is stable across relaunches.
+func _screenshot_paths(app_id: int) -> Array[String]:
+	var paths: Array[String] = []
+	var dir_path := _cartridge_root().path_join("assets").path_join(str(app_id)).path_join("screenshots")
+	var dir := DirAccess.open(dir_path)
+	if dir == null:
+		return paths
+	dir.list_dir_begin()
+	var file_name := dir.get_next()
+	while file_name != "":
+		if not dir.current_is_dir() and file_name.get_extension().to_lower() in IMAGE_EXTENSIONS:
+			paths.append(dir_path.path_join(file_name))
+		file_name = dir.get_next()
+	dir.list_dir_end()
+	paths.sort()
+	return paths
+
+func _open_viewer(path: String) -> void:
+	if path.is_empty():
+		return
+	var image := Image.new()
+	if image.load(path) != OK:
+		push_warning("Cannot load screenshot at %s" % path)
+		return
+	_viewer_image.texture = ImageTexture.create_from_image(image)
+	_viewer.visible = true
+
+func _close_viewer() -> void:
+	_viewer.visible = false
 
 func _description_of(app_id: int) -> String:
 	var path := _cartridge_root().path_join("assets").path_join(str(app_id)).path_join("description.txt")
@@ -373,6 +449,8 @@ func _update_selection(animate: bool) -> void:
 	_info_name.text = String(app.get("name", "?"))
 	_info_description.text = _description_of(app_id)
 	_update_background(app_id)
+	_gallery.set_screenshots(_screenshot_paths(app_id))
+	_gallery.resize(_panel_content_width)
 
 	var standalone := bool(app.get("standalone", false))
 	_action_launch.modulate = Color.WHITE if standalone else Color(1, 1, 1, 0.4)
