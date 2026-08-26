@@ -19,12 +19,18 @@ func _init() -> void:
 	flat = true
 	focus_mode = Control.FOCUS_ALL
 
+	# Button is a plain Control, not a Container — it never stretches a child
+	# to fill it the way a Container would. Without this, the box shrinks to
+	# its content's minimum width and everything renders bunched at the
+	# button's top-left corner instead of filling/centering in the card.
 	var box := VBoxContainer.new()
 	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	box.set_anchors_preset(Control.PRESET_FULL_RECT)
 	add_child(box)
 
 	_art = TextureRect.new()
 	_art.custom_minimum_size = Vector2(0, 200)
+	_art.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_art.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	_art.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	_art.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -33,6 +39,7 @@ func _init() -> void:
 	_name_label = Label.new()
 	_name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_name_label.autowrap_mode = TextServer.AUTOWRAP_WORD
+	_name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	box.add_child(_name_label)
 
