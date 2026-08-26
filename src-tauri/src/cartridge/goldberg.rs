@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use goblin::pe::PE;
 
 use crate::drm::Preservability;
-use crate::steam::exe::pick_main_exe_in;
+use crate::steam::pick_main_exe_in;
 
 use super::install::{acf_field, appmanifest_path};
 use super::marker::set_standalone;
