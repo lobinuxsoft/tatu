@@ -46,11 +46,18 @@ const SIDE_PANEL_WIDTH_RATIO := 0.22
 const SIDE_PANEL_MARGIN_RATIO := 0.018
 const TITLE_FONT_RATIO := 0.036
 const BODY_FONT_RATIO := 0.02
-# Smaller and its own ratio, not BODY_FONT_RATIO — these sit in a fixed
-# bottom-anchored corner (see the VBoxContainer's ALIGNMENT_END below), so
-# shrinking them doesn't fight the info panel's actual body text for space.
-const HINT_FONT_RATIO := 0.014
-const HINT_ICON_RATIO := 0.024
+# Smaller and its own ratio, not BODY_FONT_RATIO — these sit in their own
+# bottom-center bar (see ACTION_BAR_* below), so shrinking them doesn't
+# fight the info panel's actual body text for space. Reduced again from an
+# earlier pass — found live-testing with the user: all four still need to
+# fit in one row without crowding.
+const HINT_FONT_RATIO := 0.011
+const HINT_ICON_RATIO := 0.02
+# The action bar's own bottom margin and the gap between its four action
+# groups, both ratios of the window rather than fixed pixels — same rule
+# as every other size in this file.
+const ACTION_BAR_MARGIN_RATIO := 0.03
+const ACTION_BAR_GAP_RATIO := 0.03
 
 # Same display/body fonts Tatu's own web frontend themes already use (OFL,
 # vendored under assets/fonts/ — see assets/README.md for provenance).
@@ -101,6 +108,7 @@ var _action_launch: Control
 var _action_add_to_steam: Control
 var _action_gallery: Control
 var _action_close: Control
+var _action_bar: HBoxContainer
 var _gallery: ScreenshotGallery
 var _viewer: Control
 var _viewer_image: TextureRect
@@ -163,6 +171,12 @@ func _resize_layout() -> void:
 	for icon in _hint_icons:
 		icon.custom_minimum_size = Vector2(icon_size, icon_size)
 
+	var bar_margin := int(_carousel_clip.size.y * ACTION_BAR_MARGIN_RATIO)
+	_action_bar.offset_bottom = -bar_margin
+	_action_bar.add_theme_constant_override(
+		"separation", int(_carousel_clip.size.x * ACTION_BAR_GAP_RATIO)
+	)
+
 	var panel_width := _carousel_clip.size.x * SIDE_PANEL_WIDTH_RATIO
 	var panel_margin := int(_carousel_clip.size.x * SIDE_PANEL_MARGIN_RATIO)
 	_left_glass.offset_right = panel_width
@@ -215,10 +229,19 @@ func _ensure_action(action: StringName, key: int, joy_button: int) -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	# The enlarged viewer is a modal — while it's open, it owns input
 	# exclusively (no carousel navigation leaking through behind it). #214's
-	# bonus-content gallery reuses this exact same trap.
+	# bonus-content gallery reuses this exact same trap. ui_up/ui_down still
+	# move through the screenshots while enlarged, though — found live-
+	# testing with the user: the viewer opened but there was no way to
+	# browse past the one screenshot you enlarged first.
 	if _viewer.visible:
 		if event.is_action_pressed("gallery_close") or event.is_action_pressed("gallery_select"):
 			_close_viewer()
+		elif event.is_action_pressed("ui_up"):
+			_gallery.move_selection(-1)
+			_open_viewer(_gallery.selected_path())
+		elif event.is_action_pressed("ui_down"):
+			_gallery.move_selection(1)
+			_open_viewer(_gallery.selected_path())
 		return
 	if _apps.is_empty():
 		return
@@ -293,21 +316,27 @@ func _build_layout() -> void:
 	_body_labels.append(_info_description)
 	add_child(_glass_panel(Control.PRESET_LEFT_WIDE, [_info_name, _info_description]))
 
+	_gallery = ScreenshotGallery.new()
+	_gallery.thumbnail_activated.connect(_open_viewer)
+	add_child(_glass_panel(Control.PRESET_RIGHT_WIDE, [_gallery]))
+
+	# Bottom-center action bar, horizontal — found live-testing with the
+	# user: stacked vertically inside the side panel, the four action rows
+	# crowded the gallery above them and read too large/prominent. A single
+	# row across the bottom of the whole screen (not just the side panel)
+	# reads more like a real game's button-prompt bar, and leaves the
+	# gallery its full height to work with.
 	_action_launch = _action_hint(ICON_LAUNCH, "Launch")
 	_action_add_to_steam = _action_hint(ICON_ADD_TO_STEAM, "Add to Steam")
 	_action_gallery = _action_hint(ICON_GALLERY, "Gallery")
 	_action_close = _action_hint(ICON_CLOSE, "Close")
-	_gallery = ScreenshotGallery.new()
-	_gallery.thumbnail_activated.connect(_open_viewer)
-	# The gallery is the only EXPAND_FILL child here, so it absorbs all
-	# leftover vertical space above the four action rows — those stay
-	# bottom-anchored regardless of how many (or how few) screenshots the
-	# selected game has.
-	add_child(_glass_panel(
-		Control.PRESET_RIGHT_WIDE,
-		[_gallery, _action_launch, _action_add_to_steam, _action_gallery, _action_close],
-		BoxContainer.ALIGNMENT_END,
-	))
+	_action_bar = HBoxContainer.new()
+	_action_bar.alignment = BoxContainer.ALIGNMENT_CENTER
+	_action_bar.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	_action_bar.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	for action in [_action_launch, _action_add_to_steam, _action_gallery, _action_close]:
+		_action_bar.add_child(action)
+	add_child(_action_bar)
 
 	_empty_state = Label.new()
 	_empty_state.text = "No hay juegos instalados en este cartucho."
@@ -396,8 +425,10 @@ func _action_hint(icon_paths: Array[String], text: String) -> Control:
 	var label := Label.new()
 	label.text = text
 	label.add_theme_font_override("font", load(FONT_BODY))
-	label.autowrap_mode = TextServer.AUTOWRAP_WORD
-	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# No autowrap/EXPAND_FILL here — this used to be a wide row inside the
+	# vertical side-panel stack, but now sits as one of four fixed-size
+	# groups in the horizontal bottom bar. Wrapping mid-word ("Add to
+	# Steam" over 3 lines) was the visible result of the old assumption.
 	_hint_labels.append(label)
 	row.add_child(label)
 	return row
