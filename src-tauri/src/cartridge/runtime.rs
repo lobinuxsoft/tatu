@@ -3,6 +3,8 @@ use std::io::{self, BufWriter};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use serde::{Deserialize, Serialize};
+
 /// Adopted rather than reinvented (#206): [umu-launcher](https://github.com/Open-Wine-Components/umu-launcher)
 /// is the maintained, actively-used-by-Lutris/Heroic tool for running Proton
 /// outside of Steam — replicating Steam's own runtime container so a game
@@ -44,8 +46,8 @@ pub async fn bundle_linux_runtime(mount_point: PathBuf) -> Result<(), String> {
 
 fn bundle_linux_runtime_sync(mount_point: &Path) -> Result<(), String> {
     let dest = mount_point.join(RUNTIME_SUBDIR);
-    if dest.join("umu-run").is_file() {
-        return Ok(()); // Already bundled on this cartridge.
+    if is_current(&dest) {
+        return Ok(());
     }
 
     let cache = ensure_cached()?;
@@ -55,11 +57,41 @@ fn bundle_linux_runtime_sync(mount_point: &Path) -> Result<(), String> {
             .map_err(|e| format!("Cannot copy {name} onto cartridge: {e}"))?;
     }
 
-    let manifest = format!(
-        "{{\"proton_version\":\"{PROTON_VERSION}\",\"runtime_variant\":\"{RUNTIME_VARIANT}\"}}"
-    );
-    fs::write(dest.join("manifest.json"), manifest)
-        .map_err(|e| format!("Cannot write runtime manifest: {e}"))
+    let manifest = RuntimeManifest {
+        proton_version: PROTON_VERSION.to_string(),
+        runtime_variant: RUNTIME_VARIANT.to_string(),
+    };
+    fs::write(
+        dest.join("manifest.json"),
+        serde_json::to_string(&manifest).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| format!("Cannot write runtime manifest: {e}"))
+}
+
+#[derive(Deserialize, Serialize)]
+struct RuntimeManifest {
+    proton_version: String,
+    runtime_variant: String,
+}
+
+/// Whether the cartridge's already-bundled runtime matches what THIS build
+/// of Tatu currently pins — not just whether *some* runtime is there. A
+/// cartridge bundled before a `PROTON_VERSION`/`RUNTIME_VARIANT` bump would
+/// otherwise keep a stale, silently mismatched Proton forever: the old
+/// existence-only check (`umu-run` present?) had no way to notice a version
+/// bump at all.
+fn is_current(dest: &Path) -> bool {
+    let Ok(raw) = fs::read_to_string(dest.join("manifest.json")) else {
+        return false;
+    };
+    let Ok(manifest) = serde_json::from_str::<RuntimeManifest>(&raw) else {
+        return false;
+    };
+    manifest.proton_version == PROTON_VERSION
+        && manifest.runtime_variant == RUNTIME_VARIANT
+        && dest.join("umu-run").is_file()
+        && dest.join(proton_filename()).is_file()
+        && dest.join(RUNTIME_ARCHIVE).is_file()
 }
 
 fn proton_filename() -> &'static str {
@@ -247,6 +279,55 @@ fn make_executable(path: &Path) -> Result<(), String> {
 #[cfg(not(unix))]
 fn make_executable(_path: &Path) -> Result<(), String> {
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn write_manifest(dest: &Path, proton_version: &str, runtime_variant: &str) {
+        fs::create_dir_all(dest).unwrap();
+        for name in ["umu-run", proton_filename(), RUNTIME_ARCHIVE] {
+            fs::write(dest.join(name), b"stub").unwrap();
+        }
+        fs::write(
+            dest.join("manifest.json"),
+            serde_json::to_string(&RuntimeManifest {
+                proton_version: proton_version.to_string(),
+                runtime_variant: runtime_variant.to_string(),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn no_manifest_is_not_current() {
+        let dest = tempfile::tempdir().unwrap();
+        assert!(!is_current(dest.path()));
+    }
+
+    #[test]
+    fn a_matching_manifest_with_all_files_present_is_current() {
+        let dest = tempfile::tempdir().unwrap();
+        write_manifest(dest.path(), PROTON_VERSION, RUNTIME_VARIANT);
+        assert!(is_current(dest.path()));
+    }
+
+    #[test]
+    fn a_stale_proton_version_is_not_current() {
+        let dest = tempfile::tempdir().unwrap();
+        write_manifest(dest.path(), "GE-Proton10-1", RUNTIME_VARIANT);
+        assert!(!is_current(dest.path()));
+    }
+
+    #[test]
+    fn a_matching_manifest_missing_a_file_is_not_current() {
+        let dest = tempfile::tempdir().unwrap();
+        write_manifest(dest.path(), PROTON_VERSION, RUNTIME_VARIANT);
+        fs::remove_file(dest.path().join(RUNTIME_ARCHIVE)).unwrap();
+        assert!(!is_current(dest.path()));
+    }
 }
 
 #[cfg(test)]
