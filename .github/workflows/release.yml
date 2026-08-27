@@ -37,6 +37,17 @@ jobs:
         with:
           ref: ${{ inputs.tag_name }}
 
+      # Same stand-in as ci.yml — see that file for why. TODO(#204 follow-up):
+      # replace this with a real Godot export step once the CI job that
+      # builds the launcher binaries exists, so a real release actually
+      # ships them instead of an empty file.
+      - name: Create placeholder launcher resources
+        shell: bash
+        run: |
+          mkdir -p src-tauri/vendor/launcher/linux src-tauri/vendor/launcher/windows
+          : > src-tauri/vendor/launcher/linux/tatu-launcher
+          : > src-tauri/vendor/launcher/windows/tatu-launcher.exe
+
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2

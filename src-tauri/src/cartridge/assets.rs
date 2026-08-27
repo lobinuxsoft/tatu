@@ -48,6 +48,10 @@ pub async fn fetch_cartridge_art(
 }
 
 fn fetch_cartridge_art_sync(api_key: &str, mount_point: &Path, app_id: u64) -> Result<(), String> {
+    let dir = mount_point.join("assets").join(app_id.to_string());
+    if has_grid_art(&dir) {
+        return Ok(());
+    }
     if api_key.is_empty() {
         return Err("No SteamGridDB API key configured".to_string());
     }
@@ -85,10 +89,24 @@ fn fetch_cartridge_art_sync(api_key: &str, mount_point: &Path, app_id: u64) -> R
         .read_to_vec()
         .map_err(|e| format!("Cover art read failed: {e}"))?;
 
-    let dir = mount_point.join("assets").join(app_id.to_string());
     fs::create_dir_all(&dir).map_err(|e| format!("Cannot create {}: {e}", dir.display()))?;
     fs::write(dir.join(format!("grid.{ext}")), bytes)
         .map_err(|e| format!("Cannot write grid art: {e}"))
+}
+
+/// Whether `dir` already has a `grid.*` file from a previous call — skips
+/// hitting SteamGridDB again every time #204's batch "prepare cartridge"
+/// step re-runs for a cartridge that already has some apps set up.
+fn has_grid_art(dir: &Path) -> bool {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return false;
+    };
+    entries.filter_map(Result::ok).any(|entry| {
+        entry
+            .file_name()
+            .to_str()
+            .is_some_and(|name| name.starts_with("grid."))
+    })
 }
 
 /// Caches this app's short store description at
@@ -102,6 +120,11 @@ pub async fn fetch_cartridge_description(mount_point: PathBuf, app_id: u64) -> R
 }
 
 fn fetch_cartridge_description_sync(mount_point: &Path, app_id: u64) -> Result<(), String> {
+    let dir = mount_point.join("assets").join(app_id.to_string());
+    if dir.join("description.txt").is_file() {
+        return Ok(());
+    }
+
     let agent = ureq::Agent::new_with_config(
         ureq::config::Config::builder()
             .timeout_global(Some(Duration::from_secs(15)))
@@ -131,7 +154,6 @@ fn fetch_cartridge_description_sync(mount_point: &Path, app_id: u64) -> Result<(
         return Ok(());
     };
 
-    let dir = mount_point.join("assets").join(app_id.to_string());
     fs::create_dir_all(&dir).map_err(|e| format!("Cannot create {}: {e}", dir.display()))?;
     fs::write(dir.join("description.txt"), description)
         .map_err(|e| format!("Cannot write description: {e}"))

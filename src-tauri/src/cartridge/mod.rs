@@ -6,6 +6,7 @@ mod assets;
 mod drives;
 mod goldberg;
 mod install;
+mod launcher;
 mod marker;
 mod runtime;
 
@@ -21,9 +22,9 @@ pub use drives::{RemovableDrive, list_removable_drives};
 pub use format::format_as_cartridge;
 pub use goldberg::inject_goldberg;
 pub use install::{install_url, is_registered_library, poll_install_status};
-pub use marker::has_cartridge_structure;
+pub use launcher::install_launcher_binaries;
+pub use marker::{CartridgeApp, has_cartridge_structure, list_apps};
 pub use runtime::bundle_linux_runtime;
 
-// CartridgeApp/CartridgeMarker/read_marker/MARKER_FILENAME are the schema
-// #196 (marker refresh in the UI) builds on. Not re-exported here — nothing
-// outside this module calls them until that lands.
+// CartridgeMarker/read_marker/MARKER_FILENAME stay private — nothing outside
+// this module needs the raw marker, only the app list (`list_apps`).

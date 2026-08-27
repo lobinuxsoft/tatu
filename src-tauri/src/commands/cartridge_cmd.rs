@@ -17,6 +17,13 @@ pub fn has_cartridge_structure(mount_point: String) -> bool {
     cartridge::has_cartridge_structure(Path::new(&mount_point))
 }
 
+/// Every app already recorded on this cartridge — feeds the "Gestionar
+/// cartucho" screen, independent of any one game's install flow.
+#[tauri::command]
+pub fn list_cartridge_apps(mount_point: String) -> Result<Vec<cartridge::CartridgeApp>, String> {
+    cartridge::list_apps(Path::new(&mount_point))
+}
+
 #[tauri::command]
 pub fn is_registered_library(mount_point: String) -> bool {
     cartridge::is_registered_library(Path::new(&mount_point))
@@ -146,6 +153,39 @@ pub async fn fetch_cartridge_description(app_id: u64, mount_point: String) -> Re
 #[tauri::command]
 pub async fn bundle_linux_runtime(mount_point: String) -> Result<(), String> {
     cartridge::bundle_linux_runtime(PathBuf::from(mount_point)).await
+}
+
+/// Copies both the Linux and Windows launcher binaries onto the cartridge
+/// root (#204's remaining gap). `spawn_blocking`d: this is ~180MB of copy
+/// onto whatever drive is plugged in, and #217 already found a slow/stuck
+/// USB stick can stall a sync file op long enough to freeze all of Tatu's
+/// IPC if it isn't pushed off the async runtime's worker thread.
+#[tauri::command]
+pub async fn install_launcher_binaries(app: AppHandle, mount_point: String) -> Result<(), String> {
+    let linux_binary = app
+        .path()
+        .resolve(
+            "vendor/launcher/linux/tatu-launcher",
+            BaseDirectory::Resource,
+        )
+        .map_err(|e| e.to_string())?;
+    let windows_binary = app
+        .path()
+        .resolve(
+            "vendor/launcher/windows/tatu-launcher.exe",
+            BaseDirectory::Resource,
+        )
+        .map_err(|e| e.to_string())?;
+
+    tokio::task::spawn_blocking(move || {
+        cartridge::install_launcher_binaries(
+            Path::new(&mount_point),
+            &linux_binary,
+            &windows_binary,
+        )
+    })
+    .await
+    .map_err(|e| format!("Task error: {e}"))?
 }
 
 // No verified non-elevated, silent format API on Windows yet (#194) —

@@ -19,6 +19,7 @@
   <div class="tabs">
     <div class="tab active" data-tab="steam">Steam <span class="tab-count" id="tabSteamCount"></span></div>
     <div class="tab" data-tab="nonsteam">Non-Steam <span class="tab-count" id="tabNonsteamCount"></span></div>
+    <div class="tab" data-tab="cartridge">Cartucho</div>
     <div class="tab" data-tab="help" style="margin-left:auto;">Cómo funciona</div>
     <div class="tab" data-tab="settings" style="color:#6e7681;">Settings</div>
   </div>
@@ -89,6 +90,11 @@
     </div>
     <div class="progress-wrap"><div class="progress-bar" id="nspBar"></div><div class="progress-text" id="nspText">0%</div></div>
     <div id="nsContent"><div class="empty-state">Dale a "Leer shortcuts.vdf" para cargar tus juegos Non-Steam.<br><br>Son los accesos directos que agregaste al cliente de Steam a mano. Se cuentan aparte de tu biblioteca: Steam no registra horas, logros ni cromos para ellos.</div></div>
+  </div>
+
+  <!-- CARTRIDGE TAB -->
+  <div class="tab-panel" id="panel-cartridge">
+    <div id="cartridgeManageBody"><div class="loading"><div class="spinner"></div><br>Buscando discos...</div></div>
   </div>
 
   <!-- HELP TAB -->
