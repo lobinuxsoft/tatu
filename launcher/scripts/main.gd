@@ -25,6 +25,11 @@ extends Control
 
 const MARKER_FILENAME := ".tatu-cartridge.json"
 const IMAGE_EXTENSIONS: Array[String] = ["png", "jpg", "jpeg", "webp"]
+# Opt-in trailer (#212), Ogg Theora — the only video format Godot 4 plays
+# natively. Absent for most games unless the user checked "Incluir
+# trailers" in the Cartucho tab: falls back to a cached screenshot, then
+# the blurred grid art, same tier order the background already had.
+const TRAILER_FILENAME := "trailer.ogv"
 # Cards size off the carousel area's own height, not a fixed pixel value —
 # resizing the window (or running on a different screen entirely) has to
 # rescale them, not leave them stuck at whatever size they started at.
@@ -87,6 +92,7 @@ var _cards: Array[GameCard] = []
 
 var _empty_state: Label
 var _background: TextureRect
+var _background_video: VideoStreamPlayer
 var _carousel_clip: Control
 var _carousel_row: HBoxContainer
 var _info_name: Label
@@ -248,6 +254,18 @@ func _build_layout() -> void:
 	_background.material = ShaderMaterial.new()
 	_background.material.shader = load("res://shaders/box_blur.gdshader")
 	add_child(_background)
+
+	# Same full-rect slot as the TextureRect above — only one of the two is
+	# ever visible at a time (#212), toggled in _update_background(). Muted:
+	# this is background dressing behind the carousel, not something that
+	# should compete with whatever audio the player already has going.
+	_background_video = VideoStreamPlayer.new()
+	_background_video.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_background_video.expand = true
+	_background_video.loop = true
+	_background_video.volume_db = -80.0
+	_background_video.visible = false
+	add_child(_background_video)
 
 	# The carousel spans the FULL screen — the glass side panels overlay on
 	# top of its edges rather than living in separate side-by-side columns,
@@ -518,19 +536,36 @@ func _update_selection(animate: bool) -> void:
 
 	var app: Dictionary = _apps[_selected_index]
 	var app_id := int(app.get("app_id", 0))
+	var screenshots := _screenshot_paths(app_id)
 	_info_name.text = String(app.get("name", "?"))
 	_info_description.text = _description_of(app_id)
-	_update_background(app_id)
-	_gallery.set_screenshots(_screenshot_paths(app_id))
+	_update_background(app_id, screenshots)
+	_gallery.set_screenshots(screenshots)
 	_gallery.resize(_panel_content_width)
 
 	var standalone := bool(app.get("standalone", false))
 	_action_launch.modulate = Color.WHITE if standalone else Color(1, 1, 1, 0.4)
 
-## The blurred backdrop reuses the same cover art the selected card already
-## shows — no separate asset, no separate cache.
-func _update_background(app_id: int) -> void:
-	var path := _grid_art_path(app_id)
+## Background priority (#212): a cached trailer beats a cached screenshot
+## beats the blurred grid art — closer to actual gameplay each step down,
+## and no tier ever leaves the background blank since grid art (#205) is
+## already required for the card itself to render at all.
+func _update_background(app_id: int, screenshots: Array[String]) -> void:
+	var trailer_path := _trailer_path(app_id)
+	if not trailer_path.is_empty():
+		var stream := VideoStreamTheora.new()
+		stream.set_file(trailer_path)
+		_background_video.stream = stream
+		_background_video.play()
+		_background_video.visible = true
+		_background.visible = false
+		return
+
+	_background_video.stop()
+	_background_video.visible = false
+	_background.visible = true
+
+	var path := screenshots[0] if not screenshots.is_empty() else _grid_art_path(app_id)
 	if path.is_empty():
 		_background.texture = null
 		return
@@ -539,6 +574,10 @@ func _update_background(app_id: int) -> void:
 		_background.texture = null
 		return
 	_background.texture = ImageTexture.create_from_image(image)
+
+func _trailer_path(app_id: int) -> String:
+	var path := _cartridge_root().path_join("assets").path_join(str(app_id)).path_join(TRAILER_FILENAME)
+	return path if FileAccess.file_exists(path) else ""
 
 ## Moves the whole row so the selected card's center lands on the clip
 ## area's center. The row's OWN sizing/spacing comes for free from being a
