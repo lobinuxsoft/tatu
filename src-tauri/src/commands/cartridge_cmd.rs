@@ -154,6 +154,15 @@ pub async fn fetch_cartridge_description(app_id: u64, mount_point: String) -> Re
     cartridge::fetch_cartridge_description(PathBuf::from(mount_point), app_id).await
 }
 
+/// Caches this app's Steam trailer, transcoded to `.ogv`, onto the
+/// cartridge (#212). Opt-in — only called when the Cartucho tab's
+/// "Preparar launcher" step has the trailer toggle checked, unlike art and
+/// description above which always run.
+#[tauri::command]
+pub async fn fetch_cartridge_trailer(app_id: u64, mount_point: String) -> Result<(), String> {
+    cartridge::fetch_cartridge_trailer(PathBuf::from(mount_point), app_id).await
+}
+
 /// Bundles the shared umu-run + Proton + Steam Linux Runtime files onto the
 /// cartridge (#206) — only needed once an "Easy" (Goldberg-patched) game
 /// exists on it, so this is called right alongside `inject_goldberg`. A

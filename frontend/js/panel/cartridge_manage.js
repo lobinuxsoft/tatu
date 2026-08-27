@@ -97,6 +97,11 @@ function renderCartridge(drive, apps) {
     `<div class="cartridge-guide">Cartucho: <b>${esc(drive.label || drive.id)}</b> ` +
     `(${formatBytes(drive.total_bytes)}) — ${apps.length} juego(s)</div>` +
     rows +
+    // Opt-in (#212): a trailer runs 10-100+ MB and takes real time to
+    // transcode, unlike art/description below which are always-on and
+    // basically free — never checked by default.
+    `<label class="cartridge-guide" style="display:flex; align-items:center; gap:8px; cursor:pointer;">` +
+    `<input type="checkbox" id="cartIncludeTrailers"> Incluir trailers (pesa más, tarda más por juego)</label>` +
     `<div class="cartridge-actions">` +
     `<button class="cartridge-btn-secondary" id="cartManageBack">Volver a discos</button>` +
     `<button class="cartridge-btn" id="cartPrepareBtn">Preparar launcher</button>` +
@@ -104,14 +109,15 @@ function renderCartridge(drive, apps) {
     `<div id="cartPrepareResult"></div>`;
 
   document.getElementById("cartManageBack").onclick = () => showDriveList();
-  document.getElementById("cartPrepareBtn").onclick = () => prepareLauncher(drive, apps);
+  document.getElementById("cartPrepareBtn").onclick = () =>
+    prepareLauncher(drive, apps, document.getElementById("cartIncludeTrailers").checked);
 }
 
 // Everything that's shared by the WHOLE cartridge rather than tied to one
 // game's install — the launcher binary, the Linux runtime, and every app's
 // art/description — batched here instead of firing per-game at install
 // time (finishInstall in cartridge.js only does Goldberg injection now).
-async function prepareLauncher(drive, apps) {
+async function prepareLauncher(drive, apps, includeTrailers) {
   const result = document.getElementById("cartPrepareResult");
   const mountPoint = drive.mount_point;
   const setStatus = msg => {
@@ -134,6 +140,17 @@ async function prepareLauncher(drive, apps) {
         invoke("fetch_cartridge_art", { appId: app.app_id, mountPoint }).catch(() => {}),
         invoke("fetch_cartridge_description", { appId: app.app_id, mountPoint }).catch(() => {}),
       ]);
+    }
+
+    // Separate loop, after art/description: transcoding a trailer takes
+    // real wall-clock time (ffmpeg, not just an HTTP GET), worth its own
+    // per-game progress line instead of hiding inside the loop above.
+    if (includeTrailers) {
+      for (let i = 0; i < apps.length; i++) {
+        const app = apps[i];
+        setStatus(`Bajando trailer (${i + 1}/${apps.length}): ${app.name}...`);
+        await invoke("fetch_cartridge_trailer", { appId: app.app_id, mountPoint }).catch(() => {});
+      }
     }
 
     result.innerHTML =
