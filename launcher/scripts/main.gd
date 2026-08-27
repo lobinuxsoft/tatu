@@ -635,10 +635,10 @@ func _on_launch_requested() -> void:
 
 	# Hard/Unknown preservability (real third-party DRM, or not enough data
 	# to tell) never gets Goldberg's standalone patch (#199) — it only ever
-	# plays through a real Steam client. #208 gets it there without the
-	# player having to find Steam's own Settings → Storage screen by hand.
+	# plays through a real Steam client, registered first via the dedicated
+	# "Add to Steam" action (#208) below, not this one.
 	if not bool(app.get("standalone", false)):
-		await _launch_via_steam(app_id, app_name)
+		await _show_status("Usá \"Add to Steam\" para jugar %s" % app_name, 2.5)
 		return
 
 	var exe_relative := String(app.get("exe_path", ""))
@@ -868,7 +868,7 @@ func _extract_tar(archive_path: String, dest_dir: String, strip_top_level: bool)
 	return code == 0
 
 func _on_add_to_steam_requested() -> void:
-	var app_id := int(_apps[_selected_index].get("app_id", 0))
-	# Steam library registration (#208) is not wired yet.
-	push_warning("Add-to-Steam requested for app %d — no registration wired yet (#208)" % app_id)
-	await _show_status("Agregar a Steam todavía no está disponible (#208)", 2.5)
+	var app: Dictionary = _apps[_selected_index]
+	var app_id := int(app.get("app_id", 0))
+	var app_name := String(app.get("name", "el juego"))
+	await _launch_via_steam(app_id, app_name)
