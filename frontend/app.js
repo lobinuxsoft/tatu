@@ -7,6 +7,7 @@ import { openImportModal, closeImportModal } from "./js/modals/import.js";
 import { doSync, doSyncNonSteam, doScanSizes, doFetchAllDrm } from "./js/actions.js";
 import { loadSettingsUI, checkConfigWarning, installSettingsHandlers } from "./js/settings.js";
 import { initTheme, installThemeSwitcher } from "./js/themes.js";
+import { openCartridgeManagePanel } from "./js/panel/cartridge_manage.js";
 
 initTheme();
 
@@ -92,6 +93,7 @@ document.querySelector(".tabs").addEventListener("click", e => {
   document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
   tab.classList.add("active");
   document.getElementById("panel-" + tab.dataset.tab).classList.add("active");
+  if (tab.dataset.tab === "cartridge") openCartridgeManagePanel();
 });
 
 // --- Sync / action buttons ---

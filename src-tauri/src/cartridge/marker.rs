@@ -138,6 +138,15 @@ pub fn has_cartridge_structure(mount_point: &Path) -> bool {
     read_marker(mount_point).is_some()
 }
 
+/// Every app recorded on this cartridge — the "Gestionar cartucho" screen
+/// (#204) reads this to show what's already there, independent of any one
+/// game's install flow.
+pub fn list_apps(mount_point: &Path) -> Result<Vec<CartridgeApp>, String> {
+    read_marker(mount_point)
+        .map(|marker| marker.apps)
+        .ok_or_else(|| format!("{} has no valid cartridge marker", mount_point.display()))
+}
+
 /// Write a fresh, empty marker right after formatting (#194). Later
 /// installs (#195) rewrite this file with the growing app list.
 #[allow(dead_code)]
@@ -223,6 +232,22 @@ mod tests {
         )
         .unwrap();
         assert!(has_cartridge_structure(dir.path()));
+    }
+
+    #[test]
+    fn list_apps_returns_the_recorded_apps() {
+        let dir = tempfile::tempdir().unwrap();
+        write_marker(dir.path()).unwrap();
+        add_app(dir.path(), app(379720, "DOOM")).unwrap();
+
+        let apps = list_apps(dir.path()).unwrap();
+        assert_eq!(apps, vec![app(379720, "DOOM")]);
+    }
+
+    #[test]
+    fn list_apps_errors_without_a_marker() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(list_apps(dir.path()).is_err());
     }
 
     #[test]

@@ -11,3 +11,7 @@ Both pulled from Google Fonts' own repo (`github.com/google/fonts`, `ofl/` direc
 
 - `steamdeck_button_a.png`, `steamdeck_button_b.png`, `keyboard_enter.png`, `keyboard_s.png` — from Kenney's [Input Prompts](https://kenney.nl/assets/input-prompts) pack (v1.5), **CC0** — no attribution required, credited here anyway.
 - Only these 4 files are vendored, not the full ~5000-icon pack — the launcher only needs the two actions it actually has (`card_launch`, `card_add_to_steam`).
+
+## App icon (`icon/`)
+
+- `icon.png`, `icon.ico` — copied straight from `src-tauri/icons/` (Tatu's own icon), not a separate design. Same identity on the desktop tracker and the cartridge launcher.

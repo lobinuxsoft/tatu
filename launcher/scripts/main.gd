@@ -81,6 +81,8 @@ var _action_add_to_steam: Control
 var _gallery: ScreenshotGallery
 var _viewer: Control
 var _viewer_image: TextureRect
+var _launch_status: Label
+var _launch_overlay: Control
 var _scroll_tween: Tween
 var _panel_content_width := 0.0
 
@@ -275,6 +277,23 @@ func _build_layout() -> void:
 	_viewer_image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	_viewer.add_child(_viewer_image)
 	add_child(_viewer)
+
+	# Launching (#206) shells out and waits on `_ensure_linux_runtime_deployed`
+	# extracting ~700MB the first time — with zero UI feedback that used to
+	# look identical to the launcher having hung. Built last, same as the
+	# viewer above, so it draws on top of everything.
+	_launch_overlay = ColorRect.new()
+	_launch_overlay.color = Color(0, 0, 0, 0.75)
+	_launch_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_launch_overlay.visible = false
+	_launch_status = Label.new()
+	_launch_status.add_theme_font_override("font", load(FONT_DISPLAY))
+	_launch_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_launch_status.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_launch_status.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_title_labels.append(_launch_status)
+	_launch_overlay.add_child(_launch_status)
+	add_child(_launch_overlay)
 
 ## A strip pinned to the given edge (PRESET_LEFT_WIDE or PRESET_RIGHT_WIDE),
 ## rendering whatever is already on screen behind it — blurred and tinted —
@@ -497,6 +516,7 @@ func _center_on_selected(animate: bool) -> void:
 func _on_launch_requested() -> void:
 	var app: Dictionary = _apps[_selected_index]
 	var app_id := int(app.get("app_id", 0))
+	var app_name := String(app.get("name", "el juego"))
 	if not bool(app.get("standalone", false)):
 		push_warning("App %d needs Steam — #206/#207 only cover standalone launches" % app_id)
 		return
@@ -510,15 +530,27 @@ func _on_launch_requested() -> void:
 	if OS.get_name() != "Linux":
 		push_warning("Standalone launch on %s not wired yet (#207)" % OS.get_name())
 		return
-	_launch_via_proton(app_id, exe_path)
+	await _launch_via_proton(app_id, app_name, exe_path)
 
 ## Runs a Goldberg-patched exe through umu-run (#206) — adopted rather than
 ## hand-rolling a Proton invocation: it replicates Steam's own runtime
 ## container so the game behaves the same as it would through Steam,
 ## without needing Steam installed. See runtime.rs on the Tatu side for why
 ## this specific tool and the exact files it bundles onto the cartridge.
-func _launch_via_proton(app_id: int, exe_path: String) -> void:
+func _launch_via_proton(app_id: int, app_name: String, exe_path: String) -> void:
+	_launch_status.text = "Lanzando %s..." % app_name
+	_launch_overlay.visible = true
+	# The first launch on a cartridge extracts ~700MB synchronously below —
+	# without yielding a couple frames first, the overlay's own visibility
+	# change would never actually get drawn before that freezes the thread,
+	# so this would look exactly like the hang it's meant to explain away.
+	await get_tree().process_frame
+	await get_tree().process_frame
+
 	if not _ensure_linux_runtime_deployed():
+		_launch_status.text = "No se pudo preparar el runtime de Linux para %s" % app_name
+		await get_tree().create_timer(2.5).timeout
+		_launch_overlay.visible = false
 		return
 
 	var wineprefix := _tatu_local_dir().path_join("wineprefix").path_join(str(app_id))
@@ -541,6 +573,11 @@ func _launch_via_proton(app_id: int, exe_path: String) -> void:
 	var pid := OS.create_process(_tatu_local_dir().path_join("umu-run"), [exe_path])
 	if pid <= 0:
 		push_warning("Failed to launch app %d via umu-run" % app_id)
+		_launch_status.text = "No se pudo lanzar %s" % app_name
+		await get_tree().create_timer(2.5).timeout
+	else:
+		await get_tree().create_timer(1.5).timeout
+	_launch_overlay.visible = false
 
 func _tatu_local_dir() -> String:
 	return OS.get_environment("HOME").path_join(".local/share/tatu")
