@@ -41,20 +41,35 @@ const SIDE_PANEL_WIDTH_RATIO := 0.22
 const SIDE_PANEL_MARGIN_RATIO := 0.018
 const TITLE_FONT_RATIO := 0.036
 const BODY_FONT_RATIO := 0.02
-const HINT_ICON_RATIO := 0.036
+# Smaller and its own ratio, not BODY_FONT_RATIO — these sit in a fixed
+# bottom-anchored corner (see the VBoxContainer's ALIGNMENT_END below), so
+# shrinking them doesn't fight the info panel's actual body text for space.
+const HINT_FONT_RATIO := 0.014
+const HINT_ICON_RATIO := 0.024
 
 # Same display/body fonts Tatu's own web frontend themes already use (OFL,
 # vendored under assets/fonts/ — see assets/README.md for provenance).
 const FONT_DISPLAY := "res://assets/fonts/Rajdhani-Bold.ttf"
 const FONT_BODY := "res://assets/fonts/Inter-Regular.ttf"
 # Kenney's CC0 Input Prompts pack (assets/README.md) — Steam Deck face
-# buttons, since that's the physical device this whole look targets.
+# buttons, since that's the physical device this whole look targets. A, X,
+# Y, B map to launch/add-to-steam/gallery/close, in that order — matches
+# the layout of the buttons themselves on a real controller, not an
+# arbitrary pick.
 const ICON_LAUNCH: Array[String] = [
 	"res://assets/input_prompts/keyboard_enter.png",
 	"res://assets/input_prompts/steamdeck_button_a.png",
 ]
 const ICON_ADD_TO_STEAM: Array[String] = [
 	"res://assets/input_prompts/keyboard_s.png",
+	"res://assets/input_prompts/steamdeck_button_x.png",
+]
+const ICON_GALLERY: Array[String] = [
+	"res://assets/input_prompts/keyboard_g.png",
+	"res://assets/input_prompts/steamdeck_button_y.png",
+]
+const ICON_CLOSE: Array[String] = [
+	"res://assets/input_prompts/keyboard_escape.png",
 	"res://assets/input_prompts/steamdeck_button_b.png",
 ]
 
@@ -78,6 +93,8 @@ var _info_name: Label
 var _info_description: Label
 var _action_launch: Control
 var _action_add_to_steam: Control
+var _action_gallery: Control
+var _action_close: Control
 var _gallery: ScreenshotGallery
 var _viewer: Control
 var _viewer_image: TextureRect
@@ -95,6 +112,7 @@ var _right_margin: MarginContainer
 # built, resized together in _resize_layout().
 var _title_labels: Array[Label] = []
 var _body_labels: Array[Label] = []
+var _hint_labels: Array[Label] = []
 var _hint_icons: Array[TextureRect] = []
 
 var _dragging := false
@@ -131,6 +149,10 @@ func _resize_layout() -> void:
 	for label in _body_labels:
 		label.add_theme_font_size_override("font_size", body_size)
 
+	var hint_size := int(_carousel_clip.size.y * HINT_FONT_RATIO)
+	for label in _hint_labels:
+		label.add_theme_font_size_override("font_size", hint_size)
+
 	var icon_size := _carousel_clip.size.y * HINT_ICON_RATIO
 	for icon in _hint_icons:
 		icon.custom_minimum_size = Vector2(icon_size, icon_size)
@@ -160,13 +182,18 @@ func _on_carousel_resized() -> void:
 
 func _register_input_actions() -> void:
 	_ensure_action("card_launch", KEY_ENTER, JOY_BUTTON_A)
-	_ensure_action("card_add_to_steam", KEY_S, JOY_BUTTON_B)
+	_ensure_action("card_add_to_steam", KEY_S, JOY_BUTTON_X)
 	# ui_up/ui_down are built-in (arrow keys + D-pad/stick already wired by
 	# Godot's default input map) — the screenshot gallery reuses them
 	# directly rather than registering its own, same as the carousel
 	# already reuses ui_left/ui_right instead of custom actions.
-	_ensure_action("gallery_select", KEY_X, JOY_BUTTON_X)
+	_ensure_action("gallery_select", KEY_G, JOY_BUTTON_Y)
 	_ensure_action("gallery_close", KEY_ESCAPE, JOY_BUTTON_B)
+	# Same physical keys as gallery_close above, on purpose: the two are
+	# checked in mutually exclusive branches below (viewer open vs. not),
+	# so ESCAPE/B reads as one consistent "back" button either way — closes
+	# whatever's in front, up to and including the launcher itself.
+	_ensure_action("card_close_launcher", KEY_ESCAPE, JOY_BUTTON_B)
 
 func _ensure_action(action: StringName, key: int, joy_button: int) -> void:
 	if InputMap.has_action(action):
@@ -203,6 +230,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		_on_launch_requested()
 	elif event.is_action_pressed("card_add_to_steam"):
 		_on_add_to_steam_requested()
+	elif event.is_action_pressed("card_close_launcher"):
+		get_tree().quit()
 
 func _move_selection(delta: int) -> void:
 	_selected_index = wrapi(_selected_index + delta, 0, _apps.size())
@@ -246,15 +275,21 @@ func _build_layout() -> void:
 	_body_labels.append(_info_description)
 	add_child(_glass_panel(Control.PRESET_LEFT_WIDE, [_info_name, _info_description]))
 
-	_action_launch = _action_hint(ICON_LAUNCH, "Ejecutar sin Steam")
-	_action_add_to_steam = _action_hint(ICON_ADD_TO_STEAM, "Agregar a Steam")
+	_action_launch = _action_hint(ICON_LAUNCH, "Launch")
+	_action_add_to_steam = _action_hint(ICON_ADD_TO_STEAM, "Add to Steam")
+	_action_gallery = _action_hint(ICON_GALLERY, "Gallery")
+	_action_close = _action_hint(ICON_CLOSE, "Close")
 	_gallery = ScreenshotGallery.new()
 	_gallery.thumbnail_activated.connect(_open_viewer)
 	# The gallery is the only EXPAND_FILL child here, so it absorbs all
-	# leftover vertical space above the two action rows — those stay
+	# leftover vertical space above the four action rows — those stay
 	# bottom-anchored regardless of how many (or how few) screenshots the
 	# selected game has.
-	add_child(_glass_panel(Control.PRESET_RIGHT_WIDE, [_gallery, _action_launch, _action_add_to_steam], BoxContainer.ALIGNMENT_END))
+	add_child(_glass_panel(
+		Control.PRESET_RIGHT_WIDE,
+		[_gallery, _action_launch, _action_add_to_steam, _action_gallery, _action_close],
+		BoxContainer.ALIGNMENT_END,
+	))
 
 	_empty_state = Label.new()
 	_empty_state.text = "No hay juegos instalados en este cartucho."
@@ -320,7 +355,7 @@ func _glass_panel(preset: LayoutPreset, children: Array, vbox_alignment := BoxCo
 	var panel := VBoxContainer.new()
 	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	panel.alignment = vbox_alignment
-	panel.add_theme_constant_override("separation", 18)
+	panel.add_theme_constant_override("separation", 12)
 	for child: Control in children:
 		panel.add_child(child)
 
@@ -345,7 +380,7 @@ func _action_hint(icon_paths: Array[String], text: String) -> Control:
 	label.add_theme_font_override("font", load(FONT_BODY))
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD
 	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_body_labels.append(label)
+	_hint_labels.append(label)
 	row.add_child(label)
 	return row
 
@@ -592,9 +627,18 @@ func _launch_via_proton(app_id: int, app_name: String, exe_path: String) -> void
 	if pid <= 0:
 		push_warning("Failed to launch app %d via umu-run" % app_id)
 		await _show_status("No se pudo lanzar %s" % app_name, 2.5)
-	else:
-		await get_tree().create_timer(1.5).timeout
-		_action_overlay.visible = false
+		return
+
+	# create_process is non-blocking — it returns as soon as umu-run starts,
+	# long before Proton actually puts a game window on screen. Without
+	# quitting here, this launcher keeps running underneath, still listening
+	# for input: a stray Enter/gamepad-A press spawns ANOTHER copy of the
+	# same game, indefinitely, real bug found live-testing with the user.
+	# Bowing out entirely also frees the GPU for the game instead of two
+	# graphical apps fighting over it — never a good idea on the handheld
+	# hardware this cartridge is meant to run on.
+	await get_tree().create_timer(1.5).timeout
+	get_tree().quit()
 
 func _tatu_local_dir() -> String:
 	return OS.get_environment("HOME").path_join(".local/share/tatu")
