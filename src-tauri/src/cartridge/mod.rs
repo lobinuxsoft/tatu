@@ -16,7 +16,10 @@ mod runtime;
 #[cfg(unix)]
 mod format;
 
-pub use assets::{fetch_cartridge_art, fetch_cartridge_description, fetch_cartridge_trailer};
+pub use assets::{
+    fetch_cartridge_art, fetch_cartridge_description, fetch_cartridge_screenshots,
+    fetch_cartridge_trailer,
+};
 pub use drives::{RemovableDrive, list_removable_drives};
 #[cfg(unix)]
 pub use format::{format_as_cartridge, mount_cartridge};
