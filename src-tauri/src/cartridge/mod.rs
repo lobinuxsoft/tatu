@@ -20,7 +20,10 @@ pub use drives::{RemovableDrive, list_removable_drives};
 #[cfg(unix)]
 pub use format::{format_as_cartridge, mount_cartridge};
 pub use goldberg::inject_goldberg;
-pub use install::{install_url, is_registered_library, poll_install_status};
+pub use install::{
+    find_pending_cartridge, install_url, is_registered_library, poll_install_status,
+    uninstall_from_cartridge,
+};
 pub use marker::has_cartridge_structure;
 pub use runtime::bundle_linux_runtime;
 

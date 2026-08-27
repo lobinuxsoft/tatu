@@ -95,6 +95,91 @@ fn errors_on_unbalanced_braces() {
     ));
 }
 
+/// A minimal but structurally faithful config.vdf, with one app already
+/// forced onto a compat tool.
+fn sample_config() -> String {
+    "\"InstallConfigStore\"\n{\n\t\"Software\"\n\t{\n\t\t\"Valve\"\n\t\t{\n\t\t\t\"Steam\"\n\t\t\t{\n\t\t\t\t\"CompatToolMapping\"\n\t\t\t\t{\n\t\t\t\t\t\"570\"\n\t\t\t\t\t{\n\t\t\t\t\t\t\"name\"\t\t\"proton_9\"\n\t\t\t\t\t\t\"config\"\t\t\"\"\n\t\t\t\t\t\t\"priority\"\t\t\"250\"\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t}\n}\n".to_string()
+}
+
+#[test]
+fn set_compat_tool_creates_mapping_when_absent() {
+    let out = set_compat_tool(&sample_config(), "3017860", "proton_experimental").unwrap();
+    assert!(tokenize(&out).is_ok());
+    let toks = tokenize(&out).unwrap();
+    let mapping = navigate(&toks, &out, COMPAT_TOOL_MAPPING_PATH).unwrap();
+    let inner = brace_token_range(&toks, &mapping);
+    let block = find_block(&toks, &out, inner, "3017860").expect("new mapping present");
+    let block_inner = brace_token_range(&toks, &block);
+    assert_eq!(
+        find_value(&toks, &out, block_inner.clone(), "name").map(|r| &out[r]),
+        Some("proton_experimental")
+    );
+    // The pre-existing mapping is untouched.
+    assert!(out.contains("\"570\""));
+    assert!(out.contains("\"proton_9\""));
+}
+
+#[test]
+fn set_compat_tool_replaces_existing_mapping() {
+    let out = set_compat_tool(&sample_config(), "570", "proton_experimental").unwrap();
+    assert!(tokenize(&out).is_ok());
+    let toks = tokenize(&out).unwrap();
+    let mapping = navigate(&toks, &out, COMPAT_TOOL_MAPPING_PATH).unwrap();
+    let inner = brace_token_range(&toks, &mapping);
+    let block = find_block(&toks, &out, inner, "570").expect("mapping still present");
+    let block_inner = brace_token_range(&toks, &block);
+    assert_eq!(
+        find_value(&toks, &out, block_inner, "name").map(|r| &out[r]),
+        Some("proton_experimental")
+    );
+    // Old tool name is gone, not just shadowed.
+    assert!(!out.contains("proton_9"));
+    // Exactly one "570" mapping remains (no duplicate block left behind).
+    assert_eq!(out.matches("\"570\"").count(), 1);
+}
+
+#[test]
+fn set_compat_tool_errors_on_missing_path() {
+    let err = set_compat_tool("\"NotConfig\"\n{\n}\n", "570", "proton_experimental").unwrap_err();
+    assert!(matches!(err, VdfError::PathNotFound(_)));
+}
+
+/// Validate against the real config.vdf if present — read-only, never
+/// writes to disk. `#[ignore]` because it depends on a local Steam install.
+#[test]
+#[ignore]
+fn set_compat_tool_round_trips_real_config_vdf() {
+    let home = std::env::var("HOME").unwrap();
+    let mut found = None;
+    for base in [
+        "/.local/share/Steam/config/config.vdf",
+        "/.steam/steam/config/config.vdf",
+    ] {
+        let p = std::path::PathBuf::from(format!("{home}{base}"));
+        if p.is_file() {
+            found = Some(p);
+            break;
+        }
+    }
+    let path = found.expect("no real config.vdf found");
+    let src = std::fs::read_to_string(&path).unwrap();
+
+    let toks = tokenize(&src).expect("real file tokenizes");
+    let mapping = navigate(&toks, &src, COMPAT_TOOL_MAPPING_PATH).expect("mapping path resolves");
+    let _ = brace_token_range(&toks, &mapping);
+
+    // Edit a synthetic, certainly-absent app id: must create a mapping, keep
+    // the file balanced, and leave the rest of the file untouched.
+    let edited = set_compat_tool(&src, "999999999", "proton_experimental").unwrap();
+    tokenize(&edited).expect("edited file still balanced");
+    let edited_toks = tokenize(&edited).unwrap();
+    let edited_mapping = navigate(&edited_toks, &edited, COMPAT_TOOL_MAPPING_PATH).unwrap();
+    let edited_inner = brace_token_range(&edited_toks, &edited_mapping);
+    assert!(find_block(&edited_toks, &edited, edited_inner, "999999999").is_some());
+    assert!(edited.len() > src.len());
+    assert!(edited.contains(&src[src.len() - 50..]));
+}
+
 /// Validate the editor against the real (large) localconfig.vdf if present.
 /// Reads every app's LaunchOptions, then exercises set_launch_options on a
 /// synthetic app id and confirms the result re-tokenizes cleanly and the

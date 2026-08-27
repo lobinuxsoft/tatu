@@ -87,6 +87,46 @@ pub fn set_winhttp_override(app_id: &str) -> Result<LaunchOptOutcome, LaunchOptE
     })
 }
 
+/// Steam's built-in experimental Proton branch — present on essentially
+/// every Linux Steam install with Steam Play enabled at all, since Steam
+/// itself manages/updates it, unlike a specific pinned Proton version the
+/// user may or may not have installed.
+const FORCE_TOOL_NAME: &str = "proton_experimental";
+
+/// Force `app_id` to install/run under Proton (`config.vdf`'s
+/// `CompatToolMapping`) instead of whatever native Linux build Steam would
+/// otherwise prefer — the cartridge (#192/#206) always needs the Windows
+/// depot, since it has to also work when plugged into a Windows machine
+/// (#207) or run through the bundled Proton (#206), neither of which a
+/// native Linux build satisfies. Known Valve limitation
+/// (ValveSoftware/Proton#6635): forcing this alone does not guarantee the
+/// Windows depot downloads — the caller still needs to wipe any existing
+/// native install and trigger a fresh one after this returns.
+pub fn force_proton_compat(app_id: &str) -> Result<(), LaunchOptError> {
+    if is_steam_running() {
+        return Err(LaunchOptError::SteamRunning);
+    }
+
+    let path = config_vdf_path()?;
+    let src = fs::read_to_string(&path).map_err(|source| LaunchOptError::Io {
+        path: path.clone(),
+        source,
+    })?;
+    let edited = vdf::set_compat_tool(&src, app_id, FORCE_TOOL_NAME)?;
+    write_atomic(&path, edited.as_bytes())
+}
+
+/// Resolve `<steam>/config/config.vdf` — the top-level install config, NOT
+/// per-account like `localconfig.vdf` below.
+fn config_vdf_path() -> Result<PathBuf, LaunchOptError> {
+    let steam = steam_install_dir().ok_or(LaunchOptError::SteamIdNotFound)?;
+    let path = steam.join("config/config.vdf");
+    if !path.is_file() {
+        return Err(LaunchOptError::ConfigNotFound(path));
+    }
+    Ok(path)
+}
+
 /// Resolve `<steam>/userdata/<account_id>/config/localconfig.vdf` for the most
 /// recently used account.
 fn localconfig_path() -> Result<PathBuf, LaunchOptError> {

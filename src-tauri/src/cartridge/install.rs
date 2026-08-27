@@ -6,7 +6,8 @@ use regex::Regex;
 use crate::drm::Preservability;
 use crate::steam::library_paths;
 
-use super::marker::{CartridgeApp, add_app};
+use super::drives::list_removable_drives;
+use super::marker::{CartridgeApp, add_app, has_cartridge_structure};
 
 /// Steam's own client owns everything from here: download, EULA, its own
 /// disk-selection prompt if more than one library qualifies.
@@ -62,6 +63,62 @@ pub fn poll_install_status(
         },
     )?;
     Ok(true)
+}
+
+/// Finds a currently-connected cartridge that already has `app_id`'s Steam
+/// manifest on it — installing, stalled, or already finished — so the UI
+/// can resume watching it without the user re-clicking through the drive
+/// picker. There is nothing in memory to lose track of: a manifest existing
+/// on disk IS the evidence an install started, on whichever physical
+/// cartridge happens to have it, regardless of whether Tatu's own modal
+/// (or Tatu itself) stayed open the whole time.
+pub async fn find_pending_cartridge(app_id: u64) -> Result<Option<String>, String> {
+    let drives = list_removable_drives().await?;
+    // A drive stalled at the kernel level (a struggling USB stick under
+    // heavy write load — seen firsthand smoke-testing #206) can make a
+    // plain fs read block for a very long time. Running these on a
+    // blocking-pool thread keeps that stall from stealing the async
+    // runtime's own worker threads, which is what actually froze the rest
+    // of the UI's IPC, not just this one check.
+    tokio::task::spawn_blocking(move || {
+        for drive in drives {
+            let Some(mount) = drive.mount_point else {
+                continue;
+            };
+            let mount_path = Path::new(&mount);
+            if has_cartridge_structure(mount_path) && appmanifest_path(mount_path, app_id).is_file()
+            {
+                return Some(mount);
+            }
+        }
+        None
+    })
+    .await
+    .map_err(|e| format!("Task error: {e}"))
+}
+
+/// Removes a game's install (both the manifest and the actual files) from
+/// the cartridge, so a follow-up `steam://install` starts completely fresh
+/// instead of Steam treating it as an update to repair in place. Needed
+/// when the wrong depot landed (e.g. a native Linux build on a cartridge
+/// that needs the Windows one, see #206's `force_proton_compat`) — Steam's
+/// own depot-swap-on-update path is unreliable (ValveSoftware/Proton#6635).
+pub fn uninstall_from_cartridge(mount_point: &Path, app_id: u64) -> Result<(), String> {
+    let manifest = appmanifest_path(mount_point, app_id);
+    let content = fs::read_to_string(&manifest)
+        .map_err(|e| format!("Cannot read {}: {e}", manifest.display()))?;
+    let installdir = acf_field(&content, "installdir")
+        .ok_or_else(|| format!("{} has no installdir field", manifest.display()))?;
+
+    let install_dir = mount_point
+        .join("steamapps")
+        .join("common")
+        .join(&installdir);
+    if install_dir.is_dir() {
+        fs::remove_dir_all(&install_dir)
+            .map_err(|e| format!("Cannot remove {}: {e}", install_dir.display()))?;
+    }
+    fs::remove_file(&manifest).map_err(|e| format!("Cannot remove {}: {e}", manifest.display()))
 }
 
 /// Path to Steam's own per-app manifest on a cartridge — shared with #199's

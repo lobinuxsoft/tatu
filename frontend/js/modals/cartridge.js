@@ -6,10 +6,26 @@ import { esc, formatBytes } from "../utils.js";
 // install is started on top of one already running.
 let pollTimer = null;
 
-export function openCartridgeModal(gameId) {
+export async function openCartridgeModal(gameId) {
   const game = state.G.find(g => g.id === gameId);
   if (!game) return;
   document.getElementById("cartridgeOverlay").classList.remove("hidden");
+
+  // A manifest already on a connected cartridge is real evidence an install
+  // started there, regardless of whether this modal (or Tatu itself) was
+  // open the whole time — resume watching it directly instead of making
+  // the user re-pick the drive and re-click install.
+  const el = body();
+  el.innerHTML = `<div class="loading"><div class="spinner"></div><br>Buscando discos...</div>`;
+  try {
+    const pending = await invoke("find_pending_cartridge", { appId: gameId });
+    if (pending) {
+      showInstall(gameId, game.name, pending);
+      return;
+    }
+  } catch {
+    // Fall through to the normal picker — this is a best-effort shortcut.
+  }
   showDriveList(gameId, game.name);
 }
 

@@ -46,6 +46,15 @@ pub fn trigger_install(
         .map_err(|e| e.to_string())
 }
 
+/// Finds a currently-connected cartridge already tracking `app_id`'s
+/// install (in progress or finished) — lets the UI resume watching it
+/// straight away instead of making the user click back through the drive
+/// picker if the modal (or Tatu itself) was closed mid-install.
+#[tauri::command]
+pub async fn find_pending_cartridge(app_id: u64) -> Result<Option<String>, String> {
+    cartridge::find_pending_cartridge(app_id).await
+}
+
 /// Polls the cartridge's `appmanifest_<app_id>.acf` for Steam's own
 /// "fully installed" flag, recording the app on the #193 marker (with its
 /// already-classified DRM preservability) the moment it flips.
@@ -168,4 +177,23 @@ pub async fn format_as_cartridge(
 #[tauri::command]
 pub async fn mount_cartridge(device: String) -> Result<String, String> {
     cartridge::mount_cartridge(&device).await
+}
+
+/// Forces `app_id` onto Proton in Steam's own `config.vdf` — needed when
+/// Steam installed the app's native Linux build onto the cartridge instead
+/// of the Windows one it actually needs (#206). Requires Steam closed, same
+/// constraint `set_winhttp_override` already has for the same reason
+/// (Steam rewrites its own config files on exit).
+#[cfg(unix)]
+#[tauri::command]
+pub fn force_proton_compat(app_id: u64) -> Result<(), String> {
+    crate::steam::force_proton_compat(&app_id.to_string()).map_err(|e| e.to_string())
+}
+
+/// Deletes an app's install (files + manifest) from the cartridge so a
+/// follow-up `trigger_install` starts completely fresh — paired with
+/// `force_proton_compat` when the wrong depot landed.
+#[tauri::command]
+pub fn uninstall_from_cartridge(app_id: u64, mount_point: String) -> Result<(), String> {
+    cartridge::uninstall_from_cartridge(Path::new(&mount_point), app_id)
 }
