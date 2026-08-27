@@ -49,6 +49,11 @@ struct Movie {
 /// No art found for this app is not an error: the install this is attached
 /// to already succeeded, and an empty `assets/<app_id>/` just means the
 /// launcher falls back to no cover art for that entry.
+///
+/// Always re-fetched, unlike the trailer below — a cheap request, worth
+/// paying every time "Preparar launcher" re-runs so a cartridge picks up a
+/// better cover art SteamGridDB gets later, rather than being stuck with
+/// whatever was cached the first time forever.
 pub async fn fetch_cartridge_art(
     api_key: String,
     mount_point: PathBuf,
@@ -61,9 +66,6 @@ pub async fn fetch_cartridge_art(
 
 fn fetch_cartridge_art_sync(api_key: &str, mount_point: &Path, app_id: u64) -> Result<(), String> {
     let dir = mount_point.join("assets").join(app_id.to_string());
-    if has_grid_art(&dir) {
-        return Ok(());
-    }
     if api_key.is_empty() {
         return Err("No SteamGridDB API key configured".to_string());
     }
@@ -102,29 +104,37 @@ fn fetch_cartridge_art_sync(api_key: &str, mount_point: &Path, app_id: u64) -> R
         .map_err(|e| format!("Cover art read failed: {e}"))?;
 
     fs::create_dir_all(&dir).map_err(|e| format!("Cannot create {}: {e}", dir.display()))?;
+    // A re-fetch can land a different extension than last time (SteamGridDB
+    // switches formats between calls) — remove any stale grid.* first so
+    // exactly one ever exists, never an orphaned old file sitting next to
+    // the new one that the launcher might pick by extension order instead.
+    remove_grid_art(&dir);
     fs::write(dir.join(format!("grid.{ext}")), bytes)
         .map_err(|e| format!("Cannot write grid art: {e}"))
 }
 
-/// Whether `dir` already has a `grid.*` file from a previous call — skips
-/// hitting SteamGridDB again every time #204's batch "prepare cartridge"
-/// step re-runs for a cartridge that already has some apps set up.
-fn has_grid_art(dir: &Path) -> bool {
+/// Deletes any existing `grid.*` file in `dir`, if present.
+fn remove_grid_art(dir: &Path) {
     let Ok(entries) = fs::read_dir(dir) else {
-        return false;
+        return;
     };
-    entries.filter_map(Result::ok).any(|entry| {
-        entry
+    for entry in entries.filter_map(Result::ok) {
+        let is_grid = entry
             .file_name()
             .to_str()
-            .is_some_and(|name| name.starts_with("grid."))
-    })
+            .is_some_and(|name| name.starts_with("grid."));
+        if is_grid {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
 }
 
 /// Caches this app's short store description at
 /// `assets/<app_id>/description.txt` on the cartridge — the carousel's info
 /// panel (#204) reads this local file, same offline-first reasoning as the
 /// cover art above. Steam's `appdetails` endpoint is public, no API key.
+/// Always re-fetched, same "cheap enough to just redo it" reasoning as the
+/// cover art.
 pub async fn fetch_cartridge_description(mount_point: PathBuf, app_id: u64) -> Result<(), String> {
     tokio::task::spawn_blocking(move || fetch_cartridge_description_sync(&mount_point, app_id))
         .await
@@ -133,9 +143,6 @@ pub async fn fetch_cartridge_description(mount_point: PathBuf, app_id: u64) -> R
 
 fn fetch_cartridge_description_sync(mount_point: &Path, app_id: u64) -> Result<(), String> {
     let dir = mount_point.join("assets").join(app_id.to_string());
-    if dir.join("description.txt").is_file() {
-        return Ok(());
-    }
 
     let agent = ureq::Agent::new_with_config(
         ureq::config::Config::builder()
@@ -230,10 +237,13 @@ fn fetch_cartridge_trailer_sync(mount_point: &Path, app_id: u64) -> Result<(), S
     // confirmed live (#212) as `ffmpeg` reading multiple video renditions
     // plus a separately-grouped audio track off the same ambiguous master
     // and interleaving them ("Packet corrupt", "Invalid NAL unit size").
-    // Resolving one concrete ~480p rendition's own video+audio
+    // Resolving one concrete ~720p rendition's own video+audio
     // sub-playlists first sidesteps that entirely, and is a real quality
-    // win too — Steam's own 480p encode beats re-encoding-and-downscaling
-    // its 1080p one ourselves.
+    // win too — Steam's own 720p encode beats re-encoding-and-downscaling
+    // its 1080p one ourselves. 720p rather than the full 1080p60 "max"
+    // rendition: Godot's Theora decoder is software-only, and this is
+    // playing behind the launcher's own shader-heavy UI on the same frame
+    // budget — a lower resolution costs noticeably less to decode there.
     let playlist = agent
         .get(&master_url)
         .call()
@@ -294,7 +304,7 @@ fn fetch_cartridge_trailer_sync(mount_point: &Path, app_id: u64) -> Result<(), S
     fs::rename(&part, &dest).map_err(|e| format!("Cannot finalize trailer file: {e}"))
 }
 
-/// Resolves a modest-quality (largest rendition at or under 480p, falling
+/// Resolves a modest-quality (largest rendition at or under 720p, falling
 /// back to the smallest available if none qualifies) rendition from an HLS
 /// master playlist to direct video and (separately grouped) audio
 /// sub-playlist URLs, both carrying the master's own query string — Steam's
@@ -325,7 +335,7 @@ fn pick_hls_rendition(master_url: &str, playlist: &str) -> Option<(String, Strin
     }
     let video_file = renditions
         .iter()
-        .filter(|(height, _)| *height <= 480)
+        .filter(|(height, _)| *height <= 720)
         .max_by_key(|(height, _)| *height)
         .or_else(|| renditions.iter().min_by_key(|(height, _)| *height))
         .map(|(_, file)| *file)?;
@@ -427,12 +437,12 @@ hls_264_2_video.m3u8\n\
 hls_264_3_video.m3u8\n";
 
     #[test]
-    fn picks_the_480p_rendition_over_1080p() {
+    fn picks_the_720p_rendition_over_1080p() {
         let master = "https://video.example/store_trailers/3110760/x/hls_264_master.m3u8?t=123";
         let (video, audio) = pick_hls_rendition(master, REAL_MASTER_PLAYLIST).unwrap();
         assert_eq!(
             video,
-            "https://video.example/store_trailers/3110760/x/hls_264_2_video.m3u8?t=123"
+            "https://video.example/store_trailers/3110760/x/hls_264_1_video.m3u8?t=123"
         );
         assert_eq!(
             audio,
@@ -441,13 +451,13 @@ hls_264_3_video.m3u8\n";
     }
 
     #[test]
-    fn falls_back_to_the_smallest_rendition_when_none_is_480p_or_under() {
+    fn falls_back_to_the_smallest_rendition_when_none_is_720p_or_under() {
         let master = "https://video.example/x/master.m3u8";
         let playlist = "#EXTM3U\n\
 #EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID=\"audio\",URI=\"audio.m3u8\"\n\
-#EXT-X-STREAM-INF:BANDWIDTH=1,RESOLUTION=1920x1080,AUDIO=\"audio\"\n\
+#EXT-X-STREAM-INF:BANDWIDTH=1,RESOLUTION=2560x1440,AUDIO=\"audio\"\n\
 v0.m3u8\n\
-#EXT-X-STREAM-INF:BANDWIDTH=2,RESOLUTION=1280x720,AUDIO=\"audio\"\n\
+#EXT-X-STREAM-INF:BANDWIDTH=2,RESOLUTION=1920x1080,AUDIO=\"audio\"\n\
 v1.m3u8\n";
         let (video, _) = pick_hls_rendition(master, playlist).unwrap();
         assert_eq!(video, "https://video.example/x/v1.m3u8");
