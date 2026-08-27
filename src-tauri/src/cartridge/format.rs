@@ -71,6 +71,35 @@ pub async fn format_as_cartridge(
     write_marker(mount_point)
 }
 
+/// Mount an already-formatted, currently-unmounted removable drive.
+/// `format_as_cartridge` mounts once right after formatting, but nothing
+/// remounts it after the drive is unplugged and reconnected (or the
+/// desktop's own automounter didn't run) — this is that missing step.
+/// Not gated as heavily as formatting: mounting is non-destructive, so the
+/// only check that matters is that `device` is still actually a removable
+/// drive right now, not some other block device that reused the path.
+pub async fn mount_cartridge(device: &str) -> Result<String, String> {
+    let drives = list_removable_drives().await?;
+    if !drives.iter().any(|d| d.id == device) {
+        return Err(format!(
+            "{device} is not currently a removable drive — refusing to mount"
+        ));
+    }
+
+    let client = udisks2::Client::new()
+        .await
+        .map_err(|e| format!("Cannot connect to udisks2: {e}"))?;
+    let (object, _block) = find_block(&client, device).await?;
+    let filesystem = object
+        .filesystem()
+        .await
+        .map_err(|e| format!("{device} has no filesystem interface: {e}"))?;
+    filesystem
+        .mount(HashMap::new())
+        .await
+        .map_err(|e| format!("Mount failed: {e}"))
+}
+
 /// Locate the `Object`/`BlockProxy` pair for a device path (e.g. `/dev/sdb1`)
 /// by scanning udisks2's managed objects — safer than reconstructing its
 /// `/org/freedesktop/UDisks2/block_devices/<name>` path convention by hand.

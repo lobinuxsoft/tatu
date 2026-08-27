@@ -58,11 +58,13 @@ macro_rules! tracker_handler {
             commands::cartridge_cmd::has_cartridge_structure,
             commands::cartridge_cmd::is_registered_library,
             commands::cartridge_cmd::trigger_install,
+            commands::cartridge_cmd::find_pending_cartridge,
             commands::cartridge_cmd::poll_install_status,
             commands::cartridge_cmd::inject_goldberg,
             commands::cartridge_cmd::fetch_cartridge_art,
             commands::cartridge_cmd::fetch_cartridge_description,
             commands::cartridge_cmd::bundle_linux_runtime,
+            commands::cartridge_cmd::uninstall_from_cartridge,
             commands::cartridge_cmd::list_cartridge_apps,
             commands::cartridge_cmd::install_launcher_binaries,
             commands::misc_cmd::detect_steam_id,
@@ -132,6 +134,8 @@ pub fn run() {
                 commands::cheat_runtime_cmd::prereqs::cheat_runtime_set_winhttp_override,
                 commands::cheat_search_cmd::open_fearless_search,
                 commands::cartridge_cmd::format_as_cartridge,
+                commands::cartridge_cmd::mount_cartridge,
+                commands::cartridge_cmd::force_proton_compat,
             ])
     };
 

@@ -6,10 +6,26 @@ import { esc, formatBytes } from "../utils.js";
 // install is started on top of one already running.
 let pollTimer = null;
 
-export function openCartridgeModal(gameId) {
+export async function openCartridgeModal(gameId) {
   const game = state.G.find(g => g.id === gameId);
   if (!game) return;
   document.getElementById("cartridgeOverlay").classList.remove("hidden");
+
+  // A manifest already on a connected cartridge is real evidence an install
+  // started there, regardless of whether this modal (or Tatu itself) was
+  // open the whole time — resume watching it directly instead of making
+  // the user re-pick the drive and re-click install.
+  const el = body();
+  el.innerHTML = `<div class="loading"><div class="spinner"></div><br>Buscando discos...</div>`;
+  try {
+    const pending = await invoke("find_pending_cartridge", { appId: gameId });
+    if (pending) {
+      showInstall(gameId, game.name, pending);
+      return;
+    }
+  } catch {
+    // Fall through to the normal picker — this is a best-effort shortcut.
+  }
   showDriveList(gameId, game.name);
 }
 
@@ -54,8 +70,9 @@ async function showDriveList(gameId, gameName) {
     let html = "";
     for (const { drive, ready } of rows) {
       // Read-only blocks both formatting (blank drive) and installing
-      // (steamapps/ needs write access), so it's a dead end either way.
-      const disabled = !drive.mount_point || drive.read_only ? " disabled" : "";
+      // (steamapps/ needs write access), so it's a dead end either way. An
+      // unmounted drive isn't a dead end though — clicking it mounts it.
+      const disabled = drive.read_only ? " disabled" : "";
       const tag = drive.read_only
         ? `<span class="drive-tag drive-tag-blank">🔒 Solo lectura</span>`
         : !drive.mount_point
@@ -71,11 +88,31 @@ async function showDriveList(gameId, gameName) {
     }
     el.innerHTML = html;
 
-    el.onclick = e => {
+    el.onclick = async e => {
       const row = e.target.closest(".collection-row");
       if (!row || row.classList.contains("disabled")) return;
       const picked = rows.find(r => r.drive.id === row.dataset.id);
       if (!picked) return;
+
+      if (!picked.drive.mount_point) {
+        el.innerHTML = `<div class="loading"><div class="spinner"></div><br>Montando disco...</div>`;
+        try {
+          const mountPoint = await invoke("mount_cartridge", { device: picked.drive.id });
+          const alreadyCartridge = await invoke("has_cartridge_structure", { mountPoint });
+          if (alreadyCartridge) {
+            showRegistrationCheck(gameId, gameName, mountPoint);
+          } else {
+            showFormatConfirm(gameId, gameName, { ...picked.drive, mount_point: mountPoint });
+          }
+        } catch (err) {
+          el.innerHTML =
+            `<div class="cartridge-warn">No se pudo montar: ${esc(String(err))}</div>` +
+            `<div class="cartridge-actions"><button class="cartridge-btn-secondary" id="cartMountBack">Volver</button></div>`;
+          document.getElementById("cartMountBack").onclick = () => showDriveList(gameId, gameName);
+        }
+        return;
+      }
+
       if (picked.ready) {
         showRegistrationCheck(gameId, gameName, picked.drive.mount_point);
       } else {

@@ -564,6 +564,11 @@ func _launch_via_proton(app_id: int, app_name: String, exe_path: String) -> void
 	# destination machine never needs network access — this stops umu-run
 	# from trying to check for a newer Steam Linux Runtime on its own.
 	OS.set_environment("UMU_RUNTIME_UPDATE", "0")
+	# Isolates umu-run's own storage under Tatu's folder instead of the
+	# shared ~/.local/share/umu convention — a destination machine may
+	# already run Lutris/Heroic with a real umu install there, and this
+	# launcher has no business mixing its bundled runtime into it.
+	OS.set_environment("UMU_FOLDERS_PATH", _tatu_local_dir())
 
 	var pid := OS.create_process(_tatu_local_dir().path_join("umu-run"), [exe_path])
 	if pid <= 0:
@@ -577,8 +582,10 @@ func _launch_via_proton(app_id: int, app_name: String, exe_path: String) -> void
 func _tatu_local_dir() -> String:
 	return OS.get_environment("HOME").path_join(".local/share/tatu")
 
+## Matches umu-run's own resolution of UMU_LOCAL when UMU_FOLDERS_PATH is
+## set (umu/umu_consts.py): `<UMU_FOLDERS_PATH>/umu`.
 func _umu_local_dir() -> String:
-	return OS.get_environment("HOME").path_join(".local/share/umu")
+	return _tatu_local_dir().path_join("umu")
 
 func _umu_compat_dir() -> String:
 	return _umu_local_dir().path_join("compatibilitytools")
