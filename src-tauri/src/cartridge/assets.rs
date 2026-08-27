@@ -215,12 +215,33 @@ fn fetch_cartridge_trailer_sync(mount_point: &Path, app_id: u64) -> Result<(), S
     let Some(entry) = response.remove(&app_id.to_string()) else {
         return Ok(());
     };
-    let Some(movie_url) = entry
+    let Some(master_url) = entry
         .success
         .then_some(entry.data)
         .flatten()
         .and_then(|d| d.movies.into_iter().find_map(|m| m.hls_h264))
     else {
+        return Ok(());
+    };
+
+    // Feeding ffmpeg the master playlist directly — the natural first
+    // attempt — actually produced a corrupt-looking trailer (glitchy in a
+    // plain video player, nothing to do with Godot's own playback):
+    // confirmed live (#212) as `ffmpeg` reading multiple video renditions
+    // plus a separately-grouped audio track off the same ambiguous master
+    // and interleaving them ("Packet corrupt", "Invalid NAL unit size").
+    // Resolving one concrete ~480p rendition's own video+audio
+    // sub-playlists first sidesteps that entirely, and is a real quality
+    // win too — Steam's own 480p encode beats re-encoding-and-downscaling
+    // its 1080p one ourselves.
+    let playlist = agent
+        .get(&master_url)
+        .call()
+        .map_err(|e| format!("HLS master playlist request failed: {e}"))?
+        .into_body()
+        .read_to_string()
+        .map_err(|e| format!("HLS master playlist read failed: {e}"))?;
+    let Some((video_url, audio_url)) = pick_hls_rendition(&master_url, &playlist) else {
         return Ok(());
     };
 
@@ -232,17 +253,32 @@ fn fetch_cartridge_trailer_sync(mount_point: &Path, app_id: u64) -> Result<(), S
     // ffmpeg picks its output muxer from the file extension unless told
     // otherwise — the atomic-write `.part` suffix (same pattern runtime.rs
     // already uses for its own downloads) hides the real `.ogv` extension
-    // from that guess, so `-f ogg` says so explicitly instead.
+    // from that guess, so `-f ogg` says so explicitly instead. `fps=30`
+    // caps decode cost further: the source runs ~60fps despite the
+    // playlist's own FRAME-RATE=30 metadata tag (also confirmed live),
+    // more than a background loop behind the UI needs.
     let part = dir.join("trailer.ogv.part");
     let output = Command::new("ffmpeg")
         .args([
             "-y",
             "-i",
-            &movie_url,
+            &video_url,
+            "-i",
+            &audio_url,
+            "-map",
+            "0:v:0",
+            "-map",
+            "1:a:0",
+            "-vf",
+            "fps=30",
             "-c:v",
             "libtheora",
+            "-qscale:v",
+            "6",
             "-c:a",
             "libvorbis",
+            "-qscale:a",
+            "4",
             "-f",
             "ogg",
         ])
@@ -256,6 +292,62 @@ fn fetch_cartridge_trailer_sync(mount_point: &Path, app_id: u64) -> Result<(), S
         return Err(format!("ffmpeg failed: {tail}"));
     }
     fs::rename(&part, &dest).map_err(|e| format!("Cannot finalize trailer file: {e}"))
+}
+
+/// Resolves a modest-quality (largest rendition at or under 480p, falling
+/// back to the smallest available if none qualifies) rendition from an HLS
+/// master playlist to direct video and (separately grouped) audio
+/// sub-playlist URLs, both carrying the master's own query string — Steam's
+/// CDN paths are structured so relative sub-playlist filenames sit right
+/// next to the master's own.
+fn pick_hls_rendition(master_url: &str, playlist: &str) -> Option<(String, String)> {
+    let base = &master_url[..master_url.rfind('/')?];
+    let query = master_url.find('?').map(|i| &master_url[i..]).unwrap_or("");
+
+    let audio_file = playlist
+        .lines()
+        .find(|line| line.starts_with("#EXT-X-MEDIA:TYPE=AUDIO"))
+        .and_then(|line| extract_quoted_attr(line, "URI"))?;
+
+    let lines: Vec<&str> = playlist.lines().collect();
+    let mut renditions: Vec<(u32, &str)> = Vec::new();
+    for i in 0..lines.len() {
+        let Some(height) = lines[i]
+            .strip_prefix("#EXT-X-STREAM-INF:")
+            .and_then(extract_resolution_height)
+        else {
+            continue;
+        };
+        let Some(&file) = lines.get(i + 1).filter(|f| !f.starts_with('#')) else {
+            continue;
+        };
+        renditions.push((height, file));
+    }
+    let video_file = renditions
+        .iter()
+        .filter(|(height, _)| *height <= 480)
+        .max_by_key(|(height, _)| *height)
+        .or_else(|| renditions.iter().min_by_key(|(height, _)| *height))
+        .map(|(_, file)| *file)?;
+
+    let join = |file: &str| format!("{base}/{file}{query}");
+    Some((join(video_file), join(audio_file)))
+}
+
+/// The value of a `KEY="value"` attribute inside an HLS tag line.
+fn extract_quoted_attr<'a>(line: &'a str, key: &str) -> Option<&'a str> {
+    let needle = format!("{key}=\"");
+    let start = line.find(&needle)? + needle.len();
+    let rest = &line[start..];
+    rest.get(..rest.find('"')?)
+}
+
+/// The height out of a `RESOLUTION=WxH` attribute inside an `#EXT-X-STREAM-INF` tag.
+fn extract_resolution_height(attrs: &str) -> Option<u32> {
+    let start = attrs.find("RESOLUTION=")? + "RESOLUTION=".len();
+    let rest = &attrs[start..];
+    let end = rest.find(',').unwrap_or(rest.len());
+    rest[..end].split_once('x')?.1.parse().ok()
 }
 
 /// The file extension off a SteamGridDB image URL, falling back to `png` —
@@ -315,5 +407,49 @@ mod tests {
             fs::read(app_dir.join("trailer.ogv")).unwrap(),
             b"already here"
         );
+    }
+
+    // Real playlist pulled live from Steam's CDN for Alabaster Dawn
+    // (appid 3110760) while investigating #212's corrupt-trailer bug —
+    // not a hand-written fixture, so a future format change would show up
+    // here instead of only in production.
+    const REAL_MASTER_PLAYLIST: &str = "#EXTM3U\n\
+#EXT-X-VERSION:7\n\
+#EXT-X-INDEPENDENT-SEGMENTS\n\
+#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID=\"audio\",NAME=\"Default\",AUTOSELECT=YES,DEFAULT=YES,URI=\"hls_264_4_audio.m3u8\"\n\
+#EXT-X-STREAM-INF:BANDWIDTH=5800000,CODECS=\"avc1.640029,mp4a.40.2\",RESOLUTION=1920x1080,FRAME-RATE=30,AUDIO=\"audio\"\n\
+hls_264_0_video.m3u8\n\
+#EXT-X-STREAM-INF:BANDWIDTH=2600000,CODECS=\"avc1.640029,mp4a.40.2\",RESOLUTION=1280x720,FRAME-RATE=30,AUDIO=\"audio\"\n\
+hls_264_1_video.m3u8\n\
+#EXT-X-STREAM-INF:BANDWIDTH=1400000,CODECS=\"avc1.640029,mp4a.40.2\",RESOLUTION=854x480,FRAME-RATE=30,AUDIO=\"audio\"\n\
+hls_264_2_video.m3u8\n\
+#EXT-X-STREAM-INF:BANDWIDTH=1000000,CODECS=\"avc1.640029,mp4a.40.2\",RESOLUTION=640x360,FRAME-RATE=30,AUDIO=\"audio\"\n\
+hls_264_3_video.m3u8\n";
+
+    #[test]
+    fn picks_the_480p_rendition_over_1080p() {
+        let master = "https://video.example/store_trailers/3110760/x/hls_264_master.m3u8?t=123";
+        let (video, audio) = pick_hls_rendition(master, REAL_MASTER_PLAYLIST).unwrap();
+        assert_eq!(
+            video,
+            "https://video.example/store_trailers/3110760/x/hls_264_2_video.m3u8?t=123"
+        );
+        assert_eq!(
+            audio,
+            "https://video.example/store_trailers/3110760/x/hls_264_4_audio.m3u8?t=123"
+        );
+    }
+
+    #[test]
+    fn falls_back_to_the_smallest_rendition_when_none_is_480p_or_under() {
+        let master = "https://video.example/x/master.m3u8";
+        let playlist = "#EXTM3U\n\
+#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID=\"audio\",URI=\"audio.m3u8\"\n\
+#EXT-X-STREAM-INF:BANDWIDTH=1,RESOLUTION=1920x1080,AUDIO=\"audio\"\n\
+v0.m3u8\n\
+#EXT-X-STREAM-INF:BANDWIDTH=2,RESOLUTION=1280x720,AUDIO=\"audio\"\n\
+v1.m3u8\n";
+        let (video, _) = pick_hls_rendition(master, playlist).unwrap();
+        assert_eq!(video, "https://video.example/x/v1.m3u8");
     }
 }
