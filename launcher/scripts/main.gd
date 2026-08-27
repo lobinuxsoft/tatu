@@ -632,8 +632,13 @@ func _on_launch_requested() -> void:
 	var app: Dictionary = _apps[_selected_index]
 	var app_id := int(app.get("app_id", 0))
 	var app_name := String(app.get("name", "el juego"))
+
+	# Hard/Unknown preservability (real third-party DRM, or not enough data
+	# to tell) never gets Goldberg's standalone patch (#199) — it only ever
+	# plays through a real Steam client. #208 gets it there without the
+	# player having to find Steam's own Settings → Storage screen by hand.
 	if not bool(app.get("standalone", false)):
-		push_warning("App %d needs Steam — #206/#207 only cover standalone launches" % app_id)
+		await _launch_via_steam(app_id, app_name)
 		return
 
 	var exe_relative := String(app.get("exe_path", ""))
@@ -709,6 +714,97 @@ func _launch_via_proton(app_id: int, app_name: String, exe_path: String) -> void
 	# hardware this cartridge is meant to run on.
 	await get_tree().create_timer(1.5).timeout
 	get_tree().quit()
+
+## Registers the cartridge as a Steam library (#208): closes Steam if it's
+## running (it owns `libraryfolders.vdf` in memory and would overwrite an
+## edit made while it's still open, same reason `config.vdf`/
+## `localconfig.vdf` edits elsewhere in this epic require it closed),
+## writes a minimal entry to both copies of the file, then reopens it.
+##
+## Deliberately does NOT also fire `steam://rungameid/<id>` to auto-launch
+## the game — Steam's own startup time is unpredictable enough (can run
+## into the tens of seconds on a cold start) that firing it right after
+## reopening would be a guess, not something verified to actually work.
+## Getting the game to appear, ready to press Play like any other title in
+## the user's library, is what #208 actually asks for.
+func _launch_via_steam(app_id: int, app_name: String) -> void:
+	_action_status.text = "Registrando %s en Steam..." % app_name
+	_action_overlay.visible = true
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	var steam_dir := _steam_install_dir()
+	if steam_dir.is_empty():
+		await _show_status("No se encontró una instalación de Steam en esta máquina", 2.5)
+		return
+
+	await _stop_steam()
+
+	var mount_point := _cartridge_root()
+	for rel in ["config/libraryfolders.vdf", "steamapps/libraryfolders.vdf"]:
+		var path := steam_dir.path_join(rel)
+		if not FileAccess.file_exists(path):
+			continue
+		var content := FileAccess.get_file_as_string(path)
+		var updated: String = load("res://scripts/steam_library.gd").add_library(content, mount_point)
+		if updated == content:
+			continue
+		var f := FileAccess.open(path, FileAccess.WRITE)
+		f.store_string(updated)
+		f.close()
+
+	_start_steam(steam_dir)
+	_action_status.text = "Abriendo Steam..."
+	await get_tree().create_timer(2.0).timeout
+	get_tree().quit()
+
+## Linux: `~/.local/share/Steam` or the older `~/.steam/steam` symlink
+## target. Windows: the one non-elevated, no-registry-access location a
+## default install actually lands in — matches Tatu's own Rust-side
+## `steam_install_dir()` fallback for the same reason (this can't call
+## into that code, see this file's header), just without the registry
+## lookup GDScript has no built-in access to.
+func _steam_install_dir() -> String:
+	if OS.get_name() == "Windows":
+		var default := "C:/Program Files (x86)/Steam"
+		return default if DirAccess.dir_exists_absolute(default) else ""
+	var home := OS.get_environment("HOME")
+	for rel in [".local/share/Steam", ".steam/steam"]:
+		var path := home.path_join(rel)
+		if DirAccess.dir_exists_absolute(path):
+			return path
+	return ""
+
+func _is_steam_running() -> bool:
+	var output := []
+	if OS.get_name() == "Windows":
+		OS.execute("tasklist", ["/FI", "IMAGENAME eq steam.exe"], output)
+	else:
+		OS.execute("pgrep", ["-x", "steam"], output)
+	return not String(output[0] if output.size() > 0 else "").strip_edges().is_empty()
+
+## Closes Steam the same way its own tray icon "Exit" would (a normal
+## process termination, not a forceful kill) and waits for it to actually
+## exit — verified live (#217) that this machine's disk/process state
+## doesn't always update instantly, same reasoning applies to a whole
+## client shutting down its background services.
+func _stop_steam() -> void:
+	if not _is_steam_running():
+		return
+	if OS.get_name() == "Windows":
+		OS.execute("taskkill", ["/IM", "steam.exe"])
+	else:
+		OS.execute("pkill", ["-x", "steam"])
+	var attempts := 0
+	while _is_steam_running() and attempts < 20:
+		await get_tree().create_timer(0.5).timeout
+		attempts += 1
+
+func _start_steam(steam_dir: String) -> void:
+	if OS.get_name() == "Windows":
+		OS.create_process(steam_dir.path_join("steam.exe"), [])
+	else:
+		OS.create_process(steam_dir.path_join("steam.sh"), [])
 
 func _tatu_local_dir() -> String:
 	return OS.get_environment("HOME").path_join(".local/share/tatu")
