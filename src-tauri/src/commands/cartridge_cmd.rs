@@ -154,6 +154,14 @@ pub async fn fetch_cartridge_description(app_id: u64, mount_point: String) -> Re
     cartridge::fetch_cartridge_description(PathBuf::from(mount_point), app_id).await
 }
 
+/// Caches this app's Steam store screenshots onto the cartridge (#213's
+/// Tatu-side half — the launcher's gallery UI already shipped in #211,
+/// with nothing to actually show until this exists).
+#[tauri::command]
+pub async fn fetch_cartridge_screenshots(app_id: u64, mount_point: String) -> Result<(), String> {
+    cartridge::fetch_cartridge_screenshots(PathBuf::from(mount_point), app_id).await
+}
+
 /// Caches this app's Steam trailer, transcoded to `.ogv`, onto the
 /// cartridge (#212). Opt-in — only called when the Cartucho tab's
 /// "Preparar launcher" step has the trailer toggle checked, unlike art and

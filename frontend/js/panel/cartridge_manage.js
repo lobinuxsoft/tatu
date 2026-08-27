@@ -149,10 +149,11 @@ async function prepareLauncher(drive, apps, includeTrailers) {
 
     for (let i = 0; i < apps.length; i++) {
       const app = apps[i];
-      setStatus(`Bajando arte y descripción (${i + 1}/${apps.length}): ${app.name}`);
+      setStatus(`Bajando arte, descripción y capturas (${i + 1}/${apps.length}): ${app.name}`);
       await Promise.all([
         invoke("fetch_cartridge_art", { appId: app.app_id, mountPoint }).catch(() => {}),
         invoke("fetch_cartridge_description", { appId: app.app_id, mountPoint }).catch(() => {}),
+        invoke("fetch_cartridge_screenshots", { appId: app.app_id, mountPoint }).catch(() => {}),
       ]);
     }
 

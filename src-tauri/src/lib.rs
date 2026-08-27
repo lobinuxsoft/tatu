@@ -63,6 +63,7 @@ macro_rules! tracker_handler {
             commands::cartridge_cmd::inject_goldberg,
             commands::cartridge_cmd::fetch_cartridge_art,
             commands::cartridge_cmd::fetch_cartridge_description,
+            commands::cartridge_cmd::fetch_cartridge_screenshots,
             commands::cartridge_cmd::fetch_cartridge_trailer,
             commands::cartridge_cmd::bundle_linux_runtime,
             commands::cartridge_cmd::uninstall_from_cartridge,

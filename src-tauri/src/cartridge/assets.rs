@@ -30,6 +30,8 @@ struct AppDetailsData {
     short_description: String,
     #[serde(default)]
     movies: Vec<Movie>,
+    #[serde(default)]
+    screenshots: Vec<Screenshot>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -39,6 +41,14 @@ struct Movie {
     /// before writing this. `ffmpeg` ingests the manifest URL directly, no
     /// separate segment-by-segment download needed.
     hls_h264: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Screenshot {
+    /// The 1920x1080 original — same file the launcher's gallery (#213)
+    /// both thumbnails and enlarges, so there's no separate smaller
+    /// `path_thumbnail` variant to bother caching too.
+    path_full: String,
 }
 
 /// Caches this app's top SteamGridDB cover art at `assets/<app_id>/grid.<ext>`
@@ -176,6 +186,74 @@ fn fetch_cartridge_description_sync(mount_point: &Path, app_id: u64) -> Result<(
     fs::create_dir_all(&dir).map_err(|e| format!("Cannot create {}: {e}", dir.display()))?;
     fs::write(dir.join("description.txt"), description)
         .map_err(|e| format!("Cannot write description: {e}"))
+}
+
+/// Caches this app's Steam store screenshots at
+/// `assets/<app_id>/screenshots/<n>.jpg` (#213) — the launcher's gallery
+/// only ever reads whatever files already sit in that folder, same
+/// "Tatu prepares, launcher consumes" split every asset here follows.
+///
+/// Idempotent, unlike art/description above: a released game's screenshot
+/// set essentially never changes, and re-downloading every one of them
+/// (often a dozen-plus, unlike a single grid image) on every "Preparar
+/// launcher" click would add up as a cartridge's library grows.
+pub async fn fetch_cartridge_screenshots(mount_point: PathBuf, app_id: u64) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || fetch_cartridge_screenshots_sync(&mount_point, app_id))
+        .await
+        .map_err(|e| format!("Task error: {e}"))?
+}
+
+fn fetch_cartridge_screenshots_sync(mount_point: &Path, app_id: u64) -> Result<(), String> {
+    let dir = mount_point
+        .join("assets")
+        .join(app_id.to_string())
+        .join("screenshots");
+    if fs::read_dir(&dir).is_ok_and(|mut entries| entries.next().is_some()) {
+        return Ok(());
+    }
+
+    let agent = ureq::Agent::new_with_config(
+        ureq::config::Config::builder()
+            .timeout_global(Some(Duration::from_secs(15)))
+            .build(),
+    );
+
+    let mut response: HashMap<String, AppDetailsEntry> = agent
+        .get(format!(
+            "https://store.steampowered.com/api/appdetails?appids={app_id}"
+        ))
+        .call()
+        .map_err(|e| format!("Steam appdetails request failed: {e}"))?
+        .into_body()
+        .read_json()
+        .map_err(|e| format!("Steam appdetails response parse failed: {e}"))?;
+
+    let Some(entry) = response.remove(&app_id.to_string()) else {
+        return Ok(());
+    };
+    let screenshots = entry
+        .success
+        .then_some(entry.data)
+        .flatten()
+        .map(|d| d.screenshots)
+        .unwrap_or_default();
+    if screenshots.is_empty() {
+        return Ok(());
+    }
+
+    fs::create_dir_all(&dir).map_err(|e| format!("Cannot create {}: {e}", dir.display()))?;
+    for (i, shot) in screenshots.iter().enumerate() {
+        let bytes = agent
+            .get(&shot.path_full)
+            .call()
+            .map_err(|e| format!("Screenshot {i} download failed: {e}"))?
+            .into_body()
+            .read_to_vec()
+            .map_err(|e| format!("Screenshot {i} read failed: {e}"))?;
+        fs::write(dir.join(format!("{i:02}.jpg")), bytes)
+            .map_err(|e| format!("Cannot write screenshot {i}: {e}"))?;
+    }
+    Ok(())
 }
 
 /// Caches this app's Steam store trailer, transcoded to Ogg Theora
@@ -417,6 +495,19 @@ mod tests {
             fs::read(app_dir.join("trailer.ogv")).unwrap(),
             b"already here"
         );
+    }
+
+    #[test]
+    fn an_already_populated_screenshots_dir_is_left_untouched() {
+        let dir = tempfile::tempdir().unwrap();
+        let shots_dir = dir.path().join("assets").join("1").join("screenshots");
+        fs::create_dir_all(&shots_dir).unwrap();
+        fs::write(shots_dir.join("00.jpg"), b"already here").unwrap();
+
+        fetch_cartridge_screenshots_sync(dir.path(), 1).unwrap();
+
+        let entries: Vec<_> = fs::read_dir(&shots_dir).unwrap().collect();
+        assert_eq!(entries.len(), 1);
     }
 
     // Real playlist pulled live from Steam's CDN for Alabaster Dawn
