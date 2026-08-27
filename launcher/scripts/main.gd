@@ -327,7 +327,7 @@ func _build_layout() -> void:
 	# reads more like a real game's button-prompt bar, and leaves the
 	# gallery its full height to work with.
 	_action_launch = _action_hint(ICON_LAUNCH, "Launch")
-	_action_add_to_steam = _action_hint(ICON_ADD_TO_STEAM, "Add to Steam")
+	_action_add_to_steam = _action_hint(ICON_ADD_TO_STEAM, "Add Cartridge")
 	_action_gallery = _action_hint(ICON_GALLERY, "Gallery")
 	_action_close = _action_hint(ICON_CLOSE, "Close")
 	_action_bar = HBoxContainer.new()
@@ -636,9 +636,9 @@ func _on_launch_requested() -> void:
 	# Hard/Unknown preservability (real third-party DRM, or not enough data
 	# to tell) never gets Goldberg's standalone patch (#199) — it only ever
 	# plays through a real Steam client, registered first via the dedicated
-	# "Add to Steam" action (#208) below, not this one.
+	# "Add Cartridge" action (#208) below, not this one.
 	if not bool(app.get("standalone", false)):
-		await _show_status("Usá \"Add to Steam\" para jugar %s" % app_name, 2.5)
+		await _show_status("Usá \"Add Cartridge\" para jugar %s" % app_name, 2.5)
 		return
 
 	var exe_relative := String(app.get("exe_path", ""))
@@ -653,7 +653,7 @@ func _on_launch_requested() -> void:
 	await _launch_via_proton(app_id, app_name, exe_path)
 
 ## Shows the action-status overlay with `text` for `seconds`, then hides it —
-## shared by the launch flow below and by Add to Steam, so every action a
+## shared by the launch flow below and by Add Cartridge, so every action a
 ## player takes gets SOME visible response instead of only a `push_warning`
 ## that only ever reached a log file nobody was watching.
 func _show_status(text: String, seconds: float) -> void:
@@ -715,32 +715,45 @@ func _launch_via_proton(app_id: int, app_name: String, exe_path: String) -> void
 	await get_tree().create_timer(1.5).timeout
 	get_tree().quit()
 
-## Registers the cartridge as a Steam library (#208): closes Steam if it's
-## running (it owns `libraryfolders.vdf` in memory and would overwrite an
-## edit made while it's still open, same reason `config.vdf`/
-## `localconfig.vdf` edits elsewhere in this epic require it closed),
-## writes a minimal entry to both copies of the file, then reopens it.
+## Registers the CARTRIDGE ITSELF as a Steam library folder (#208) — not any
+## one game on it. Steam then scans the whole folder on its own and
+## recognizes every app manifest already there, so this only ever needs to
+## run once per cartridge no matter how many games get installed onto it
+## afterward. Closes Steam if it's running (it owns `libraryfolders.vdf` in
+## memory and would overwrite an edit made while it's still open, same
+## reason `config.vdf`/`localconfig.vdf` edits elsewhere in this epic
+## require it closed), writes a minimal entry to both copies of the file,
+## then reopens it.
 ##
 ## Deliberately does NOT also fire `steam://rungameid/<id>` to auto-launch
-## the game — Steam's own startup time is unpredictable enough (can run
+## anything — Steam's own startup time is unpredictable enough (can run
 ## into the tens of seconds on a cold start) that firing it right after
 ## reopening would be a guess, not something verified to actually work.
-## Getting the game to appear, ready to press Play like any other title in
-## the user's library, is what #208 actually asks for.
-func _launch_via_steam(app_id: int, app_name: String) -> void:
-	_action_status.text = "Registrando %s en Steam..." % app_name
-	_action_overlay.visible = true
-	await get_tree().process_frame
-	await get_tree().process_frame
-
+## Getting every installed game to appear, ready to press Play like any
+## other title in the user's library, is what #208 actually asks for.
+func _launch_via_steam() -> void:
+	var mount_point := _cartridge_root()
 	var steam_dir := _steam_install_dir()
 	if steam_dir.is_empty():
 		await _show_status("No se encontró una instalación de Steam en esta máquina", 2.5)
 		return
 
+	var config_vdf := steam_dir.path_join("config/libraryfolders.vdf")
+	if FileAccess.file_exists(config_vdf):
+		var already: Array = load("res://scripts/steam_library.gd").registered_paths(
+			FileAccess.get_file_as_string(config_vdf)
+		)
+		if already.has(mount_point):
+			await _show_status("Este cartucho ya está en tu biblioteca de Steam", 2.5)
+			return
+
+	_action_status.text = "Registrando el cartucho en Steam..."
+	_action_overlay.visible = true
+	await get_tree().process_frame
+	await get_tree().process_frame
+
 	await _stop_steam()
 
-	var mount_point := _cartridge_root()
 	for rel in ["config/libraryfolders.vdf", "steamapps/libraryfolders.vdf"]:
 		var path := steam_dir.path_join(rel)
 		if not FileAccess.file_exists(path):
@@ -867,8 +880,8 @@ func _extract_tar(archive_path: String, dest_dir: String, strip_top_level: bool)
 		push_warning("Failed to extract %s: %s" % [archive_path, output])
 	return code == 0
 
+## Registers the whole cartridge (not just the selected card) as a Steam
+## library — deliberately independent of `_selected_index`, see
+## `_launch_via_steam`'s own header.
 func _on_add_to_steam_requested() -> void:
-	var app: Dictionary = _apps[_selected_index]
-	var app_id := int(app.get("app_id", 0))
-	var app_name := String(app.get("name", "el juego"))
-	await _launch_via_steam(app_id, app_name)
+	await _launch_via_steam()
