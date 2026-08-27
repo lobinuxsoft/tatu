@@ -81,8 +81,8 @@ var _action_add_to_steam: Control
 var _gallery: ScreenshotGallery
 var _viewer: Control
 var _viewer_image: TextureRect
-var _launch_status: Label
-var _launch_overlay: Control
+var _action_status: Label
+var _action_overlay: Control
 var _scroll_tween: Tween
 var _panel_content_width := 0.0
 
@@ -282,18 +282,18 @@ func _build_layout() -> void:
 	# extracting ~700MB the first time — with zero UI feedback that used to
 	# look identical to the launcher having hung. Built last, same as the
 	# viewer above, so it draws on top of everything.
-	_launch_overlay = ColorRect.new()
-	_launch_overlay.color = Color(0, 0, 0, 0.75)
-	_launch_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_launch_overlay.visible = false
-	_launch_status = Label.new()
-	_launch_status.add_theme_font_override("font", load(FONT_DISPLAY))
-	_launch_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_launch_status.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	_launch_status.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_title_labels.append(_launch_status)
-	_launch_overlay.add_child(_launch_status)
-	add_child(_launch_overlay)
+	_action_overlay = ColorRect.new()
+	_action_overlay.color = Color(0, 0, 0, 0.75)
+	_action_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_action_overlay.visible = false
+	_action_status = Label.new()
+	_action_status.add_theme_font_override("font", load(FONT_DISPLAY))
+	_action_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_action_status.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_action_status.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_title_labels.append(_action_status)
+	_action_overlay.add_child(_action_status)
+	add_child(_action_overlay)
 
 ## A strip pinned to the given edge (PRESET_LEFT_WIDE or PRESET_RIGHT_WIDE),
 ## rendering whatever is already on screen behind it — blurred and tinted —
@@ -532,14 +532,24 @@ func _on_launch_requested() -> void:
 		return
 	await _launch_via_proton(app_id, app_name, exe_path)
 
+## Shows the action-status overlay with `text` for `seconds`, then hides it —
+## shared by the launch flow below and by Add to Steam, so every action a
+## player takes gets SOME visible response instead of only a `push_warning`
+## that only ever reached a log file nobody was watching.
+func _show_status(text: String, seconds: float) -> void:
+	_action_status.text = text
+	_action_overlay.visible = true
+	await get_tree().create_timer(seconds).timeout
+	_action_overlay.visible = false
+
 ## Runs a Goldberg-patched exe through umu-run (#206) — adopted rather than
 ## hand-rolling a Proton invocation: it replicates Steam's own runtime
 ## container so the game behaves the same as it would through Steam,
 ## without needing Steam installed. See runtime.rs on the Tatu side for why
 ## this specific tool and the exact files it bundles onto the cartridge.
 func _launch_via_proton(app_id: int, app_name: String, exe_path: String) -> void:
-	_launch_status.text = "Lanzando %s..." % app_name
-	_launch_overlay.visible = true
+	_action_status.text = "Lanzando %s..." % app_name
+	_action_overlay.visible = true
 	# The first launch on a cartridge extracts ~700MB synchronously below —
 	# without yielding a couple frames first, the overlay's own visibility
 	# change would never actually get drawn before that freezes the thread,
@@ -548,9 +558,7 @@ func _launch_via_proton(app_id: int, app_name: String, exe_path: String) -> void
 	await get_tree().process_frame
 
 	if not _ensure_linux_runtime_deployed():
-		_launch_status.text = "No se pudo preparar el runtime de Linux para %s" % app_name
-		await get_tree().create_timer(2.5).timeout
-		_launch_overlay.visible = false
+		await _show_status("No se pudo preparar el runtime de Linux para %s" % app_name, 2.5)
 		return
 
 	var wineprefix := _tatu_local_dir().path_join("wineprefix").path_join(str(app_id))
@@ -573,11 +581,10 @@ func _launch_via_proton(app_id: int, app_name: String, exe_path: String) -> void
 	var pid := OS.create_process(_tatu_local_dir().path_join("umu-run"), [exe_path])
 	if pid <= 0:
 		push_warning("Failed to launch app %d via umu-run" % app_id)
-		_launch_status.text = "No se pudo lanzar %s" % app_name
-		await get_tree().create_timer(2.5).timeout
+		await _show_status("No se pudo lanzar %s" % app_name, 2.5)
 	else:
 		await get_tree().create_timer(1.5).timeout
-	_launch_overlay.visible = false
+		_action_overlay.visible = false
 
 func _tatu_local_dir() -> String:
 	return OS.get_environment("HOME").path_join(".local/share/tatu")
@@ -644,3 +651,4 @@ func _on_add_to_steam_requested() -> void:
 	var app_id := int(_apps[_selected_index].get("app_id", 0))
 	# Steam library registration (#208) is not wired yet.
 	push_warning("Add-to-Steam requested for app %d — no registration wired yet (#208)" % app_id)
+	await _show_status("Agregar a Steam todavía no está disponible (#208)", 2.5)
