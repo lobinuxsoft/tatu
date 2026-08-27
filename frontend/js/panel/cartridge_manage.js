@@ -124,12 +124,26 @@ async function prepareLauncher(drive, apps, includeTrailers) {
     result.innerHTML = `<div class="loading"><div class="spinner"></div><br>${esc(msg)}</div>`;
   };
 
+  // Found live-testing with the user: nothing stopped "Volver a discos" or
+  // a second "Preparar launcher" click mid-run — either tears down the DOM
+  // nodes this function is still writing to, or races a second copy of the
+  // same invokes. Locked for the duration, restored in `finally` either way.
+  const checkbox = document.getElementById("cartIncludeTrailers");
+  const backBtn = document.getElementById("cartManageBack");
+  const prepareBtn = document.getElementById("cartPrepareBtn");
+  checkbox.disabled = true;
+  backBtn.disabled = true;
+  prepareBtn.disabled = true;
+
   try {
     setStatus("Copiando el launcher (Linux + Windows)...");
     await invoke("install_launcher_binaries", { mountPoint });
 
     if (apps.some(a => a.preservability && a.preservability.kind === "easy")) {
-      setStatus("Preparando runtime de Linux (Proton)...");
+      // Hundreds of MB copied from Tatu's own cache onto whatever drive is
+      // plugged in — no network involved, but real disk write time on a
+      // slow USB stick, same one #217 already found stalling under load.
+      setStatus("Preparando runtime de Linux (Proton)... puede tardar según la velocidad del disco.");
       await invoke("bundle_linux_runtime", { mountPoint });
     }
 
@@ -158,5 +172,9 @@ async function prepareLauncher(drive, apps, includeTrailers) {
       `para Linux y Windows, ${apps.length} juego(s) preparados.</div>`;
   } catch (e) {
     result.innerHTML = `<div class="cartridge-warn">No se pudo terminar de preparar el cartucho: ${esc(String(e))}</div>`;
+  } finally {
+    checkbox.disabled = false;
+    backBtn.disabled = false;
+    prepareBtn.disabled = false;
   }
 }
