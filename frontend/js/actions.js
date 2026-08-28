@@ -55,12 +55,24 @@ export async function doScanSizes() {
 export async function doFetchAllDrm() {
   const btn = document.getElementById("drmBtn");
   const info = document.getElementById("syncInfo");
+  const wrap = document.getElementById("drmProgressWrap");
+  const bar = document.getElementById("drmProgressBar");
+  const text = document.getElementById("drmProgressText");
   btn.disabled = true; btn.textContent = "Cargando DRM...";
   const prevInfo = info.textContent;
 
+  // A small text badge next to the sync buttons was too easy to miss
+  // against 500+ games loading below it — a real progress bar, shown only
+  // while this runs, reuses the same visual language the completion bar
+  // above already has (#234).
+  wrap.style.display = "";
+  bar.style.width = "0%";
+  text.textContent = "DRM Análisis 0/0";
+
   const unlisten = await listen("drm_progress", e => {
     const p = e.payload || {};
-    info.textContent = `DRM ${p.current}/${p.total}`;
+    bar.style.width = `${(p.current / p.total) * 100}%`;
+    text.textContent = `DRM Análisis ${p.current}/${p.total}`;
     if (p.app_id && p.info) {
       state.drmCache[p.app_id] = p.info;
       renderSteam();
@@ -69,6 +81,7 @@ export async function doFetchAllDrm() {
   const unlistenDone = await listen("drm_done", e => {
     const p = e.payload || {};
     info.textContent = prevInfo || `DRM cargado para ${p.total} juegos`;
+    wrap.style.display = "none";
     btn.disabled = false; btn.textContent = "Cargar DRM";
     unlisten(); unlistenDone();
   });
@@ -77,6 +90,7 @@ export async function doFetchAllDrm() {
     await invoke("fetch_all_drm");
   } catch (e) {
     info.textContent = "Error DRM: " + e;
+    wrap.style.display = "none";
     btn.disabled = false; btn.textContent = "Cargar DRM";
     unlisten(); unlistenDone();
   }
