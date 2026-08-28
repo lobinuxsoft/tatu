@@ -5,6 +5,9 @@ dist/
 .tools/
 .local-ct/
 launcher/.godot/
+# Stamped fresh by launcher/export.sh on every build, read by main.gd's
+# corner label — regenerated, never hand-edited or committed.
+launcher/build_info.txt
 
 # Built by CI's release job (godot --export-release), never committed:
 # GitHub blocks any single git-committed file over 100MiB, and the stock
