@@ -70,6 +70,7 @@ macro_rules! tracker_handler {
             commands::cartridge_cmd::uninstall_from_cartridge,
             commands::cartridge_cmd::list_cartridge_apps,
             commands::cartridge_cmd::install_launcher_binaries,
+            commands::cartridge_cmd::refresh_cartridge_drm,
             commands::misc_cmd::detect_steam_id,
             commands::misc_cmd::cheats_supported,
             commands::misc_cmd::state_path,

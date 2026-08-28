@@ -214,6 +214,7 @@ async function prepareLauncher(drive, apps, includeTrailers) {
   prepareBtn.disabled = true;
 
   let symlinkWarning = "";
+  let drmNotice = "";
   try {
     // Fixes Proton itself, not just standalone/Goldberg — Steam-native
     // Proton launches from the cartridge fail the exact same way without
@@ -229,6 +230,32 @@ async function prepareLauncher(drive, apps, includeTrailers) {
           `<div class="cartridge-warn">No se pudo habilitar symlinks NTFS — los juegos con Proton ` +
           `pueden no arrancar: ${esc(raw)}</div>`;
       }
+    }
+
+    // Re-classifies every installed app against live DRM sources plus the
+    // local-file fallback (#238) and injects Goldberg for whatever newly
+    // resolves to Easy — not just what was known back when the game
+    // finished installing. Runs before the runtime-bundling check below so
+    // a game that just flipped to Easy still gets the Proton runtime it
+    // now needs, not only ones classified Easy from the start.
+    setStatus("Analizando DRM de cada juego instalado...");
+    try {
+      const drmResults = await invoke("refresh_cartridge_drm", { mountPoint });
+      for (const r of drmResults) {
+        const app = apps.find(a => a.app_id === r.app_id);
+        if (app && r.drm_info) {
+          app.preservability = r.drm_info.preservability;
+        }
+        if (app && r.goldberg_injected) {
+          app.standalone = true;
+        }
+      }
+      const injected = drmResults.filter(r => r.goldberg_injected).map(r => r.name);
+      if (injected.length) {
+        drmNotice = `<div class="import-result import-result-ok">Goldberg agregado a: ${injected.map(esc).join(", ")}.</div>`;
+      }
+    } catch (e) {
+      drmNotice = `<div class="cartridge-warn">No se pudo re-analizar el DRM del cartucho: ${esc(String(e))}</div>`;
     }
 
     setStatus("Copiando el launcher (Linux + Windows)...");
@@ -266,6 +293,7 @@ async function prepareLauncher(drive, apps, includeTrailers) {
     result.innerHTML =
       `<div class="import-result import-result-ok">✓ Cartucho listo — launcher instalado ` +
       `para Linux y Windows, ${apps.length} juego(s) preparados.</div>` +
+      drmNotice +
       symlinkWarning;
 
     // Space just moved a lot (runtime bundled, art/screenshots/trailers

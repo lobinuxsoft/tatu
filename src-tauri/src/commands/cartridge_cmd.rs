@@ -142,6 +142,44 @@ pub fn inject_goldberg(
     )
 }
 
+/// Re-classifies every app already on this cartridge and injects Goldberg
+/// for any that newly resolve to Easy — part of "Preparar launcher" (#238),
+/// covering the whole cartridge automatically instead of needing a manual
+/// per-game trigger. Also refreshes the main library's own DRM cache for
+/// each app touched, so "Desconocido" in the Steam tab gets fixed too, not
+/// just the cartridge marker.
+#[tauri::command]
+pub fn refresh_cartridge_drm(
+    app: AppHandle,
+    state: State<'_, SharedState>,
+    mount_point: String,
+) -> Result<Vec<cartridge::PrepareDrmResult>, String> {
+    let template_x86 = app
+        .path()
+        .resolve("vendor/goldberg/x86/steam_api.dll", BaseDirectory::Resource)
+        .map_err(|e| e.to_string())?;
+    let template_x64 = app
+        .path()
+        .resolve(
+            "vendor/goldberg/x64/steam_api64.dll",
+            BaseDirectory::Resource,
+        )
+        .map_err(|e| e.to_string())?;
+
+    let results =
+        cartridge::refresh_drm_and_inject(Path::new(&mount_point), &template_x86, &template_x64)?;
+
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    for result in &results {
+        if let Some(info) = &result.drm_info {
+            s.drm_cache.insert(result.app_id, info.clone());
+        }
+    }
+    s.save();
+
+    Ok(results)
+}
+
 /// Caches this app's SteamGridDB cover art onto the cartridge (#205). Best
 /// effort: the caller treats a failure here as a warning, never a reason to
 /// undo an install that already succeeded.
