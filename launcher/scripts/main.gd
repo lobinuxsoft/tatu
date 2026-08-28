@@ -334,6 +334,10 @@ func _build_layout() -> void:
 	_action_bar.alignment = BoxContainer.ALIGNMENT_CENTER
 	_action_bar.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
 	_action_bar.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	# Added before the screenshot viewer and the launch overlay below, both
+	# of which cover the whole screen — without a z_index they'd draw over
+	# this bar instead of under it, hiding the input prompts (live-tested).
+	_action_bar.z_index = 100
 	for action in [_action_launch, _action_add_to_steam, _action_gallery, _action_close]:
 		_action_bar.add_child(action)
 	add_child(_action_bar)
