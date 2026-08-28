@@ -17,6 +17,19 @@ config/icon="res://assets/icon/icon.png"
 boot_splash/bg_color=Color(0.043137, 0.054902, 0.070588, 1)
 boot_splash/show_image=false
 
+[display]
+
+; Live-tested (2026-08-28): every size in main.gd is a RATIO of the root
+; Control's own `.size`, which without this section tracks the raw OS
+; window — a non-16:9 window shape distorted every proportion downstream
+; (cards, fonts, the side panels). Locking the logical canvas to a fixed
+; 16:9 resolution with `aspect="keep"` letterboxes/pillarboxes instead,
+; so `.size` is always 16:9 regardless of the actual window shape.
+window/size/viewport_width=1920
+window/size/viewport_height=1080
+window/stretch/mode="canvas_items"
+window/stretch/aspect="keep"
+
 [rendering]
 
 renderer/rendering_method="gl_compatibility"
