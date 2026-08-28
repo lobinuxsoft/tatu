@@ -57,6 +57,7 @@ macro_rules! tracker_handler {
             commands::cartridge_cmd::list_removable_drives,
             commands::cartridge_cmd::has_cartridge_structure,
             commands::cartridge_cmd::is_registered_library,
+            commands::cartridge_cmd::get_cartridge_usage,
             commands::cartridge_cmd::trigger_install,
             commands::cartridge_cmd::find_pending_cartridge,
             commands::cartridge_cmd::poll_install_status,
