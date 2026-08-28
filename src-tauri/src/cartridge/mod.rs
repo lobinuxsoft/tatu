@@ -9,6 +9,7 @@ mod install;
 mod launcher;
 mod marker;
 mod runtime;
+mod usage;
 
 // Windows has no verified, non-elevated, silent format API (#194) — see the
 // PR discussion. Only the Linux path (udisks2 Block.Format, no sudo) exists
@@ -31,6 +32,7 @@ pub use install::{
 pub use launcher::install_launcher_binaries;
 pub use marker::{CartridgeApp, has_cartridge_structure, list_apps};
 pub use runtime::bundle_linux_runtime;
+pub use usage::{CartridgeUsage, usage};
 
 // CartridgeMarker/read_marker/MARKER_FILENAME stay private — nothing outside
 // this module needs the raw marker, only the app list (`list_apps`).

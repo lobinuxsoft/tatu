@@ -29,6 +29,18 @@ pub fn is_registered_library(mount_point: String) -> bool {
     cartridge::is_registered_library(Path::new(&mount_point))
 }
 
+/// Disk usage breakdown (#228) for the Cartucho tab's bar chart — total/free
+/// space plus the launcher (combined) and each installed game's own total.
+/// `spawn_blocking`d: summing every file under `steamapps/common/` walks a
+/// real directory tree, same I/O-on-a-slow-drive concern `scan_sizes`
+/// upstream already has for the main tracker.
+#[tauri::command]
+pub async fn get_cartridge_usage(mount_point: String) -> Result<cartridge::CartridgeUsage, String> {
+    tokio::task::spawn_blocking(move || cartridge::usage(Path::new(&mount_point)))
+        .await
+        .map_err(|e| format!("Task error: {e}"))?
+}
+
 /// Opens `steam://install/<app_id>` — refused outright if the active
 /// account doesn't own the app, so Steam never gets a chance to silently
 /// swap the install for a purchase page instead.

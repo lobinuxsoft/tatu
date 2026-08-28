@@ -31,6 +31,10 @@ goblin = { version = "0.10", default-features = false, features = [
     "pe32",
     "pe64",
 ] }
+# Cartridge disk usage (#228): total/free space per mount point, cross-
+# platform (statvfs on Linux, GetDiskFreeSpaceExW on Windows) without hand-
+# rolling either — only the "disk" feature, no process/network/user scanning.
+sysinfo = { version = "0.39.6", default-features = false, features = ["disk"] }
 
 # The cheat runtime is the Linux ptrace backend (nix, /proc, ELF symbols).
 # Windows gets the tracker only until tatu-win lands (#181); gating the deps

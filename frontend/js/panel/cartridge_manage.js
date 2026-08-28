@@ -72,13 +72,68 @@ async function showCartridge(drive) {
   el.innerHTML = `<div class="loading"><div class="spinner"></div><br>Leyendo cartucho...</div>`;
   try {
     const apps = await invoke("list_cartridge_apps", { mountPoint: drive.mount_point });
-    renderCartridge(drive, apps);
+    // Best-effort (#228): the app list is the important part, a usage scan
+    // failing (a mid-eject race, an odd filesystem) shouldn't block it.
+    const usage = await invoke("get_cartridge_usage", { mountPoint: drive.mount_point }).catch(() => null);
+    renderCartridge(drive, apps, usage);
   } catch (e) {
     el.innerHTML = `<div class="cartridge-warn">Error al leer el cartucho: ${esc(String(e))}</div>`;
   }
 }
 
-function renderCartridge(drive, apps) {
+// Stable per-game color: hashed from the app_id rather than array index, so
+// a game keeps the same color across re-renders even if others are
+// added/removed around it. The launcher and "Otros" get fixed colors —
+// always present, always meant to stand out/recede the same way.
+function colorForApp(appId) {
+  const hue = (appId * 47) % 360;
+  return `hsl(${hue}, 60%, 55%)`;
+}
+
+// Bar + legend (#228): total/free/used, with used broken into the launcher
+// (ONE combined segment — the player doesn't care it's a binary plus a
+// bundled runtime), one segment per game, and a residual "Otros" so the
+// bar always adds up to what the filesystem itself reports as used.
+function renderUsage(usage) {
+  if (!usage) return "";
+
+  const segments = [{ label: "Launcher", bytes: usage.launcher_bytes, color: "var(--accent)" }];
+  for (const app of usage.apps) {
+    segments.push({ label: app.name, bytes: app.bytes, color: colorForApp(app.app_id) });
+  }
+  if (usage.other_bytes > 0) {
+    segments.push({ label: "Otros", bytes: usage.other_bytes, color: "var(--fg-dim)" });
+  }
+
+  const total = usage.total_bytes || 1;
+  const bar = segments
+    .map(
+      s =>
+        `<div class="cartridge-usage-segment" style="width:${(s.bytes / total) * 100}%; background:${s.color}" title="${esc(s.label)}: ${formatBytes(s.bytes)}"></div>`
+    )
+    .join("");
+  const freeBar = `<div class="cartridge-usage-segment is-free" style="width:${(usage.free_bytes / total) * 100}%" title="Libre: ${formatBytes(usage.free_bytes)}"></div>`;
+
+  const legend = segments
+    .concat([{ label: "Libre", bytes: usage.free_bytes, color: null }])
+    .map(
+      s =>
+        `<div class="cartridge-usage-legend-item">` +
+        `<span class="cartridge-usage-swatch${s.color ? "" : " is-free"}" style="${s.color ? `background:${s.color}` : ""}"></span>` +
+        `${esc(s.label)} — ${formatBytes(s.bytes)}</div>`
+    )
+    .join("");
+
+  return (
+    `<div class="cartridge-usage">` +
+    `<div class="cartridge-usage-summary">${formatBytes(usage.free_bytes)} libres de ${formatBytes(usage.total_bytes)}</div>` +
+    `<div class="cartridge-usage-bar">${bar}${freeBar}</div>` +
+    `<div class="cartridge-usage-legend">${legend}</div>` +
+    `</div>`
+  );
+}
+
+function renderCartridge(drive, apps, usage) {
   const el = body();
   const rows = apps.length
     ? apps
@@ -96,6 +151,7 @@ function renderCartridge(drive, apps) {
   el.innerHTML =
     `<div class="cartridge-guide">Cartucho: <b>${esc(drive.label || drive.id)}</b> ` +
     `(${formatBytes(drive.total_bytes)}) — ${apps.length} juego(s)</div>` +
+    renderUsage(usage) +
     rows +
     // Opt-in (#212): a trailer runs 10-100+ MB and takes real time to
     // transcode, unlike art/description below which are always-on and
@@ -171,6 +227,14 @@ async function prepareLauncher(drive, apps, includeTrailers) {
     result.innerHTML =
       `<div class="import-result import-result-ok">✓ Cartucho listo — launcher instalado ` +
       `para Linux y Windows, ${apps.length} juego(s) preparados.</div>`;
+
+    // Space just moved a lot (runtime bundled, art/screenshots/trailers
+    // downloaded) — the bar chart drawn before this run started is stale.
+    const usageEl = document.querySelector(".cartridge-usage");
+    if (usageEl) {
+      const usage = await invoke("get_cartridge_usage", { mountPoint }).catch(() => null);
+      usageEl.outerHTML = renderUsage(usage);
+    }
   } catch (e) {
     result.innerHTML = `<div class="cartridge-warn">No se pudo terminar de preparar el cartucho: ${esc(String(e))}</div>`;
   } finally {
