@@ -1,6 +1,7 @@
 import { invoke } from "../tauri.js";
 import { state } from "../state.js";
 import { esc, formatBytes } from "../utils.js";
+import { renderFormatConfirm } from "./format_cartridge.js";
 
 // Guards against a leaked timer if the modal is closed mid-poll or a second
 // install is started on top of one already running.
@@ -126,42 +127,16 @@ async function showDriveList(gameId, gameName) {
 
 function showFormatConfirm(gameId, gameName, drive) {
   const el = body();
-  el.innerHTML =
-    `<div class="cartridge-warn">Vas a formatear "<b>${esc(drive.label || drive.id)}</b>" ` +
-    `(${formatBytes(drive.total_bytes)}) como cartucho. Esto BORRA todo su contenido actual, sin vuelta atrás.</div>` +
-    `<div class="cartridge-actions">` +
-    `<button class="cartridge-btn-secondary" id="cartFormatCancel">Volver</button>` +
-    `<button class="cartridge-btn" id="cartFormatGo">Formatear</button>` +
-    `</div>`;
-
-  document.getElementById("cartFormatCancel").onclick = () => showDriveList(gameId, gameName);
-  document.getElementById("cartFormatGo").onclick = async () => {
-    el.innerHTML = `<div class="loading"><div class="spinner"></div><br>Formateando...</div>`;
-    try {
-      await invoke("format_as_cartridge", {
-        device: drive.id,
-        expectedLabel: drive.label,
-        expectedBytes: drive.total_bytes,
-      });
-      const fresh = (await invoke("list_removable_drives")).find(d => d.id === drive.id);
-      if (!fresh || !fresh.mount_point) {
-        el.innerHTML = `<div class="cartridge-warn">Formateado, pero no encontré el punto de montaje. Reconectá el disco e intentá de nuevo.</div>`;
-        return;
-      }
-      showRegistrationCheck(gameId, gameName, fresh.mount_point);
-    } catch (e) {
-      // format_as_cartridge isn't registered at all on Windows yet (#194) —
-      // Tauri's own "command not found" error is how that surfaces here.
-      const raw = String(e);
-      const msg = /not found|unknown command/i.test(raw)
-        ? "Formatear todavía no está soportado en Windows (ver #194)."
-        : raw;
+  renderFormatConfirm(el, drive, {
+    onCancel: () => showDriveList(gameId, gameName),
+    onSuccess: fresh => showRegistrationCheck(gameId, gameName, fresh.mount_point),
+    onError: msg => {
       el.innerHTML =
         `<div class="cartridge-warn">${esc(msg)}</div>` +
         `<div class="cartridge-actions"><button class="cartridge-btn-secondary" id="cartFormatBack">Volver</button></div>`;
       document.getElementById("cartFormatBack").onclick = () => showDriveList(gameId, gameName);
-    }
-  };
+    },
+  });
 }
 
 async function showRegistrationCheck(gameId, gameName, mountPoint) {
@@ -229,13 +204,22 @@ function showInstall(gameId, gameName, mountPoint) {
 const CARTRIDGE_TAB_HINT =
   ' Andá a la pestaña "Cartucho" para preparar el launcher cuando termines de instalar juegos.';
 
+// Live-tested (2026-08-28): Steam bajando/commiteando el shader cache
+// directo sobre un pendrive USB tardó ~10 minutos y dejó el cliente con el
+// hilo principal trabado (assert "BMainLoop stalled") — se ve exactamente
+// como un cuelgue aunque termina solo. Pasa la primera vez que Steam corre
+// este juego en esta máquina/prefix, sea desde acá o desde el launcher.
+const FIRST_LAUNCH_HINT =
+  ' El primer lanzamiento por Steam puede tardar varios minutos (shader cache) y Steam puede parecer ' +
+  'congelado mientras tanto — es normal en un pendrive, no lo cierres.';
+
 async function finishInstall(gameId, gameName, mountPoint) {
   const el = body();
   const info = state.drmCache[gameId];
   const easy = info && info.preservability && info.preservability.kind === "easy";
 
   if (!easy) {
-    el.innerHTML = `<div class="import-result import-result-ok">✓ "${esc(gameName)}" instalado en el cartucho. Jugable desde Steam.${CARTRIDGE_TAB_HINT}</div>`;
+    el.innerHTML = `<div class="import-result import-result-ok">✓ "${esc(gameName)}" instalado en el cartucho. Jugable desde Steam.${FIRST_LAUNCH_HINT}${CARTRIDGE_TAB_HINT}</div>`;
     return;
   }
 
