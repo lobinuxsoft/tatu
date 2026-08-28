@@ -1,4 +1,5 @@
 mod classify;
+mod gog;
 mod hints;
 mod sources;
 mod types;
@@ -13,6 +14,7 @@ mod probe;
 pub use types::{DrmInfo, DrmStatus, Preservability};
 
 use classify::{RawDrm, merge};
+use gog::upgrade_if_on_gog;
 #[cfg(unix)]
 use probe::upgrade_from_installed_files;
 use sources::{fetch_from_pcgamingwiki, fetch_from_steam};
@@ -21,11 +23,13 @@ use sources::{fetch_from_pcgamingwiki, fetch_from_steam};
 /// PCGamingWiki and merging the results with a Steam-copy-centric heuristic.
 pub fn fetch_drm_info(app_id: u64) -> Result<DrmInfo, String> {
     let mut raw = RawDrm::default();
+    let mut steam_name = None;
 
-    if let Some((notice, account)) = fetch_from_steam(app_id) {
-        raw.steam_drm_notice = notice;
-        raw.steam_account_notice = account;
+    if let Some(steam) = fetch_from_steam(app_id) {
+        raw.steam_drm_notice = steam.drm_notice;
+        raw.steam_account_notice = steam.account_notice;
         raw.steam_store_ok = true;
+        steam_name = steam.name;
     }
 
     if let Some(pcgw) = fetch_from_pcgamingwiki(app_id) {
@@ -46,6 +50,13 @@ pub fn fetch_drm_info(app_id: u64) -> Result<DrmInfo, String> {
     // already installed locally, its own files can settle it (#238).
     #[cfg(unix)]
     let info = upgrade_from_installed_files(app_id, info);
+    // Still Unknown? PCGamingWiki not having an entry says nothing about
+    // whether the game is actually sold DRM-free on GOG — ask GOG's own
+    // catalog directly (#237).
+    let info = match steam_name {
+        Some(name) => upgrade_if_on_gog(&name, info),
+        None => info,
+    };
     Ok(info)
 }
 
