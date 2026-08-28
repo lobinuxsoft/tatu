@@ -4,9 +4,17 @@ mod sources;
 mod types;
 mod vendors;
 
+// find_install_path (steam::exe) that this depends on isn't ported to
+// Windows yet — same story as cartridge::format/symlinks. Windows just
+// keeps relying on the network sources alone until that lands.
+#[cfg(unix)]
+mod probe;
+
 pub use types::{DrmInfo, DrmStatus, Preservability};
 
 use classify::{RawDrm, merge};
+#[cfg(unix)]
+use probe::upgrade_from_installed_files;
 use sources::{fetch_from_pcgamingwiki, fetch_from_steam};
 
 /// Fetch DRM information for a Steam app ID, querying Steam Store and
@@ -33,7 +41,12 @@ pub fn fetch_drm_info(app_id: u64) -> Result<DrmInfo, String> {
         return Err("Both Steam Store and PCGamingWiki requests failed".into());
     }
 
-    Ok(merge(raw, now_secs()))
+    let info = merge(raw, now_secs());
+    // A network Unknown isn't necessarily a dead end — if the game is
+    // already installed locally, its own files can settle it (#238).
+    #[cfg(unix)]
+    let info = upgrade_from_installed_files(app_id, info);
+    Ok(info)
 }
 
 fn now_secs() -> u64 {

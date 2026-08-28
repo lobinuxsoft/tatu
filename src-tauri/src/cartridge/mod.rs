@@ -8,6 +8,7 @@ mod goldberg;
 mod install;
 mod launcher;
 mod marker;
+mod prepare;
 mod runtime;
 mod usage;
 
@@ -36,6 +37,7 @@ pub use install::{
 };
 pub use launcher::install_launcher_binaries;
 pub use marker::{CartridgeApp, has_cartridge_structure, list_apps};
+pub use prepare::{PrepareDrmResult, refresh_drm_and_inject};
 pub use runtime::bundle_linux_runtime;
 #[cfg(unix)]
 pub use symlinks::ensure_symlinks;
