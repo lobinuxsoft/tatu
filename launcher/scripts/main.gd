@@ -377,6 +377,28 @@ func _build_layout() -> void:
 	_action_overlay.add_child(_action_status)
 	add_child(_action_overlay)
 
+	add_child(_build_info_label())
+
+## Small, dim corner label showing exactly which build is on screen —
+## `<version>+g<commit>[-dirty]`, written by `launcher/export.sh` into
+## `build_info.txt` right before each export. Added after repeatedly
+## confusing a stale cached binary for a just-fixed one during live
+## testing with no way to tell them apart on screen. Missing file (a
+## debug run straight from the editor, not an exported build) just shows
+## nothing rather than an error — this is diagnostic, never load-bearing.
+func _build_info_label() -> Label:
+	var label := Label.new()
+	label.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	label.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	label.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	label.offset_left = -160
+	label.offset_top = -24
+	label.modulate = Color(1, 1, 1, 0.35)
+	label.add_theme_font_size_override("font_size", 12)
+	var path := "res://build_info.txt"
+	label.text = FileAccess.get_file_as_string(path).strip_edges() if FileAccess.file_exists(path) else ""
+	return label
+
 ## A strip pinned to the given edge (PRESET_LEFT_WIDE or PRESET_RIGHT_WIDE),
 ## rendering whatever is already on screen behind it — blurred and tinted —
 ## via glass_panel.gdshader, added AFTER the carousel so that shader's
@@ -725,6 +747,17 @@ func _launch_via_proton(app_id: int, app_name: String, exe_path: String) -> void
 ## require it closed), writes a minimal entry to both copies of the file,
 ## then reopens it.
 ##
+## ALWAYS runs the full stop/edit/restart cycle, even if the path is already
+## in `libraryfolders.vdf` — Steam periodically re-validates removable-media
+## libraries on its own and can mark one "not mounted" in memory (confirmed
+## live in this machine's own `content_log.txt`, taking down an unrelated
+## real external library at the same moment, not something this code
+## caused) without ever rewriting the file to say so. A file-only "already
+## registered" check can't tell that apart from a genuinely healthy one, so
+## it's not trustworthy here — only a real restart reliably fixes it, and
+## this is a deliberate, infrequent, user-triggered action, not something
+## that runs on its own.
+##
 ## Deliberately does NOT also fire `steam://rungameid/<id>` to auto-launch
 ## anything — Steam's own startup time is unpredictable enough (can run
 ## into the tens of seconds on a cold start) that firing it right after
@@ -737,15 +770,6 @@ func _launch_via_steam() -> void:
 	if steam_dir.is_empty():
 		await _show_status("No se encontró una instalación de Steam en esta máquina", 2.5)
 		return
-
-	var config_vdf := steam_dir.path_join("config/libraryfolders.vdf")
-	if FileAccess.file_exists(config_vdf):
-		var already: Array = load("res://scripts/steam_library.gd").registered_paths(
-			FileAccess.get_file_as_string(config_vdf)
-		)
-		if already.has(mount_point):
-			await _show_status("Este cartucho ya está en tu biblioteca de Steam", 2.5)
-			return
 
 	_action_status.text = "Registrando el cartucho en Steam..."
 	_action_overlay.visible = true
