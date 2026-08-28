@@ -248,6 +248,18 @@ pub async fn mount_cartridge(device: String) -> Result<String, String> {
     cartridge::mount_cartridge(&device).await
 }
 
+/// Exempts this cartridge's NTFS device from udisks2's default
+/// `windows_names` mount option, which otherwise blocks the `:` in
+/// Proton's own `dosdevices/c:` symlink — every Proton launch (Steam-native
+/// or the standalone launcher) fails to create its wineprefix without this.
+/// Idempotent per device UUID; part of "Preparar launcher" so both new and
+/// already-formatted cartridges get it.
+#[cfg(unix)]
+#[tauri::command]
+pub async fn ensure_symlinks(mount_point: String) -> Result<bool, String> {
+    cartridge::ensure_symlinks(Path::new(&mount_point)).await
+}
+
 /// Forces `app_id` onto Proton in Steam's own `config.vdf` — needed when
 /// Steam installed the app's native Linux build onto the cartridge instead
 /// of the Windows one it actually needs (#206). Requires Steam closed, same

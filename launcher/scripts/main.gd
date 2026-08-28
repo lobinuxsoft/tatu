@@ -684,6 +684,12 @@ func _show_status(text: String, seconds: float) -> void:
 	await get_tree().create_timer(seconds).timeout
 	_action_overlay.visible = false
 
+## Single-quotes `s` for `/bin/sh -c`, escaping any embedded single quote —
+## paths here come from the marker/cartridge layout, not untrusted input,
+## but "Alabaster Dawn"-style spaces make quoting mandatory regardless.
+func _sh_quote(s: String) -> String:
+	return "'" + s.replace("'", "'\\''") + "'"
+
 ## Runs a Goldberg-patched exe through umu-run (#206) — adopted rather than
 ## hand-rolling a Proton invocation: it replicates Steam's own runtime
 ## container so the game behaves the same as it would through Steam,
@@ -720,7 +726,17 @@ func _launch_via_proton(app_id: int, app_name: String, exe_path: String) -> void
 	# launcher has no business mixing its bundled runtime into it.
 	OS.set_environment("UMU_FOLDERS_PATH", _tatu_local_dir())
 
-	var pid := OS.create_process(_tatu_local_dir().path_join("umu-run"), [exe_path])
+	# `create_process` has no working_directory parameter (Godot 4.7's OS
+	# class never grew one) — without this, umu-run and the game inherit
+	# this launcher's own CWD instead of the game's install folder. Steam
+	# itself always launches with CWD = install dir, and Goldberg's
+	# steam_appid.txt lookup falls back to exactly that path when it's not
+	# under steam_settings/, so a wrong CWD here silently breaks standalone
+	# Goldberg games without touching a single one of their files.
+	var install_dir := exe_path.get_base_dir()
+	var umu_run := _tatu_local_dir().path_join("umu-run")
+	var cmd := "cd %s && exec %s %s" % [_sh_quote(install_dir), _sh_quote(umu_run), _sh_quote(exe_path)]
+	var pid := OS.create_process("/bin/sh", ["-c", cmd])
 	if pid <= 0:
 		push_warning("Failed to launch app %d via umu-run" % app_id)
 		await _show_status("No se pudo lanzar %s" % app_name, 2.5)
@@ -778,6 +794,13 @@ func _launch_via_steam() -> void:
 
 	await _stop_steam()
 
+	# A PC that never ran Tatu still auto-mounts this cartridge through
+	# udisks2, so the fix can't live only in Tatu's UI — it has to travel
+	# with the launcher. After `_stop_steam` so the drive isn't busy when
+	# this remounts it (see `_ensure_ntfs_symlinks`'s own header).
+	if OS.get_name() != "Windows":
+		await _ensure_ntfs_symlinks()
+
 	for rel in ["config/libraryfolders.vdf", "steamapps/libraryfolders.vdf"]:
 		var path := steam_dir.path_join(rel)
 		if not FileAccess.file_exists(path):
@@ -791,9 +814,62 @@ func _launch_via_steam() -> void:
 		f.close()
 
 	_start_steam(steam_dir)
-	_action_status.text = "Abriendo Steam..."
-	await get_tree().create_timer(2.0).timeout
+	# Live-tested (2026-08-28): Steam's own shader-cache download+commit for a
+	# freshly-launched app on a USB cartridge took ~10 minutes and stalled the
+	# client's main thread the whole time — looks exactly like a hang. Only
+	# fires the first time Steam runs this app on this machine/prefix, but
+	# this overlay is gone by then (launcher already quit), so the warning
+	# has to land here, before that.
+	_action_status.text = "Abriendo Steam... el primer lanzamiento de cada juego puede tardar varios minutos (shader cache) — no lo cierres aunque parezca colgado."
+	await get_tree().create_timer(4.0).timeout
 	get_tree().quit()
+
+## udisks2 forces `windows_names` onto every NTFS drive it automounts by
+## default (storaged-project/udisks#620) — it forbids the `:` in Wine's own
+## `dosdevices/c:` symlink, so Proton's own prefix creation fails with
+## EINVAL. Confirmed live on the desktop app (`cartridge/symlinks.rs`);
+## reimplemented here in plain shell calls (no D-Bus binding available in
+## GDScript) because a PC this cartridge is plugged into for the first
+## time may never have had Tatu installed at all — the fix has to be
+## self-contained in the one binary guaranteed to be there.
+## Idempotent (checks the conf before touching it) and best-effort: any
+## failure just leaves Steam's launch to fail the way it always did before
+## this existed, same as if this function didn't run.
+func _ensure_ntfs_symlinks() -> void:
+	var mount_point := _cartridge_root()
+	var uuid_out := []
+	OS.execute("findmnt", ["-no", "UUID", mount_point], uuid_out)
+	var uuid := String(uuid_out[0] if uuid_out.size() > 0 else "").strip_edges()
+	var source_out := []
+	OS.execute("findmnt", ["-no", "SOURCE", mount_point], source_out)
+	var source := String(source_out[0] if source_out.size() > 0 else "").strip_edges()
+	if uuid.is_empty() or source.is_empty():
+		return
+
+	var conf_path := "/etc/udisks2/mount_options.conf"
+	var marker := "[/dev/disk/by-uuid/%s]" % uuid
+	var existing := FileAccess.get_file_as_string(conf_path) if FileAccess.file_exists(conf_path) else ""
+	if existing.contains(marker):
+		return
+
+	_action_status.text = "Habilitando symlinks NTFS para Proton (puede pedir tu contraseña de administrador)..."
+	await get_tree().process_frame
+
+	var tmp := OS.get_cache_dir().path_join("tatu-mount-options-%s.conf" % uuid)
+	var f := FileAccess.open(tmp, FileAccess.WRITE)
+	f.store_string("%s\n%s\nntfs_defaults=uid=$UID,gid=$GID\n" % [existing, marker])
+	f.close()
+
+	# pkexec pops a graphical polkit prompt and blocks until it's answered —
+	# fine here, this whole function already runs behind the "Registrando
+	# el cartucho en Steam..." overlay the caller set up.
+	OS.execute("pkexec", ["install", "-m", "0644", tmp, conf_path])
+	DirAccess.remove_absolute(tmp)
+
+	# Remounts at the same path for this label — verified live, same as
+	# the manual `udisksctl unmount`/`mount` cycle this replicates.
+	OS.execute("udisksctl", ["unmount", "-b", source])
+	OS.execute("udisksctl", ["mount", "-b", source])
 
 ## Linux: `~/.local/share/Steam` or the older `~/.steam/steam` symlink
 ## target. Windows: the one non-elevated, no-registry-access location a

@@ -17,6 +17,11 @@ mod usage;
 #[cfg(unix)]
 mod format;
 
+// Same story as `format` above: the udisks2 mount-options fix only applies
+// to Linux's own automounter. Windows never routes NTFS through udisks2.
+#[cfg(unix)]
+mod symlinks;
+
 pub use assets::{
     fetch_cartridge_art, fetch_cartridge_description, fetch_cartridge_screenshots,
     fetch_cartridge_trailer,
@@ -32,6 +37,8 @@ pub use install::{
 pub use launcher::install_launcher_binaries;
 pub use marker::{CartridgeApp, has_cartridge_structure, list_apps};
 pub use runtime::bundle_linux_runtime;
+#[cfg(unix)]
+pub use symlinks::ensure_symlinks;
 pub use usage::{CartridgeUsage, usage};
 
 // CartridgeMarker/read_marker/MARKER_FILENAME stay private — nothing outside

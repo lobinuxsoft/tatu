@@ -138,6 +138,7 @@ pub fn run() {
                 commands::cheat_search_cmd::open_fearless_search,
                 commands::cartridge_cmd::format_as_cartridge,
                 commands::cartridge_cmd::mount_cartridge,
+                commands::cartridge_cmd::ensure_symlinks,
                 commands::cartridge_cmd::force_proton_compat,
             ])
     };
