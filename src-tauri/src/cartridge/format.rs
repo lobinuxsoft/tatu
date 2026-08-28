@@ -42,20 +42,60 @@ pub async fn format_as_cartridge(
     let client = udisks2::Client::new()
         .await
         .map_err(|e| format!("Cannot connect to udisks2: {e}"))?;
-    let (object, block) = find_block(&client, device).await?;
+    let (object, _block) = find_block(&client, device).await?;
 
-    let mut options: HashMap<&str, Value> = HashMap::new();
-    options.insert("label", Value::from(CARTRIDGE_LABEL));
-    options.insert("update-partition-type", Value::from(true));
-    options.insert("take-ownership", Value::from(true));
-    block
-        .format("ntfs", options)
+    // `device` may already be a partition rather than the whole disk — a
+    // drive that already carries a filesystem (re-formatting an existing
+    // cartridge) or one that shipped from the factory with extra partitions
+    // (observed live: a Kingston DataTraveler with its own 100MB/300KB
+    // vendor partitions alongside the main one) reports its filesystem-
+    // carrying partition here, per `list_removable_drives`'s own doc
+    // comment. Formatting just that partition in place would silently
+    // leave any other partition, or unpartitioned space past it, never
+    // reclaimed — exactly what happened live (a 28.9GB drive ending up
+    // with only 9.1GB usable). Always operate on the whole disk instead.
+    let (disk_object, disk_block) = whole_disk(&client, &object).await?;
+
+    // `tear-down` below only drops fstab/crypttab tracking — it does NOT
+    // unmount an actively mounted partition (confirmed live: wiping a disk
+    // with its own data partition still mounted just hangs, no error, no
+    // udisks2 Job ever appears). Any partition this disk already has needs
+    // unmounting by hand first, same as re-formatting an existing cartridge
+    // whose filesystem the caller (or Steam, scanning it as a library) still
+    // has open.
+    unmount_existing_partitions(&client, &disk_object).await;
+
+    // Wipe whatever partition table (or none) is currently there and lay
+    // down a fresh, empty one — `tear-down` also drops any stale fstab/
+    // crypttab tracking left over from a previous life as something else.
+    let mut wipe_options: HashMap<&str, Value> = HashMap::new();
+    wipe_options.insert("tear-down", Value::from(true));
+    disk_block
+        .format("gpt", wipe_options)
         .await
-        .map_err(|e| format!("Format failed: {e}"))?;
+        .map_err(|e| format!("Wiping the partition table failed: {e}"))?;
 
-    // Format leaves the filesystem unmounted — nothing re-inserted the
-    // device to trigger an auto-mount. Mount it ourselves so steamapps/
-    // and the marker can be written.
+    let partition_table = disk_object
+        .partition_table()
+        .await
+        .map_err(|e| format!("No partition table after wiping the disk: {e}"))?;
+
+    let mut format_options: HashMap<&str, Value> = HashMap::new();
+    format_options.insert("label", Value::from(CARTRIDGE_LABEL));
+    format_options.insert("take-ownership", Value::from(true));
+    // offset 0, size 0: per udisks2's own convention, size 0 means "use
+    // every remaining byte on the disk" — the entire point of this rewrite.
+    let partition_path = partition_table
+        .create_partition_and_format(0, 0, "", "", HashMap::new(), "ntfs", format_options)
+        .await
+        .map_err(|e| format!("CreatePartitionAndFormat failed: {e}"))?;
+    let object = client
+        .object(partition_path)
+        .expect("OwnedObjectPath is already a valid object path");
+
+    // CreatePartitionAndFormat leaves the filesystem unmounted — nothing
+    // re-inserted the device to trigger an auto-mount. Mount it ourselves
+    // so steamapps/ and the marker can be written.
     let filesystem = object
         .filesystem()
         .await
@@ -98,6 +138,58 @@ pub async fn mount_cartridge(device: &str) -> Result<String, String> {
         .mount(HashMap::new())
         .await
         .map_err(|e| format!("Mount failed: {e}"))
+}
+
+/// Unmounts every currently-mounted partition already on `disk_object`,
+/// best-effort — a blank drive has no partition table at all (nothing to
+/// do), and a partition with no filesystem interface or that's already
+/// unmounted just errors on the attempt, which is exactly the outcome
+/// wanted either way. Never returns an error itself: the caller's own
+/// `format()` call is what actually needs to succeed, not this cleanup.
+async fn unmount_existing_partitions(client: &udisks2::Client, disk_object: &udisks2::Object) {
+    let Ok(partition_table) = disk_object.partition_table().await else {
+        return;
+    };
+    let Ok(partitions) = partition_table.partitions().await else {
+        return;
+    };
+    for path in partitions {
+        let partition_object = client
+            .object(path)
+            .expect("OwnedObjectPath is already a valid object path");
+        let Ok(filesystem) = partition_object.filesystem().await else {
+            continue;
+        };
+        let _ = filesystem.unmount(HashMap::new()).await;
+    }
+}
+
+/// Resolves `object` to the whole-disk `Object`/`BlockProxy` pair, following
+/// `Partition.Table` up to the parent block device if `object` turns out to
+/// be a partition rather than the disk itself.
+async fn whole_disk(
+    client: &udisks2::Client,
+    object: &udisks2::Object,
+) -> Result<(udisks2::Object, BlockProxy<'static>), String> {
+    let Ok(partition) = object.partition().await else {
+        let block = object
+            .block()
+            .await
+            .map_err(|e| format!("No block interface on the disk: {e}"))?;
+        return Ok((object.clone(), block));
+    };
+    let table_path = partition
+        .table()
+        .await
+        .map_err(|e| format!("Cannot read the partition's table property: {e}"))?;
+    let disk_object = client
+        .object(table_path)
+        .expect("OwnedObjectPath is already a valid object path");
+    let disk_block = disk_object
+        .block()
+        .await
+        .map_err(|e| format!("No block interface on the whole disk: {e}"))?;
+    Ok((disk_object, disk_block))
 }
 
 /// Locate the `Object`/`BlockProxy` pair for a device path (e.g. `/dev/sdb1`)

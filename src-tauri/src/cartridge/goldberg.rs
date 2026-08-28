@@ -53,11 +53,32 @@ pub fn inject_goldberg(
             install_dir.display()
         ));
     }
-    for original in dll64 {
+    for original in &dll64 {
         swap_dll(original, template_x64)?;
     }
-    for original in dll32 {
+    for original in &dll32 {
         swap_dll(original, template_x86)?;
+    }
+
+    // gbe_fork checks `steam_settings/steam_appid.txt` NEXT TO THE DLL first,
+    // falling back to the exe's own run path only if that's absent — without
+    // this folder, some builds fail SteamAPI_Init silently (no crash, no
+    // window, no error) instead of falling back cleanly. Root-level
+    // steam_appid.txt below covers the run-path fallback for whichever
+    // process actually ends up as CWD.
+    for original in dll64.iter().chain(dll32.iter()) {
+        let Some(dll_dir) = original.parent() else {
+            continue;
+        };
+        let settings_dir = dll_dir.join("steam_settings");
+        fs::create_dir_all(&settings_dir)
+            .map_err(|e| format!("Cannot create {}: {e}", settings_dir.display()))?;
+        fs::write(settings_dir.join("steam_appid.txt"), app_id.to_string()).map_err(|e| {
+            format!(
+                "Cannot write {}: {e}",
+                settings_dir.join("steam_appid.txt").display()
+            )
+        })?;
     }
 
     fs::write(install_dir.join("steam_appid.txt"), app_id.to_string())
@@ -259,6 +280,25 @@ mod tests {
         let marker = read_marker(dir.path()).unwrap();
         assert!(marker.apps[0].standalone);
         assert_eq!(marker.apps[0].exe_path, "steamapps/common/DOOM/DOOM.exe");
+    }
+
+    #[test]
+    fn injection_writes_steam_settings_next_to_the_dll() {
+        let dir = tempfile::tempdir().unwrap();
+        let (x86, x64) = setup_cartridge_with_app(dir.path(), 379720, "DOOM");
+        let install_dir = dir.path().join("steamapps").join("common").join("DOOM");
+        fs::write(install_dir.join("steam_api64.dll"), b"real steam api").unwrap();
+        fs::write(install_dir.join("DOOM.exe"), vec![0u8; 1024]).unwrap();
+
+        inject_goldberg(dir.path(), 379720, Preservability::Easy, &x86, &x64).unwrap();
+
+        // gbe_fork reads this location before its exe-run-path fallback —
+        // without it, SteamAPI_Init can fail silently (#228 live incident:
+        // no window, no crash, no error).
+        assert_eq!(
+            fs::read_to_string(install_dir.join("steam_settings").join("steam_appid.txt")).unwrap(),
+            "379720"
+        );
     }
 
     #[test]

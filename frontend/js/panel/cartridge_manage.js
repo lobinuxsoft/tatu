@@ -1,5 +1,6 @@
 import { invoke } from "../tauri.js";
 import { esc, formatBytes } from "../utils.js";
+import { renderFormatConfirm } from "../modals/format_cartridge.js";
 
 // Short labels for the same Preservability kinds the Steam tab's filter
 // buttons already use (see index.html's #presRow) — no need for a second
@@ -24,47 +25,63 @@ export async function openCartridgeManagePanel() {
   await showDriveList();
 }
 
+// Lists EVERY removable drive, cartridge or not (#232) — formatting used to
+// only be reachable through a specific game's "Instalar en un cartucho"
+// modal, which meant there was no direct way to just turn a blank drive
+// into a cartridge (or wipe and redo one) without that detour.
 async function showDriveList() {
   const el = body();
   el.innerHTML = `<div class="loading"><div class="spinner"></div><br>Buscando discos...</div>`;
   try {
     const drives = await invoke("list_removable_drives");
-    const ready = [];
+    const withStatus = [];
     for (const drive of drives) {
-      if (drive.mount_point && (await invoke("has_cartridge_structure", { mountPoint: drive.mount_point }))) {
-        ready.push(drive);
-      }
+      const isCartridge =
+        !!drive.mount_point && (await invoke("has_cartridge_structure", { mountPoint: drive.mount_point }));
+      withStatus.push({ drive, isCartridge });
     }
 
-    if (!ready.length) {
-      el.innerHTML =
-        `<div class="cartridge-warn">No hay ningún cartucho ya armado conectado. ` +
-        `Instalá al menos un juego en un cartucho desde su ficha (botón "Instalar en cartucho") primero.</div>`;
+    if (!withStatus.length) {
+      el.innerHTML = `<div class="cartridge-warn">No hay ningún disco removible conectado.</div>`;
       return;
     }
 
-    if (ready.length === 1) {
-      await showCartridge(ready[0]);
-      return;
-    }
-
-    let html = `<div class="cartridge-guide">Elegí el cartucho a preparar:</div>`;
-    for (const drive of ready) {
+    let html = `<div class="cartridge-guide">Elegí un disco — los ya armados abren su gestión, el resto se puede formatear como cartucho nuevo:</div>`;
+    for (const { drive, isCartridge } of withStatus) {
       html +=
         `<div class="collection-row" data-id="${esc(drive.id)}">` +
         `<span class="collection-name">${esc(drive.label || "Sin nombre")}</span>` +
-        `<span class="collection-count">${formatBytes(drive.total_bytes)}</span></div>`;
+        `<span class="collection-count">${formatBytes(drive.total_bytes)}${isCartridge ? " · Cartucho" : " · Sin formatear"}</span></div>`;
     }
     el.innerHTML = html;
     el.onclick = e => {
       const row = e.target.closest(".collection-row");
       if (!row) return;
-      const picked = ready.find(d => d.id === row.dataset.id);
-      if (picked) showCartridge(picked);
+      const picked = withStatus.find(d => d.drive.id === row.dataset.id);
+      if (!picked) return;
+      if (picked.isCartridge) {
+        showCartridge(picked.drive);
+      } else {
+        showFormatConfirm(picked.drive);
+      }
     };
   } catch (e) {
     el.innerHTML = `<div class="cartridge-warn">Error al leer discos: ${esc(String(e))}</div>`;
   }
+}
+
+function showFormatConfirm(drive) {
+  const el = body();
+  renderFormatConfirm(el, drive, {
+    onCancel: () => showDriveList(),
+    onSuccess: fresh => showCartridge(fresh),
+    onError: msg => {
+      el.innerHTML =
+        `<div class="cartridge-warn">${esc(msg)}</div>` +
+        `<div class="cartridge-actions"><button class="cartridge-btn-secondary" id="cartFormatBack">Volver</button></div>`;
+      document.getElementById("cartFormatBack").onclick = () => showDriveList();
+    },
+  });
 }
 
 async function showCartridge(drive) {
@@ -160,11 +177,16 @@ function renderCartridge(drive, apps, usage) {
     `<input type="checkbox" id="cartIncludeTrailers"> Incluir trailers (pesa más, tarda más por juego)</label>` +
     `<div class="cartridge-actions">` +
     `<button class="cartridge-btn-secondary" id="cartManageBack">Volver a discos</button>` +
+    // Reachable even though this drive is already a cartridge (#232) — the
+    // only way to wipe and redo one before this was unplugging it and
+    // re-triggering the per-game install flow from scratch.
+    `<button class="cartridge-btn-secondary" id="cartReformatBtn">Reformatear</button>` +
     `<button class="cartridge-btn" id="cartPrepareBtn">Preparar launcher</button>` +
     `</div>` +
     `<div id="cartPrepareResult"></div>`;
 
   document.getElementById("cartManageBack").onclick = () => showDriveList();
+  document.getElementById("cartReformatBtn").onclick = () => showFormatConfirm(drive);
   document.getElementById("cartPrepareBtn").onclick = () =>
     prepareLauncher(drive, apps, document.getElementById("cartIncludeTrailers").checked);
 }
@@ -191,7 +213,24 @@ async function prepareLauncher(drive, apps, includeTrailers) {
   backBtn.disabled = true;
   prepareBtn.disabled = true;
 
+  let symlinkWarning = "";
   try {
+    // Fixes Proton itself, not just standalone/Goldberg — Steam-native
+    // Proton launches from the cartridge fail the exact same way without
+    // this. Unix-only (Windows never routes NTFS through udisks2), so a
+    // "not found" here just means the platform doesn't need it.
+    setStatus("Habilitando symlinks NTFS para Proton (puede pedir tu contraseña de administrador)...");
+    try {
+      await invoke("ensure_symlinks", { mountPoint });
+    } catch (e) {
+      const raw = String(e);
+      if (!/not found|unknown command/i.test(raw)) {
+        symlinkWarning =
+          `<div class="cartridge-warn">No se pudo habilitar symlinks NTFS — los juegos con Proton ` +
+          `pueden no arrancar: ${esc(raw)}</div>`;
+      }
+    }
+
     setStatus("Copiando el launcher (Linux + Windows)...");
     await invoke("install_launcher_binaries", { mountPoint });
 
@@ -226,7 +265,8 @@ async function prepareLauncher(drive, apps, includeTrailers) {
 
     result.innerHTML =
       `<div class="import-result import-result-ok">✓ Cartucho listo — launcher instalado ` +
-      `para Linux y Windows, ${apps.length} juego(s) preparados.</div>`;
+      `para Linux y Windows, ${apps.length} juego(s) preparados.</div>` +
+      symlinkWarning;
 
     // Space just moved a lot (runtime bundled, art/screenshots/trailers
     // downloaded) — the bar chart drawn before this run started is stale.
