@@ -100,10 +100,9 @@ func _init() -> void:
 func _ready() -> void:
 	pressed.connect(func() -> void: clicked.emit(index))
 
-func setup(i: int, display_name: String, art_path: String) -> void:
+func setup(i: int, display_name: String) -> void:
 	index = i
 	_name_label.text = display_name
-	_load_art(art_path)
 
 ## Sizes this card off a target HEIGHT, deriving width from ASPECT_RATIO —
 ## called by the carousel whenever the window/carousel area is resized, so
@@ -132,7 +131,12 @@ func set_selected(selected: bool) -> void:
 
 ## The name overlay stays visible whether or not art loads — a card with art
 ## still needs its title readable at a glance, same as Steam's own capsules.
-func _load_art(path: String) -> void:
+##
+## Split out of `setup()` — the carousel (main.gd) spreads this decode
+## across frames instead of doing it for every card up front, which used to
+## block the launcher's first frame for as long as the whole library's cover
+## art took to read and decode off the cartridge (#249).
+func load_art(path: String) -> void:
 	if path.is_empty():
 		return
 	var image := Image.new()
