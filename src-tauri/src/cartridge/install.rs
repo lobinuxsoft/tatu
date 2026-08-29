@@ -7,7 +7,7 @@ use crate::drm::Preservability;
 use crate::steam::library_paths;
 
 use super::drives::list_removable_drives;
-use super::marker::{CartridgeApp, add_app, has_cartridge_structure};
+use super::marker::{CartridgeApp, add_app, has_cartridge_structure, list_apps};
 
 /// Steam's own client owns everything from here: download, EULA, its own
 /// disk-selection prompt if more than one library qualifies.
@@ -63,6 +63,68 @@ pub fn poll_install_status(
         },
     )?;
     Ok(true)
+}
+
+/// Reconciles the marker against every appmanifest actually present on the
+/// cartridge. `poll_install_status` above is the ONLY thing that ever
+/// writes a new app into the marker — installing a second game directly
+/// through Steam's own UI (rather than this app's per-game "Instalar en un
+/// cartucho" flow), once the cartridge is already a registered Steam
+/// library, never touches the marker at all. Live case (2026-08-29):
+/// CrossCode installed and fully playable via Steam, invisible everywhere
+/// in Tatu because nothing had ever recorded it.
+///
+/// Only ADDS apps the marker doesn't already know about — an already-
+/// tracked app's own classification/standalone state is left untouched,
+/// that refresh is `cartridge::refresh_drm_and_inject`'s job (#238/#239).
+pub fn sync_marker_with_installed_apps(mount_point: &Path) -> Result<(), String> {
+    let Ok(entries) = fs::read_dir(mount_point.join("steamapps")) else {
+        return Ok(());
+    };
+
+    let known: std::collections::HashSet<u64> = list_apps(mount_point)
+        .map(|apps| apps.iter().map(|a| a.app_id).collect())
+        .unwrap_or_default();
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(app_id) = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .and_then(|n| n.strip_prefix("appmanifest_"))
+            .and_then(|n| n.strip_suffix(".acf"))
+            .and_then(|n| n.parse::<u64>().ok())
+        else {
+            continue;
+        };
+        if known.contains(&app_id) {
+            continue;
+        }
+
+        let Ok(content) = fs::read_to_string(&path) else {
+            continue;
+        };
+        // Same "fully installed" definition poll_install_status already
+        // uses above — a manifest existing mid-download shouldn't get
+        // recorded as a real, playable app yet.
+        if acf_field(&content, "StateFlags").and_then(|f| f.parse::<u32>().ok()) != Some(4) {
+            continue;
+        }
+        let name = acf_field(&content, "name").unwrap_or_else(|| format!("App {app_id}"));
+
+        add_app(
+            mount_point,
+            CartridgeApp {
+                app_id,
+                name,
+                preservability: Preservability::default(),
+                standalone: false,
+                exe_path: String::new(),
+            },
+        )?;
+    }
+
+    Ok(())
 }
 
 /// Finds a currently-connected cartridge that already has `app_id`'s Steam
@@ -212,6 +274,78 @@ mod tests {
         let done =
             poll_install_status(379720, dir.path(), "DOOM", Preservability::Trivial).unwrap();
         assert!(!done);
+
+        let marker = read_marker(dir.path()).unwrap();
+        assert!(marker.apps.is_empty());
+    }
+
+    #[test]
+    fn sync_adds_an_app_installed_outside_tatu() {
+        let dir = tempfile::tempdir().unwrap();
+        write_marker(dir.path()).unwrap();
+        let steamapps = dir.path().join("steamapps");
+        fs::create_dir_all(&steamapps).unwrap();
+        // No add_app call for this one at all — same as installing a second
+        // game straight through Steam's own UI, live case (2026-08-29).
+        fs::write(
+            steamapps.join("appmanifest_368340.acf"),
+            r#""AppState" { "appid" "368340" "name" "CrossCode" "installdir" "CrossCode" "StateFlags" "4" }"#,
+        )
+        .unwrap();
+
+        sync_marker_with_installed_apps(dir.path()).unwrap();
+
+        let marker = read_marker(dir.path()).unwrap();
+        assert_eq!(marker.apps.len(), 1);
+        assert_eq!(marker.apps[0].app_id, 368340);
+        assert_eq!(marker.apps[0].name, "CrossCode");
+        assert_eq!(marker.apps[0].preservability, Preservability::Unknown);
+    }
+
+    #[test]
+    fn sync_leaves_an_already_tracked_app_untouched() {
+        let dir = tempfile::tempdir().unwrap();
+        write_marker(dir.path()).unwrap();
+        let steamapps = dir.path().join("steamapps");
+        fs::create_dir_all(&steamapps).unwrap();
+        fs::write(
+            steamapps.join("appmanifest_1.acf"),
+            r#""AppState" { "appid" "1" "name" "Old Name" "StateFlags" "4" }"#,
+        )
+        .unwrap();
+        add_app(
+            dir.path(),
+            CartridgeApp {
+                app_id: 1,
+                name: "Already Tracked".to_string(),
+                preservability: Preservability::Easy,
+                standalone: true,
+                exe_path: "steamapps/common/Game/game.exe".to_string(),
+            },
+        )
+        .unwrap();
+
+        sync_marker_with_installed_apps(dir.path()).unwrap();
+
+        let marker = read_marker(dir.path()).unwrap();
+        assert_eq!(marker.apps.len(), 1);
+        assert_eq!(marker.apps[0].name, "Already Tracked");
+        assert!(marker.apps[0].standalone);
+    }
+
+    #[test]
+    fn sync_ignores_a_mid_download_manifest() {
+        let dir = tempfile::tempdir().unwrap();
+        write_marker(dir.path()).unwrap();
+        let steamapps = dir.path().join("steamapps");
+        fs::create_dir_all(&steamapps).unwrap();
+        fs::write(
+            steamapps.join("appmanifest_2.acf"),
+            r#""AppState" { "appid" "2" "name" "Still Downloading" "StateFlags" "1026" }"#,
+        )
+        .unwrap();
+
+        sync_marker_with_installed_apps(dir.path()).unwrap();
 
         let marker = read_marker(dir.path()).unwrap();
         assert!(marker.apps.is_empty());

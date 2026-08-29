@@ -24,4 +24,6 @@ pub use games::{Game, fetch_details_for, fetch_games, fetch_single_detail};
 pub use install::detect_steam_id;
 pub(crate) use install::{library_paths, steam_install_dir};
 #[cfg(unix)]
-pub(crate) use launch_options::{LaunchOptOutcome, force_proton_compat, set_winhttp_override};
+pub(crate) use launch_options::{
+    LaunchOptOutcome, force_proton_compat, set_winhttp_override, stop_steam_for_config_edit,
+};

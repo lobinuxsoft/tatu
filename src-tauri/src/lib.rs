@@ -37,6 +37,7 @@ macro_rules! tracker_handler {
     ($($extra:path),* $(,)?) => {
         tauri::generate_handler![
             commands::state_cmd::get_state,
+            commands::state_cmd::get_game_context,
             commands::state_cmd::get_settings,
             commands::state_cmd::save_settings,
             commands::state_cmd::save_completed,
