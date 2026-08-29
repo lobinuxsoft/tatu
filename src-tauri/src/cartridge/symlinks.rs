@@ -1,8 +1,21 @@
 use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::drives::bytes_to_string;
+
+/// Result of [`ensure_symlinks`] — `mount_point` is always the device's
+/// *current* mount path, which the caller must switch to using for the rest
+/// of its run when `changed` is `true`: the remount below can land the
+/// device at a different path than the one it started at (confirmed live,
+/// #246 — udisks2 appends a numeric suffix when the old mount directory
+/// hasn't finished being cleaned up yet), and every write against the stale
+/// pre-remount path silently no-ops for the rest of "Preparar launcher".
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SymlinksOutcome {
+    pub changed: bool,
+    pub mount_point: PathBuf,
+}
 
 /// udisks2 forces `windows_names` onto every NTFS drive it automounts by
 /// default (storaged-project/udisks#620) — it forbids the `:` in Wine's own
@@ -20,7 +33,7 @@ const CONF_PATH: &str = "/etc/udisks2/mount_options.conf";
 /// launcher" runs. Requires one interactive `pkexec` authorization the
 /// first time per device, since `/etc/udisks2/mount_options.conf` is
 /// root-owned and udisks2 exposes no D-Bus API for editing it.
-pub async fn ensure_symlinks(mount_point: &Path) -> Result<bool, String> {
+pub async fn ensure_symlinks(mount_point: &Path) -> Result<SymlinksOutcome, String> {
     let client = udisks2::Client::new()
         .await
         .map_err(|e| format!("Cannot connect to udisks2: {e}"))?;
@@ -29,7 +42,10 @@ pub async fn ensure_symlinks(mount_point: &Path) -> Result<bool, String> {
     let marker = format!("[/dev/disk/by-uuid/{uuid}]");
     let existing = fs::read_to_string(CONF_PATH).unwrap_or_default();
     if existing.contains(&marker) {
-        return Ok(false);
+        return Ok(SymlinksOutcome {
+            changed: false,
+            mount_point: mount_point.to_path_buf(),
+        });
     }
 
     let updated = format!("{existing}\n{marker}\nntfs_defaults=uid=$UID,gid=$GID\n");
@@ -68,7 +84,19 @@ pub async fn ensure_symlinks(mount_point: &Path) -> Result<bool, String> {
         .await
         .map_err(|e| format!("Remount failed: {e}"))?;
 
-    Ok(true)
+    let points = filesystem
+        .mount_points()
+        .await
+        .map_err(|e| format!("Cannot read the new mount point: {e}"))?;
+    let new_mount_point = points
+        .first()
+        .map(|p| PathBuf::from(bytes_to_string(p)))
+        .ok_or_else(|| "Device did not report a mount point after remounting".to_string())?;
+
+    Ok(SymlinksOutcome {
+        changed: true,
+        mount_point: new_mount_point,
+    })
 }
 
 /// Finds the udisks2 object mounted at `mount_point` and reads its device

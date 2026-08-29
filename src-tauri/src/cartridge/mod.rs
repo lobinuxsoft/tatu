@@ -40,7 +40,7 @@ pub use marker::{CartridgeApp, has_cartridge_structure, list_apps};
 pub use prepare::{PrepareDrmResult, refresh_drm_and_inject};
 pub use runtime::bundle_linux_runtime;
 #[cfg(unix)]
-pub use symlinks::ensure_symlinks;
+pub use symlinks::{SymlinksOutcome, ensure_symlinks};
 pub use usage::{CartridgeUsage, usage};
 
 // CartridgeMarker/read_marker/MARKER_FILENAME stay private — nothing outside

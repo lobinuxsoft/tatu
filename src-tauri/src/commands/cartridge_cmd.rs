@@ -299,7 +299,7 @@ pub async fn mount_cartridge(device: String) -> Result<String, String> {
 /// already-formatted cartridges get it.
 #[cfg(unix)]
 #[tauri::command]
-pub async fn ensure_symlinks(mount_point: String) -> Result<bool, String> {
+pub async fn ensure_symlinks(mount_point: String) -> Result<cartridge::SymlinksOutcome, String> {
     cartridge::ensure_symlinks(Path::new(&mount_point)).await
 }
 
