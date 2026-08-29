@@ -313,15 +313,6 @@ func _build_layout() -> void:
 	_background_video.visible = false
 	add_child(_background_video)
 
-	# Shown while _update_background's async load (below) is still reading
-	# off the cartridge — a slow USB/NTFS drive made switching selection
-	# feel frozen with no feedback at all (#254).
-	_background_loading = Label.new()
-	_background_loading.text = "Cargando..."
-	_background_loading.set_anchors_preset(Control.PRESET_CENTER)
-	_background_loading.add_theme_font_override("font", load(FONT_BODY))
-	_background_loading.visible = false
-	add_child(_background_loading)
 
 	# The carousel spans the FULL screen — the glass side panels overlay on
 	# top of its edges rather than living in separate side-by-side columns,
@@ -413,6 +404,19 @@ func _build_layout() -> void:
 	_title_labels.append(_action_status)
 	_action_overlay.add_child(_action_status)
 	add_child(_action_overlay)
+
+	# Shown while _update_background's read is still going — a slow USB/NTFS
+	# drive made switching selection feel frozen with no feedback at all
+	# (#254). Built here, not next to the background TextureRect/VideoPlayer
+	# above: an earlier version added it right after those and it rendered
+	# invisible, hidden behind the carousel and side panels drawn later in
+	# the tree (#258) — Control siblings paint back-to-front by add order.
+	_background_loading = Label.new()
+	_background_loading.text = "Cargando..."
+	_background_loading.set_anchors_preset(Control.PRESET_CENTER)
+	_background_loading.add_theme_font_override("font", load(FONT_BODY))
+	_background_loading.visible = false
+	add_child(_background_loading)
 
 	add_child(_build_info_label())
 

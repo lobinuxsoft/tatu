@@ -315,13 +315,17 @@ fn fetch_cartridge_trailer_sync(mount_point: &Path, app_id: u64) -> Result<(), S
     // confirmed live (#212) as `ffmpeg` reading multiple video renditions
     // plus a separately-grouped audio track off the same ambiguous master
     // and interleaving them ("Packet corrupt", "Invalid NAL unit size").
-    // Resolving one concrete ~720p rendition's own video+audio
+    // Resolving one concrete ~480p rendition's own video+audio
     // sub-playlists first sidesteps that entirely, and is a real quality
-    // win too — Steam's own 720p encode beats re-encoding-and-downscaling
-    // its 1080p one ourselves. 720p rather than the full 1080p60 "max"
-    // rendition: Godot's Theora decoder is software-only, and this is
-    // playing behind the launcher's own shader-heavy UI on the same frame
-    // budget — a lower resolution costs noticeably less to decode there.
+    // win too — Steam's own 480p encode beats re-encoding-and-downscaling
+    // a larger one ourselves. 480p rather than 720p (#259): Godot's Theora
+    // decoder is software-only and this plays behind the launcher's own
+    // shader-heavy UI on the same frame budget, but the bigger cost turned
+    // out to be upstream of decoding entirely — `VideoStreamPlayer.play()`
+    // opening a 60-90MB file synchronously froze the whole UI for several
+    // seconds on a slow cartridge (confirmed live: CrossCode's 720p trailer
+    // alone ran 89MB). Cutting the source resolution in half brings that
+    // open cost down by roughly the same fraction the pixel count does.
     let playlist = agent
         .get(&master_url)
         .call()
@@ -344,7 +348,13 @@ fn fetch_cartridge_trailer_sync(mount_point: &Path, app_id: u64) -> Result<(), S
     // from that guess, so `-f ogg` says so explicitly instead. `fps=30`
     // caps decode cost further: the source runs ~60fps despite the
     // playlist's own FRAME-RATE=30 metadata tag (also confirmed live),
-    // more than a background loop behind the UI needs.
+    // more than a background loop behind the UI needs. `scale` is a safety
+    // net, not the primary size cut (#259 already picks a ~480p source
+    // rendition above) — it only engages if a title's HLS manifest offers
+    // nothing at or under 720p, so the fallback-to-smallest branch in
+    // `pick_hls_rendition` doesn't still hand ffmpeg a huge frame; `-2`
+    // keeps the width even (required by most video codecs) while `min(...)`
+    // never upscales a source that's already smaller than 480p.
     let part = dir.join("trailer.ogv.part");
     let output = Command::new("ffmpeg")
         .args([
@@ -358,7 +368,7 @@ fn fetch_cartridge_trailer_sync(mount_point: &Path, app_id: u64) -> Result<(), S
             "-map",
             "1:a:0",
             "-vf",
-            "fps=30",
+            "scale=-2:'min(ih,480)',fps=30",
             "-c:v",
             "libtheora",
             "-qscale:v",
@@ -382,7 +392,7 @@ fn fetch_cartridge_trailer_sync(mount_point: &Path, app_id: u64) -> Result<(), S
     fs::rename(&part, &dest).map_err(|e| format!("Cannot finalize trailer file: {e}"))
 }
 
-/// Resolves a modest-quality (largest rendition at or under 720p, falling
+/// Resolves a modest-quality (largest rendition at or under 480p, falling
 /// back to the smallest available if none qualifies) rendition from an HLS
 /// master playlist to direct video and (separately grouped) audio
 /// sub-playlist URLs, both carrying the master's own query string — Steam's
@@ -413,7 +423,7 @@ fn pick_hls_rendition(master_url: &str, playlist: &str) -> Option<(String, Strin
     }
     let video_file = renditions
         .iter()
-        .filter(|(height, _)| *height <= 720)
+        .filter(|(height, _)| *height <= 480)
         .max_by_key(|(height, _)| *height)
         .or_else(|| renditions.iter().min_by_key(|(height, _)| *height))
         .map(|(_, file)| *file)?;
@@ -528,12 +538,12 @@ hls_264_2_video.m3u8\n\
 hls_264_3_video.m3u8\n";
 
     #[test]
-    fn picks_the_720p_rendition_over_1080p() {
+    fn picks_the_480p_rendition_over_720p_and_1080p() {
         let master = "https://video.example/store_trailers/3110760/x/hls_264_master.m3u8?t=123";
         let (video, audio) = pick_hls_rendition(master, REAL_MASTER_PLAYLIST).unwrap();
         assert_eq!(
             video,
-            "https://video.example/store_trailers/3110760/x/hls_264_1_video.m3u8?t=123"
+            "https://video.example/store_trailers/3110760/x/hls_264_2_video.m3u8?t=123"
         );
         assert_eq!(
             audio,
@@ -542,7 +552,7 @@ hls_264_3_video.m3u8\n";
     }
 
     #[test]
-    fn falls_back_to_the_smallest_rendition_when_none_is_720p_or_under() {
+    fn falls_back_to_the_smallest_rendition_when_none_is_480p_or_under() {
         let master = "https://video.example/x/master.m3u8";
         let playlist = "#EXTM3U\n\
 #EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID=\"audio\",URI=\"audio.m3u8\"\n\
