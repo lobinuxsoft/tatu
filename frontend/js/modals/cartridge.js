@@ -145,7 +145,7 @@ async function showRegistrationCheck(gameId, gameName, mountPoint) {
   try {
     const registered = await invoke("is_registered_library", { mountPoint });
     if (registered) {
-      showInstall(gameId, gameName, mountPoint);
+      showVersionChoice(gameId, gameName, mountPoint);
     } else {
       showRegistrationGuide(gameId, gameName, mountPoint);
     }
@@ -167,6 +167,53 @@ function showRegistrationGuide(gameId, gameName, mountPoint) {
   document.getElementById("cartRegBack").onclick = () => showDriveList(gameId, gameName);
   document.getElementById("cartRegDone").onclick = () =>
     showRegistrationCheck(gameId, gameName, mountPoint);
+}
+
+// A cartridge has to work when plugged into another machine's Steam client
+// or the bundled launcher's Proton — Steam's own native Linux build never
+// satisfies either (live case, 2026-08-29: CrossCode installed native,
+// Goldberg's own steam_api swap never had a .exe to mark standalone
+// against). Windows/Proton is the default every time, but still asked
+// per-game rather than forced silently, per the user's own "por las
+// dudas" — some game might have a real reason to want the native build.
+function showVersionChoice(gameId, gameName, mountPoint) {
+  const el = body();
+  el.innerHTML =
+    `<div class="cartridge-guide">¿Qué versión instalar?</div>` +
+    `<div class="cartridge-actions">` +
+    `<button class="cartridge-btn" id="cartVerProton">Windows / Proton (recomendado)</button>` +
+    `<button class="cartridge-btn-secondary" id="cartVerNative">Nativa de este sistema</button>` +
+    `</div>`;
+  document.getElementById("cartVerProton").onclick = () =>
+    applyProtonAndInstall(gameId, gameName, mountPoint);
+  document.getElementById("cartVerNative").onclick = () => showInstall(gameId, gameName, mountPoint);
+}
+
+async function applyProtonAndInstall(gameId, gameName, mountPoint) {
+  const el = body();
+  el.innerHTML =
+    `<div class="loading"><div class="spinner"></div><br>Cerrando Steam para forzar la versión de ` +
+    `Windows (reescribe su configuración al abrir, así que tiene que estar cerrado un momento) — ` +
+    `se vuelve a abrir solo al instalar...</div>`;
+  try {
+    await invoke("force_proton_compat", { appId: gameId });
+    showInstall(gameId, gameName, mountPoint);
+  } catch (e) {
+    const raw = String(e);
+    // force_proton_compat now closes Steam itself — this only fires if
+    // that genuinely didn't work (Steam ignored the close, or took longer
+    // than the wait), not the normal "please close it" case anymore.
+    const steamOpen = /steam is running/i.test(raw);
+    el.innerHTML =
+      `<div class="cartridge-warn">${steamOpen ? "No pude cerrar Steam solo — cerralo a mano y reintentá." : esc(raw)}</div>` +
+      `<div class="cartridge-actions">` +
+      `<button class="cartridge-btn-secondary" id="cartVerBack">Volver</button>` +
+      `<button class="cartridge-btn" id="cartVerRetry">Reintentar</button>` +
+      `</div>`;
+    document.getElementById("cartVerBack").onclick = () => showVersionChoice(gameId, gameName, mountPoint);
+    document.getElementById("cartVerRetry").onclick = () =>
+      applyProtonAndInstall(gameId, gameName, mountPoint);
+  }
 }
 
 function showInstall(gameId, gameName, mountPoint) {

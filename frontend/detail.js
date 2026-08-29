@@ -17,19 +17,27 @@ document.getElementById("cartridgeOverlay").addEventListener("click", e => {
   if (e.target.id === "cartridgeOverlay") closeCartridgeModal();
 });
 
-// This window has no library of its own: the panel modules read titles, hours
-// and completion out of `state`, so it loads the same snapshot the main window
-// does before rendering anything.
-async function loadLibrary() {
-  const data = await invoke("get_state");
-  state.G = data.games || [];
-  state.NS = data.non_steam || [];
-  state.completed = new Set(data.completed || []);
-  state.completedNS = new Set(data.completed_nonsteam || []);
-  state.achProgress = data.ach_progress || {};
-  state.hltbCache = data.hltb_cache || {};
-  state.drmCache = data.drm_cache || {};
-  state.sizeCache = data.size_cache || {};
+// This window has no library of its own: the panel modules read the target
+// game (and its cached DRM info, for the cartridge modal) out of `state`.
+// Used to load the WHOLE main-window snapshot (get_state) just for that —
+// every game plus the full DRM/HLTB/achievement/size caches, 2.8MB+ for a
+// 540-game library, shipped over IPC before a single pixel of this window
+// drew anything. That transfer time was the entire "feels hung" symptom
+// reported live (2026-08-28): a blank window with no spinner while it
+// happened. get_game_context asks only for the one game this window
+// actually needs — everything else (info, achievements, cards, cheats) was
+// already its own targeted per-game fetch inside loaders.js/cheats_view.js,
+// never read from this bulk snapshot at all.
+async function loadGameContext(gameId) {
+  const ctx = await invoke("get_game_context", { appId: gameId });
+  state.G = ctx.game ? [ctx.game] : [];
+  state.NS = ctx.non_steam_game ? [ctx.non_steam_game] : [];
+  state.completed = new Set();
+  state.completedNS = new Set();
+  state.achProgress = {};
+  state.hltbCache = {};
+  state.drmCache = ctx.drm_info ? { [gameId]: ctx.drm_info } : {};
+  state.sizeCache = {};
 }
 
 async function show(gameId) {
@@ -44,21 +52,22 @@ async function boot() {
     state.cheatsSupported = false;
   }
 
+  const gameId = await invoke("detail_target");
   try {
-    await loadLibrary();
+    await loadGameContext(gameId);
   } catch (e) {
     document.getElementById("detailContent").innerHTML =
-      `<div class="loading" style="color:var(--danger)">No pude leer la biblioteca: ${e}</div>`;
+      `<div class="loading" style="color:var(--danger)">No pude leer el juego: ${e}</div>`;
     return;
   }
 
-  await show(await invoke("detail_target"));
+  await show(gameId);
 }
 
 // Clicking another game reuses this window rather than opening a second one,
 // so the backend retargets it and we re-render in place.
 listen("detail-target-changed", e => {
-  loadLibrary().catch(() => {}).finally(() => show(e.payload));
+  loadGameContext(e.payload).catch(() => {}).finally(() => show(e.payload));
 });
 
 boot();

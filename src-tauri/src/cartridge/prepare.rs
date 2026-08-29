@@ -3,6 +3,7 @@ use std::path::Path;
 use crate::drm::{self, DrmInfo, Preservability};
 
 use super::goldberg::inject_goldberg;
+use super::install::sync_marker_with_installed_apps;
 use super::marker::{CartridgeApp, add_app, list_apps};
 
 /// Per-app outcome, for the UI to report progress and results as it goes.
@@ -48,6 +49,11 @@ pub fn refresh_drm_and_inject(
     template_x86: &Path,
     template_x64: &Path,
 ) -> Result<Vec<PrepareDrmResult>, String> {
+    // Reconciles the marker against Steam's own manifests first (#244) — a
+    // game installed directly through Steam, rather than this app's own
+    // per-game flow, never touched the marker at all otherwise, and would
+    // silently miss out on DRM classification/Goldberg below.
+    sync_marker_with_installed_apps(mount_point)?;
     let apps = list_apps(mount_point)?;
     let mut results = Vec::with_capacity(apps.len());
 

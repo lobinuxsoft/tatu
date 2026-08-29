@@ -21,7 +21,12 @@ pub fn has_cartridge_structure(mount_point: String) -> bool {
 /// cartucho" screen, independent of any one game's install flow.
 #[tauri::command]
 pub fn list_cartridge_apps(mount_point: String) -> Result<Vec<cartridge::CartridgeApp>, String> {
-    cartridge::list_apps(Path::new(&mount_point))
+    let path = Path::new(&mount_point);
+    // Reconciles the marker against Steam's own manifests first (#244) — a
+    // game installed directly through Steam, rather than this app's own
+    // per-game flow, never touched the marker at all otherwise.
+    cartridge::sync_marker_with_installed_apps(path)?;
+    cartridge::list_apps(path)
 }
 
 #[tauri::command]
@@ -306,6 +311,11 @@ pub async fn ensure_symlinks(mount_point: String) -> Result<bool, String> {
 #[cfg(unix)]
 #[tauri::command]
 pub fn force_proton_compat(app_id: u64) -> Result<(), String> {
+    // Closes Steam itself rather than asking the user to do it by hand
+    // (confusing live, 2026-08-29) — Tatu already knows exactly why this
+    // needs Steam closed, so it just does it. Relaunches on its own the
+    // moment `trigger_install` opens the next `steam://` URI.
+    crate::steam::stop_steam_for_config_edit().map_err(|e| e.to_string())?;
     crate::steam::force_proton_compat(&app_id.to_string()).map_err(|e| e.to_string())
 }
 

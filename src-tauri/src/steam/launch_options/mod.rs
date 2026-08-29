@@ -145,6 +145,30 @@ fn localconfig_path() -> Result<PathBuf, LaunchOptError> {
     Ok(path)
 }
 
+/// Closes Steam if it's running and waits for it to actually exit, so a
+/// caller like `force_proton_compat` can edit `config.vdf` right after
+/// without Steam rewriting it back on its own exit. Requested live
+/// (2026-08-29): asking the user to close Steam by hand was confusing —
+/// Tatu already knows exactly why it needs this, so it does it itself.
+/// Nothing has to reopen Steam afterward: it relaunches on its own the
+/// moment any `steam://` URI is opened next (`trigger_install` already
+/// does exactly that for the install step right after this).
+pub fn stop_steam_for_config_edit() -> Result<(), LaunchOptError> {
+    if !is_steam_running() {
+        return Ok(());
+    }
+    let _ = std::process::Command::new("pkill")
+        .args(["-x", "steam"])
+        .status();
+    for _ in 0..20 {
+        if !is_steam_running() {
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
+    Err(LaunchOptError::SteamRunning)
+}
+
 /// True if the Steam client appears to be running. Scans `/proc/*/comm` for a
 /// process named exactly `steam` (the main client reaper). Conservative: any
 /// read error is treated as "not running" so the check never wrongly blocks.

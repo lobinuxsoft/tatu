@@ -33,7 +33,7 @@ pub use format::{format_as_cartridge, mount_cartridge};
 pub use goldberg::inject_goldberg;
 pub use install::{
     find_pending_cartridge, install_url, is_registered_library, poll_install_status,
-    uninstall_from_cartridge,
+    sync_marker_with_installed_apps, uninstall_from_cartridge,
 };
 pub use launcher::install_launcher_binaries;
 pub use marker::{CartridgeApp, has_cartridge_structure, list_apps};
