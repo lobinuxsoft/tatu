@@ -695,7 +695,18 @@ func _update_background(app_id: int, screenshots: Array[String]) -> void:
 	_background_video.stop()
 	_background_video.visible = false
 	_background.visible = true
-	_background.texture = ImageTexture.create_from_image(image) if image else null
+
+	var path := screenshots[0] if not screenshots.is_empty() else _grid_art_path(app_id)
+	if path.is_empty():
+		_background.texture = null
+		_background_loading.visible = false
+		return
+	var image := Image.new()
+	if image.load(path) != OK:
+		_background.texture = null
+		_background_loading.visible = false
+		return
+	_background.texture = ImageTexture.create_from_image(image)
 	_background_loading.visible = false
 
 func _trailer_path(app_id: int) -> String:
