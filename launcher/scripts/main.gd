@@ -106,6 +106,11 @@ const ART_LOAD_BUDGET_MS := 4.0
 var _empty_state: Label
 var _background: TextureRect
 var _background_video: VideoStreamPlayer
+var _background_loading: Label
+# Bumped on every _update_background call — a background-thread load whose
+# id no longer matches when it finishes belongs to a selection the player
+# already scrolled past, and must not overwrite what's shown now (#254).
+var _background_load_id := 0
 var _carousel_clip: Control
 var _carousel_row: HBoxContainer
 var _info_name: Label
@@ -307,6 +312,16 @@ func _build_layout() -> void:
 	_background_video.volume_db = -80.0
 	_background_video.visible = false
 	add_child(_background_video)
+
+	# Shown while _update_background's async load (below) is still reading
+	# off the cartridge — a slow USB/NTFS drive made switching selection
+	# feel frozen with no feedback at all (#254).
+	_background_loading = Label.new()
+	_background_loading.text = "Cargando..."
+	_background_loading.set_anchors_preset(Control.PRESET_CENTER)
+	_background_loading.add_theme_font_override("font", load(FONT_BODY))
+	_background_loading.visible = false
+	add_child(_background_loading)
 
 	# The carousel spans the FULL screen — the glass side panels overlay on
 	# top of its edges rather than living in separate side-by-side columns,
@@ -639,30 +654,62 @@ func _update_selection(animate: bool) -> void:
 ## beats the blurred grid art — closer to actual gameplay each step down,
 ## and no tier ever leaves the background blank since grid art (#205) is
 ## already required for the card itself to render at all.
+##
+## The actual disk read runs on a worker thread (#254) — a slow USB/NTFS
+## cartridge made every selection change stall the whole UI while a
+## screenshot or trailer read off it, with zero feedback that anything was
+## happening. `request_id` guards against a stale load (the player already
+## moved on to another card) overwriting what's on screen now.
 func _update_background(app_id: int, screenshots: Array[String]) -> void:
+	_background_load_id += 1
+	var request_id := _background_load_id
 	var trailer_path := _trailer_path(app_id)
+	var image_path := screenshots[0] if not screenshots.is_empty() else _grid_art_path(app_id)
+
+	_background_loading.visible = true
+	WorkerThreadPool.add_task(
+		func() -> void: _load_background_async(request_id, trailer_path, image_path)
+	)
+
+## Runs on a worker thread — FileAccess/Image I/O is safe here, Node/Control
+## property writes are not, so every outcome is handed back to the main
+## thread via call_deferred instead of touching the scene tree directly.
+func _load_background_async(request_id: int, trailer_path: String, image_path: String) -> void:
 	if not trailer_path.is_empty():
-		var stream := VideoStreamTheora.new()
-		stream.set_file(trailer_path)
-		_background_video.stream = stream
-		_background_video.play()
-		_background_video.visible = true
-		_background.visible = false
+		# VideoStreamPlayer.play() below still does its own file read on the
+		# main thread (Godot's video playback has no async API) — reading
+		# the bytes here first warms the OS page cache so that read comes
+		# back fast instead of hitting the slow drive a second time.
+		FileAccess.get_file_as_bytes(trailer_path)
+		_apply_background_trailer.call_deferred(request_id, trailer_path)
 		return
 
+	if image_path.is_empty():
+		_apply_background_image.call_deferred(request_id, null)
+		return
+	var image := Image.new()
+	var ok := image.load(image_path) == OK
+	_apply_background_image.call_deferred(request_id, image if ok else null)
+
+func _apply_background_trailer(request_id: int, trailer_path: String) -> void:
+	if request_id != _background_load_id:
+		return
+	var stream := VideoStreamTheora.new()
+	stream.set_file(trailer_path)
+	_background_video.stream = stream
+	_background_video.play()
+	_background_video.visible = true
+	_background.visible = false
+	_background_loading.visible = false
+
+func _apply_background_image(request_id: int, image: Image) -> void:
+	if request_id != _background_load_id:
+		return
 	_background_video.stop()
 	_background_video.visible = false
 	_background.visible = true
-
-	var path := screenshots[0] if not screenshots.is_empty() else _grid_art_path(app_id)
-	if path.is_empty():
-		_background.texture = null
-		return
-	var image := Image.new()
-	if image.load(path) != OK:
-		_background.texture = null
-		return
-	_background.texture = ImageTexture.create_from_image(image)
+	_background.texture = ImageTexture.create_from_image(image) if image else null
+	_background_loading.visible = false
 
 func _trailer_path(app_id: int) -> String:
 	var path := _cartridge_root().path_join("assets").path_join(str(app_id)).path_join(TRAILER_FILENAME)
