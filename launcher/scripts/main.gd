@@ -134,6 +134,10 @@ var _drag_start_mouse_x := 0.0
 var _drag_start_row_x := 0.0
 
 func _ready() -> void:
+	# `window/size/mode=3` (borderless fullscreen) isn't enough on its own on
+	# every compositor — some never hand a newly-mapped fullscreen window
+	# input focus, leaving the gamepad dead until the user clicks it by hand.
+	get_window().grab_focus()
 	_register_input_actions()
 	_build_layout()
 	_carousel_clip.resized.connect(_on_carousel_resized)
@@ -149,6 +153,12 @@ func _ready() -> void:
 	# would compute against a stale (zero) position for the first card.
 	await get_tree().process_frame
 	_resize_layout()
+	# resize_layout() sets custom_minimum_size/size directly on every card,
+	# which only marks the HBoxContainer dirty — it re-sorts children on the
+	# NEXT idle frame, not synchronously. Centering right here would read
+	# every card's PRE-resize position, landing the carousel offset wrong
+	# on every single launch (confirmed live, #247).
+	await get_tree().process_frame
 	_update_selection(false)
 
 ## Re-sizes cards, fonts, and hint icons off the carousel area's CURRENT
@@ -198,6 +208,8 @@ func _on_carousel_resized() -> void:
 	_resize_layout()
 	if _apps.is_empty():
 		return
+	# Same one-frame container-sort lag as _ready() above.
+	await get_tree().process_frame
 	_center_on_selected(false)
 
 func _register_input_actions() -> void:

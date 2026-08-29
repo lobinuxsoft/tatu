@@ -197,7 +197,10 @@ function renderCartridge(drive, apps, usage) {
 // time (finishInstall in cartridge.js only does Goldberg injection now).
 async function prepareLauncher(drive, apps, includeTrailers) {
   const result = document.getElementById("cartPrepareResult");
-  const mountPoint = drive.mount_point;
+  // Reassigned below if ensure_symlinks remounts the device onto a different
+  // path (#246) — every later step in this run must target wherever the
+  // device actually landed, not the pre-remount path.
+  let mountPoint = drive.mount_point;
   const setStatus = msg => {
     result.innerHTML = `<div class="loading"><div class="spinner"></div><br>${esc(msg)}</div>`;
   };
@@ -222,7 +225,10 @@ async function prepareLauncher(drive, apps, includeTrailers) {
     // "not found" here just means the platform doesn't need it.
     setStatus("Habilitando symlinks NTFS para Proton (puede pedir tu contraseña de administrador)...");
     try {
-      await invoke("ensure_symlinks", { mountPoint });
+      const symResult = await invoke("ensure_symlinks", { mountPoint });
+      if (symResult && symResult.changed && symResult.mount_point) {
+        mountPoint = symResult.mount_point;
+      }
     } catch (e) {
       const raw = String(e);
       if (!/not found|unknown command/i.test(raw)) {
