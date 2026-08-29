@@ -97,6 +97,12 @@ var _apps: Array = []
 var _selected_index: int = 0
 var _cards: Array[GameCard] = []
 
+# Cover art decodes are spread across frames instead of blocking the first
+# one for as long as the whole library's art takes to read off the
+# cartridge (#249) — each entry is {"card": GameCard, "path": String}.
+var _pending_art: Array[Dictionary] = []
+const ART_LOAD_BUDGET_MS := 4.0
+
 var _empty_state: Label
 var _background: TextureRect
 var _background_video: VideoStreamPlayer
@@ -540,9 +546,23 @@ func _add_card(i: int, app: Dictionary) -> void:
 	var app_id := int(app.get("app_id", 0))
 	var card := GameCard.new()
 	_carousel_row.add_child(card)
-	card.setup(i, String(app.get("name", "?")), _grid_art_path(app_id))
+	card.setup(i, String(app.get("name", "?")))
 	card.clicked.connect(_on_card_clicked)
 	_cards.append(card)
+	_pending_art.append({"card": card, "path": _grid_art_path(app_id)})
+
+## Decodes queued cover art a few milliseconds at a time instead of all at
+## once — the first card (already selected/visible) is always the first
+## one processed, so the one art the user sees immediately never waits
+## behind the rest of the library.
+func _process(_delta: float) -> void:
+	if _pending_art.is_empty():
+		set_process(false)
+		return
+	var deadline := Time.get_ticks_msec() + ART_LOAD_BUDGET_MS
+	while not _pending_art.is_empty() and Time.get_ticks_msec() < deadline:
+		var item: Dictionary = _pending_art.pop_front()
+		(item["card"] as GameCard).load_art(item["path"])
 
 func _on_card_clicked(index: int) -> void:
 	_selected_index = index
