@@ -14,9 +14,17 @@ pub(super) struct PcgwDrm {
     pub has_entry: bool,
 }
 
+/// DRM-related fields pulled from a Steam Store appdetails response, plus
+/// the game's own title — needed to query GOG's catalog by name (#237)
+/// without a second round-trip to Steam just to get it.
+pub(super) struct SteamStoreDrm {
+    pub drm_notice: Option<String>,
+    pub account_notice: Option<String>,
+    pub name: Option<String>,
+}
+
 /// Query Steam Store appdetails and extract DRM-related fields.
-/// Returns (drm_notice, ext_user_account_notice).
-pub(super) fn fetch_from_steam(app_id: u64) -> Option<(Option<String>, Option<String>)> {
+pub(super) fn fetch_from_steam(app_id: u64) -> Option<SteamStoreDrm> {
     let url = format!("{STEAM_APPDETAILS}?appids={app_id}&l=english");
     let body: serde_json::Value = ureq::get(&url)
         .header("User-Agent", USER_AGENT)
@@ -27,18 +35,26 @@ pub(super) fn fetch_from_steam(app_id: u64) -> Option<(Option<String>, Option<St
         .ok()?;
 
     let data = body.get(app_id.to_string())?.get("data")?;
-    let notice = data
+    let drm_notice = data
         .get("drm_notice")
         .and_then(|v| v.as_str())
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
-    let account = data
+    let account_notice = data
         .get("ext_user_account_notice")
         .and_then(|v| v.as_str())
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
+    let name = data
+        .get("name")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
 
-    Some((notice, account))
+    Some(SteamStoreDrm {
+        drm_notice,
+        account_notice,
+        name,
+    })
 }
 
 /// Query PCGamingWiki's Cargo API joining Infobox_game with Availability.
