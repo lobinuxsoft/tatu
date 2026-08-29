@@ -658,53 +658,36 @@ func _update_selection(animate: bool) -> void:
 ## The actual disk read runs on a worker thread (#254) — a slow USB/NTFS
 ## cartridge made every selection change stall the whole UI while a
 ## screenshot or trailer read off it, with zero feedback that anything was
-## happening. `request_id` guards against a stale load (the player already
-## moved on to another card) overwriting what's on screen now.
+## happening.
+##
+## An earlier version moved the actual read to a WorkerThreadPool task —
+## reverted (2026-08-29, #256) after it crashed live with "double free or
+## corruption": a worker thread calling back into this same script
+## instance's methods raced the main thread running _process()/input
+## handling on that same instance, corrupting GDScript's own heap. Back to
+## fully synchronous; `await get_tree().process_frame` just buys the
+## "Cargando..." label one real frame to draw before the blocking read
+## starts, which is the only part of this that's actually safe to do
+## without a thread.
 func _update_background(app_id: int, screenshots: Array[String]) -> void:
 	_background_load_id += 1
 	var request_id := _background_load_id
-	var trailer_path := _trailer_path(app_id)
-	var image_path := screenshots[0] if not screenshots.is_empty() else _grid_art_path(app_id)
-
 	_background_loading.visible = true
-	WorkerThreadPool.add_task(
-		func() -> void: _load_background_async(request_id, trailer_path, image_path)
-	)
+	await get_tree().process_frame
+	if request_id != _background_load_id:
+		return
 
-## Runs on a worker thread — FileAccess/Image I/O is safe here, Node/Control
-## property writes are not, so every outcome is handed back to the main
-## thread via call_deferred instead of touching the scene tree directly.
-func _load_background_async(request_id: int, trailer_path: String, image_path: String) -> void:
+	var trailer_path := _trailer_path(app_id)
 	if not trailer_path.is_empty():
-		# VideoStreamPlayer.play() below still does its own file read on the
-		# main thread (Godot's video playback has no async API) — reading
-		# the bytes here first warms the OS page cache so that read comes
-		# back fast instead of hitting the slow drive a second time.
-		FileAccess.get_file_as_bytes(trailer_path)
-		_apply_background_trailer.call_deferred(request_id, trailer_path)
+		var stream := VideoStreamTheora.new()
+		stream.set_file(trailer_path)
+		_background_video.stream = stream
+		_background_video.play()
+		_background_video.visible = true
+		_background.visible = false
+		_background_loading.visible = false
 		return
 
-	if image_path.is_empty():
-		_apply_background_image.call_deferred(request_id, null)
-		return
-	var image := Image.new()
-	var ok := image.load(image_path) == OK
-	_apply_background_image.call_deferred(request_id, image if ok else null)
-
-func _apply_background_trailer(request_id: int, trailer_path: String) -> void:
-	if request_id != _background_load_id:
-		return
-	var stream := VideoStreamTheora.new()
-	stream.set_file(trailer_path)
-	_background_video.stream = stream
-	_background_video.play()
-	_background_video.visible = true
-	_background.visible = false
-	_background_loading.visible = false
-
-func _apply_background_image(request_id: int, image: Image) -> void:
-	if request_id != _background_load_id:
-		return
 	_background_video.stop()
 	_background_video.visible = false
 	_background.visible = true
