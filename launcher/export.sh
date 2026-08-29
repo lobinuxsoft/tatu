@@ -4,6 +4,12 @@
 # main.gd's corner label, added after live testing kept confusing a stale
 # binary for a freshly fixed one with no way to tell them apart on screen.
 #
+# Defaults straight into src-tauri/vendor/launcher/ — the path
+# install_launcher_binaries actually reads from (#252). An earlier version
+# defaulted to dist/launcher/ instead, which silently left the vendored
+# binaries (and therefore every "Preparar launcher" run) stuck on whatever
+# was last copied over by hand, no matter how recent the source fixes were.
+#
 # Usage: launcher/export.sh <godot-binary> [output-dir]
 set -euo pipefail
 
@@ -13,7 +19,7 @@ LAUNCHER_DIR="$REPO_ROOT/launcher"
 # Must be absolute: Godot resolves a relative --export-release path against
 # the project root (--path launcher/), not this script's own working
 # directory, and silently fails with "export path doesn't exist" otherwise.
-OUT_DIR="${2:-$REPO_ROOT/dist/launcher}"
+OUT_DIR="${2:-$REPO_ROOT/src-tauri/vendor/launcher}"
 
 VERSION="$(cat "$REPO_ROOT/VERSION")"
 COMMIT="$(git -C "$REPO_ROOT" rev-parse --short HEAD)"
@@ -21,8 +27,8 @@ DIRTY=""
 git -C "$REPO_ROOT" diff --quiet -- "$LAUNCHER_DIR" || DIRTY="-dirty"
 echo "${VERSION}+g${COMMIT}${DIRTY}" > "$LAUNCHER_DIR/build_info.txt"
 
-mkdir -p "$OUT_DIR"
-"$GODOT" --headless --path "$LAUNCHER_DIR" --export-release "Linux" "$OUT_DIR/tatu-launcher"
-"$GODOT" --headless --path "$LAUNCHER_DIR" --export-release "Windows Desktop" "$OUT_DIR/tatu-launcher.exe"
+mkdir -p "$OUT_DIR/linux" "$OUT_DIR/windows"
+"$GODOT" --headless --path "$LAUNCHER_DIR" --export-release "Linux" "$OUT_DIR/linux/tatu-launcher"
+"$GODOT" --headless --path "$LAUNCHER_DIR" --export-release "Windows Desktop" "$OUT_DIR/windows/tatu-launcher.exe"
 
 echo "Built $(cat "$LAUNCHER_DIR/build_info.txt") -> $OUT_DIR"
