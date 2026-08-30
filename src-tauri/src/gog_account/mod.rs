@@ -19,7 +19,9 @@ use serde::{Deserialize, Serialize};
 const CLIENT_ID: &str = "46899977096215655";
 const CLIENT_SECRET: &str = "9d85c43b1482497dbbce61f6e4aa173a433796eeae2ca8c5f6129f2dc4de46d9";
 const REDIRECT_URI: &str = "https://embed.gog.com/on_login_success?origin=client";
-const USER_AGENT: &str =
+// pub(crate): also used by `gog_download`, which talks to the same GOG
+// endpoints under the same identity rather than declaring its own copy.
+pub(crate) const USER_AGENT: &str =
     "game-progress-tracker (+https://github.com/lobinuxsoft/game-progress-tracker)";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]

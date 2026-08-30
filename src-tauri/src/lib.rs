@@ -4,6 +4,7 @@ mod commands;
 mod disk;
 mod drm;
 mod gog_account;
+mod gog_download;
 mod hltb;
 mod inventory;
 mod shortcuts;
