@@ -50,7 +50,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' https://media.steampowered.com https://shared.akamai.steamstatic.com https://steamcdn-a.akamaihd.net https://cdn.akamai.steamstatic.com https://community.akamai.steamstatic.com https://community.fastly.steamstatic.com https://cdn.fastly.steamstatic.com https://cdn.cloudflare.steamstatic.com"
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' https://media.steampowered.com https://shared.akamai.steamstatic.com https://steamcdn-a.akamaihd.net https://cdn.akamai.steamstatic.com https://community.akamai.steamstatic.com https://community.fastly.steamstatic.com https://cdn.fastly.steamstatic.com https://cdn.cloudflare.steamstatic.com https://*.gog-statics.com"
     }
   }
 }

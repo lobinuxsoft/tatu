@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::achievements::GameAchievements;
 use crate::disk::DiskSize;
 use crate::drm::DrmInfo;
+use crate::gog_account::GogTokens;
 use crate::hltb::HltbResult;
 use crate::inventory::GameCards;
 use crate::shortcuts::NonSteamGame;
@@ -45,6 +46,20 @@ pub struct AppState {
     /// Disk size cache (installed + previously measured), keyed by Steam app ID.
     #[serde(default)]
     pub size_cache: HashMap<u64, DiskSize>,
+    /// GOG account OAuth2 tokens (#243), once the user connects one — same
+    /// plaintext-in-state.json posture as `steam_api_key` above, no special
+    /// handling added here that the rest of this file doesn't already have.
+    #[serde(default)]
+    pub gog_tokens: Option<GogTokens>,
+    /// Cached from the last successful library fetch, so the settings
+    /// screen has something to show without re-hitting GOG on every launch.
+    #[serde(default)]
+    pub gog_library: Vec<crate::gog_account::GogOwnedGame>,
+    /// Completed tracking for the GOG tab — same shape as `completed`/
+    /// `completed_nonsteam` above, kept separate since a GOG id and a
+    /// Steam appid share the same numeric type but not the same namespace.
+    #[serde(default)]
+    pub completed_gog: HashSet<u64>,
 }
 
 impl AppState {

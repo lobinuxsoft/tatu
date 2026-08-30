@@ -1,11 +1,18 @@
-import { invoke } from "./tauri.js";
+import { invoke, opener } from "./tauri.js";
 import { state } from "./state.js";
+import { renderGog } from "./render/gog.js";
 
-export function loadSettingsUI(apiKey, steamId, sgdbApiKey) {
+export function loadSettingsUI(apiKey, steamId, sgdbApiKey, gogConnected) {
   document.getElementById("cfgApiKey").value = apiKey || "";
   document.getElementById("cfgSteamId").value = steamId || "";
   document.getElementById("cfgSgdbApiKey").value = sgdbApiKey || "";
   state.hasConfig = !!(apiKey && steamId);
+  renderGogConnectionState(!!gogConnected);
+}
+
+function renderGogConnectionState(connected) {
+  document.getElementById("gogDisconnected").style.display = connected ? "none" : "";
+  document.getElementById("gogConnected").style.display = connected ? "" : "none";
 }
 
 export function checkConfigWarning() {
@@ -68,5 +75,36 @@ export function installSettingsHandlers() {
       msg.style.color = "#f85149";
       msg.textContent = "Error: " + e;
     }
+  });
+
+  document.getElementById("gogConnectBtn").addEventListener("click", async () => {
+    const url = await invoke("gog_login_url");
+    opener.openUrl(url).catch(err => console.error("openUrl failed", err));
+  });
+
+  document.getElementById("gogSubmitCodeBtn").addEventListener("click", async () => {
+    const pasted = document.getElementById("gogPastedCode").value.trim();
+    const msg = document.getElementById("gogConnectMsg");
+    const btn = document.getElementById("gogSubmitCodeBtn");
+    if (!pasted) return;
+    btn.disabled = true;
+    try {
+      await invoke("gog_connect", { pasted });
+      document.getElementById("gogPastedCode").value = "";
+      msg.style.color = "#2ea043";
+      msg.textContent = "Conectado.";
+      renderGogConnectionState(true);
+    } catch (e) {
+      msg.style.color = "#f85149";
+      msg.textContent = "Error: " + e;
+    }
+    btn.disabled = false;
+  });
+
+  document.getElementById("gogDisconnectBtn").addEventListener("click", async () => {
+    await invoke("gog_disconnect");
+    renderGogConnectionState(false);
+    state.GOG = [];
+    renderGog();
   });
 }

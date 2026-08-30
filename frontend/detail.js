@@ -1,6 +1,7 @@
 import { invoke, listen } from "./js/tauri.js";
 import { state } from "./js/state.js";
 import { renderDetail } from "./js/panel/detail.js";
+import { renderGogDetail } from "./js/panel/gog_detail.js";
 import { installExternalLinks } from "./js/links.js";
 import { installLightbox } from "./js/panel/lightbox.js";
 import { installCardTilt } from "./js/panel/card_tilt.js";
@@ -28,7 +29,7 @@ document.getElementById("cartridgeOverlay").addEventListener("click", e => {
 // actually needs — everything else (info, achievements, cards, cheats) was
 // already its own targeted per-game fetch inside loaders.js/cheats_view.js,
 // never read from this bulk snapshot at all.
-async function loadGameContext(gameId) {
+async function loadSteamGameContext(gameId) {
   const ctx = await invoke("get_game_context", { appId: gameId });
   state.G = ctx.game ? [ctx.game] : [];
   state.NS = ctx.non_steam_game ? [ctx.non_steam_game] : [];
@@ -40,9 +41,23 @@ async function loadGameContext(gameId) {
   state.sizeCache = {};
 }
 
-async function show(gameId) {
-  if (gameId === null || gameId === undefined) return;
-  renderDetail(gameId);
+// A GOG product id and a Steam appid share no namespace (#243) — `target`
+// always carries which collection to look the id up in, so this never
+// risks matching an unrelated Steam game that happens to share the number.
+async function show(target) {
+  if (!target || target.app_id === null || target.app_id === undefined) return;
+  if (target.source === "gog") {
+    const game = await invoke("get_gog_game_context", { appId: target.app_id });
+    if (!game) {
+      document.getElementById("detailContent").innerHTML =
+        `<div class="loading">No encontré ese juego en tu biblioteca de GOG.</div>`;
+      return;
+    }
+    renderGogDetail(game);
+    return;
+  }
+  await loadSteamGameContext(target.app_id);
+  renderDetail(target.app_id);
 }
 
 async function boot() {
@@ -52,22 +67,19 @@ async function boot() {
     state.cheatsSupported = false;
   }
 
-  const gameId = await invoke("detail_target");
+  const target = await invoke("detail_target");
   try {
-    await loadGameContext(gameId);
+    await show(target);
   } catch (e) {
     document.getElementById("detailContent").innerHTML =
       `<div class="loading" style="color:var(--danger)">No pude leer el juego: ${e}</div>`;
-    return;
   }
-
-  await show(gameId);
 }
 
 // Clicking another game reuses this window rather than opening a second one,
 // so the backend retargets it and we re-render in place.
 listen("detail-target-changed", e => {
-  loadGameContext(e.payload).catch(() => {}).finally(() => show(e.payload));
+  show(e.payload).catch(() => {});
 });
 
 boot();

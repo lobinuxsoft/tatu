@@ -3,6 +3,7 @@ import { state } from "./state.js";
 import { formatBytes } from "./utils.js";
 import { renderSteam } from "./render/steam.js";
 import { renderNonSteam } from "./render/nonsteam.js";
+import { renderGog } from "./render/gog.js";
 
 export async function doSync() {
   const btn = document.getElementById("syncBtn");
@@ -93,5 +94,42 @@ export async function doFetchAllDrm() {
     wrap.style.display = "none";
     btn.disabled = false; btn.textContent = "Cargar DRM";
     unlisten(); unlistenDone();
+  }
+}
+
+// One request per owned title (#243) — same reasoning doFetchAllDrm has for
+// its own progress bar: silently blocking a tab for however long a real
+// library takes to resolve looks exactly like a hang.
+export async function doFetchGogLibrary() {
+  const btn = document.getElementById("gogTabSyncBtn");
+  const info = document.getElementById("gogSyncInfo");
+  btn.disabled = true; btn.textContent = "Actualizando...";
+  const games = [];
+
+  const unlistenProgress = await listen("gog_library_progress", e => {
+    const p = e.payload || {};
+    info.textContent = `Resolviendo biblioteca de GOG: ${p.current}/${p.total}...`;
+    if (p.game) games.push(p.game);
+  });
+  const unlistenDone = await listen("gog_library_done", e => {
+    const p = e.payload || {};
+    state.GOG = games;
+    renderGog();
+    info.textContent = `Biblioteca de GOG actualizada — ${p.total} juegos`;
+    btn.disabled = false; btn.textContent = "Actualizar biblioteca";
+    unlistenProgress(); unlistenDone(); unlistenError();
+  });
+  const unlistenError = await listen("gog_library_error", e => {
+    info.textContent = "Error: " + e.payload;
+    btn.disabled = false; btn.textContent = "Actualizar biblioteca";
+    unlistenProgress(); unlistenDone(); unlistenError();
+  });
+
+  try {
+    await invoke("fetch_gog_library");
+  } catch (e) {
+    info.textContent = "Error: " + e;
+    btn.disabled = false; btn.textContent = "Actualizar biblioteca";
+    unlistenProgress(); unlistenDone(); unlistenError();
   }
 }

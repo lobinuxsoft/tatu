@@ -29,6 +29,9 @@ pub fn get_state(state: State<'_, SharedState>) -> Result<serde_json::Value, Str
         "hltb_cache": s.hltb_cache,
         "drm_cache": s.drm_cache,
         "size_cache": s.size_cache,
+        "gog_connected": s.gog_tokens.is_some(),
+        "gog_library": s.gog_library,
+        "completed_gog": s.completed_gog,
     }))
 }
 
@@ -64,6 +67,11 @@ pub fn get_settings(state: State<'_, SharedState>) -> Result<serde_json::Value, 
         "steam_api_key": s.steam_api_key,
         "steam_id": s.steam_id,
         "steamgriddb_api_key": s.steamgriddb_api_key,
+        // Never the raw tokens — the renderer only needs to know whether an
+        // account is connected and what it last saw, every real GOG call
+        // stays in Rust.
+        "gog_connected": s.gog_tokens.is_some(),
+        "gog_library": s.gog_library,
     }))
 }
 
@@ -97,6 +105,17 @@ pub fn save_completed_nonsteam(
 ) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     s.completed_nonsteam = completed.into_iter().collect();
+    s.save();
+    Ok(())
+}
+
+#[tauri::command]
+pub fn save_completed_gog(
+    completed: Vec<u64>,
+    state: State<'_, SharedState>,
+) -> Result<(), String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    s.completed_gog = completed.into_iter().collect();
     s.save();
     Ok(())
 }
