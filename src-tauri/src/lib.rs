@@ -4,6 +4,7 @@ mod commands;
 mod disk;
 mod drm;
 mod gog_account;
+mod gog_download;
 mod hltb;
 mod inventory;
 mod shortcuts;
@@ -60,6 +61,7 @@ macro_rules! tracker_handler {
             commands::gog_cmd::fetch_gog_library,
             commands::gog_cmd::get_gog_game_context,
             commands::gog_cmd::fetch_gog_extra_details,
+            commands::gog_cmd::gog_download_game,
             commands::collection_cmd::get_steam_favorites,
             commands::collection_cmd::list_steam_collections,
             commands::collection_cmd::import_completed_from_collection,
