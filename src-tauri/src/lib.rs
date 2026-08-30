@@ -3,6 +3,7 @@ mod cartridge;
 mod commands;
 mod disk;
 mod drm;
+mod gog_account;
 mod hltb;
 mod inventory;
 mod shortcuts;
@@ -42,6 +43,7 @@ macro_rules! tracker_handler {
             commands::state_cmd::save_settings,
             commands::state_cmd::save_completed,
             commands::state_cmd::save_completed_nonsteam,
+            commands::state_cmd::save_completed_gog,
             commands::sync_cmd::sync_steam,
             commands::sync_cmd::sync_nonsteam,
             commands::sync_cmd::fetch_details,
@@ -51,6 +53,13 @@ macro_rules! tracker_handler {
             commands::detail_cmd::search_hltb,
             commands::drm_cmd::get_game_drm,
             commands::drm_cmd::fetch_all_drm,
+            commands::gog_cmd::gog_login_url,
+            commands::gog_cmd::gog_is_connected,
+            commands::gog_cmd::gog_connect,
+            commands::gog_cmd::gog_disconnect,
+            commands::gog_cmd::fetch_gog_library,
+            commands::gog_cmd::get_gog_game_context,
+            commands::gog_cmd::fetch_gog_extra_details,
             commands::collection_cmd::get_steam_favorites,
             commands::collection_cmd::list_steam_collections,
             commands::collection_cmd::import_completed_from_collection,
