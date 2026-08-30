@@ -10,7 +10,9 @@
 //! live probe alone couldn't confirm (e.g. build selection order).
 
 use std::collections::HashMap;
-use std::io::Read;
+use std::fs;
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
 
 use flate2::read::ZlibDecoder;
 use md5::{Digest, Md5};
@@ -303,6 +305,125 @@ fn hex_md5(data: &[u8]) -> String {
         .collect()
 }
 
+/// Joins `repo.install_directory` onto `cartridge_base` — the directory
+/// content-system v2 expects the game's files to land in, matching how
+/// heroic-gogdl resolves its own install path.
+pub fn install_root(cartridge_base: &Path, repo: &Repository) -> PathBuf {
+    cartridge_base.join(&repo.install_directory)
+}
+
+/// Picks the depot to install for `language` (a GOG language tag, e.g.
+/// `"en-US"`), skipping GOG's own metadata depots (`isGogDepot` — install
+/// scripts, `goggame-*.info`, not installable game content). Falls back to
+/// the first content depot if none advertises the requested language.
+pub fn pick_depot<'a>(repo: &'a Repository, language: &str) -> Option<&'a Depot> {
+    let mut content_depots = repo.depots.iter().filter(|d| !d.is_gog_depot);
+    content_depots
+        .clone()
+        .find(|d| d.languages.iter().any(|l| l == language))
+        .or_else(|| content_depots.next())
+}
+
+/// Resolves `item_path` (as it appears in a depot manifest) against
+/// `dest_root`, rejecting anything that would climb out of it. Manifest
+/// paths come from GOG's CDN, not from the user — a `..` component must
+/// never be trusted to stay under the install directory (the same
+/// zip-slip class of bug archive extractors get bitten by).
+fn resolve_install_path(dest_root: &Path, item_path: &str) -> Result<PathBuf, String> {
+    let mut resolved = dest_root.to_path_buf();
+    for component in Path::new(item_path).components() {
+        match component {
+            std::path::Component::Normal(part) => resolved.push(part),
+            std::path::Component::CurDir => {}
+            other => {
+                return Err(format!(
+                    "unsafe path component {other:?} in manifest entry {item_path}"
+                ));
+            }
+        }
+    }
+    if !resolved.starts_with(dest_root) {
+        return Err(format!(
+            "manifest entry escapes install directory: {item_path}"
+        ));
+    }
+    Ok(resolved)
+}
+
+/// Downloads every chunk of `item`, writing each decompressed chunk in
+/// manifest order to `dest_root/item.path`. GOG splits large files into
+/// fixed-size chunks with no separate reassembly step — concatenating them
+/// in order as they arrive IS reassembly.
+pub fn download_file(
+    endpoints: &[CdnEndpoint],
+    item: &DepotItem,
+    dest_root: &Path,
+) -> Result<(), String> {
+    let dest_path = resolve_install_path(dest_root, &item.path)?;
+    if let Some(parent) = dest_path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("mkdir {parent:?} failed: {e}"))?;
+    }
+    let mut file =
+        fs::File::create(&dest_path).map_err(|e| format!("create {dest_path:?} failed: {e}"))?;
+    for chunk in &item.chunks {
+        let bytes = download_chunk(endpoints, chunk)?;
+        file.write_all(&bytes)
+            .map_err(|e| format!("write {dest_path:?} failed: {e}"))?;
+    }
+    Ok(())
+}
+
+/// Downloads every file entry of `manifest` under `dest_root`. Directory
+/// and symlink entries carry no chunks and are skipped — `download_file`
+/// creates whatever parent directories a file needs on its own.
+///
+/// Refuses a `depot` that doesn't belong to `product_id`: `Repository`s for
+/// old (generation 1) games list `dependencies` — separate GOG products
+/// (e.g. a bundled DOSBox) with their own depots and their own
+/// `secure_link` — which this module doesn't resolve yet.
+///
+/// After every file lands, cross-checks the depot's own advertised total
+/// (`size`/`compressed_size`) against what the manifest's chunks actually
+/// summed to — catches a stale manifest or wrong depot picked, a class of
+/// mistake per-chunk MD5 checks alone can't see.
+pub fn download_depot(
+    product_id: u64,
+    endpoints: &[CdnEndpoint],
+    depot: &Depot,
+    manifest: &DepotManifest,
+    dest_root: &Path,
+    mut on_progress: impl FnMut(&DepotItem),
+) -> Result<(), String> {
+    if depot.product_id != product_id.to_string() {
+        return Err(format!(
+            "depot belongs to product {} (a dependency of {product_id}) — dependency installs aren't implemented yet",
+            depot.product_id
+        ));
+    }
+
+    let mut actual_size = 0u64;
+    let mut actual_compressed_size = 0u64;
+    for item in &manifest.items {
+        if !item.is_file() {
+            continue;
+        }
+        on_progress(item);
+        download_file(endpoints, item, dest_root)?;
+        for chunk in &item.chunks {
+            actual_size += chunk.size;
+            actual_compressed_size += chunk.compressed_size;
+        }
+    }
+
+    if actual_size != depot.size || actual_compressed_size != depot.compressed_size {
+        return Err(format!(
+            "depot size mismatch: manifest advertised {}/{} bytes (raw/compressed), chunks summed to {actual_size}/{actual_compressed_size}",
+            depot.size, depot.compressed_size
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -321,6 +442,62 @@ mod tests {
             galaxy_path("4e/57/4e57ae9ecb59d88b1f51be0a89a3cfaa"),
             "4e/57/4e57ae9ecb59d88b1f51be0a89a3cfaa"
         );
+    }
+
+    #[test]
+    fn resolve_install_path_joins_a_normal_relative_path() {
+        let root = Path::new("/tmp/tatu-cartridge/MyGame");
+        let resolved = resolve_install_path(root, "data/goggame-123.info").unwrap();
+        assert_eq!(resolved, root.join("data/goggame-123.info"));
+    }
+
+    #[test]
+    fn resolve_install_path_rejects_parent_dir_climb() {
+        let root = Path::new("/tmp/tatu-cartridge/MyGame");
+        assert!(resolve_install_path(root, "../../etc/passwd").is_err());
+    }
+
+    #[test]
+    fn resolve_install_path_rejects_absolute_manifest_path() {
+        let root = Path::new("/tmp/tatu-cartridge/MyGame");
+        assert!(resolve_install_path(root, "/etc/passwd").is_err());
+    }
+
+    fn depot(languages: &[&str], is_gog_depot: bool) -> Depot {
+        Depot {
+            manifest: "irrelevant".to_string(),
+            size: 0,
+            compressed_size: 0,
+            languages: languages.iter().map(|l| l.to_string()).collect(),
+            product_id: "1".to_string(),
+            is_gog_depot,
+        }
+    }
+
+    #[test]
+    fn pick_depot_prefers_the_requested_language() {
+        let repo = Repository {
+            install_directory: "Game".to_string(),
+            depots: vec![
+                depot(&["en-US"], false),
+                depot(&["es-ES"], false),
+                depot(&["en-US"], true),
+            ],
+            dependencies: vec![],
+        };
+        let picked = pick_depot(&repo, "es-ES").unwrap();
+        assert_eq!(picked.languages, vec!["es-ES".to_string()]);
+    }
+
+    #[test]
+    fn pick_depot_skips_metadata_depots_on_fallback() {
+        let repo = Repository {
+            install_directory: "Game".to_string(),
+            depots: vec![depot(&["en-US"], true), depot(&["en-US"], false)],
+            dependencies: vec![],
+        };
+        let picked = pick_depot(&repo, "fr-FR").unwrap();
+        assert!(!picked.is_gog_depot);
     }
 
     /// Full pipeline against a real owned game (Alone in the Dark 1, id
@@ -381,5 +558,69 @@ mod tests {
             .expect("download_chunk failed verification on every endpoint");
         assert_eq!(bytes.len() as u64, chunk.size);
         assert_eq!(hex_md5(&bytes), chunk.md5);
+    }
+
+    /// Same account/product as `downloads_and_verifies_a_real_metadata_chunk`,
+    /// but exercises the full `download_depot` orchestration path — every
+    /// file in the tiny `isGogDepot` metadata depot, not just its first
+    /// chunk — into a scratch temp dir, then checks the files actually
+    /// landed on disk with the right sizes.
+    #[test]
+    #[ignore]
+    fn download_depot_installs_a_real_metadata_depot() {
+        let home = std::env::var("HOME").expect("HOME not set");
+        let state_path = format!("{home}/.config/backlog-tracker/state.json");
+        let state_json = std::fs::read_to_string(&state_path)
+            .unwrap_or_else(|e| panic!("cannot read {state_path}: {e}"));
+        let state: serde_json::Value =
+            serde_json::from_str(&state_json).expect("state.json is not valid JSON");
+        let access_token = state["gog_tokens"]["access_token"]
+            .as_str()
+            .expect("no gog_tokens.access_token in state.json")
+            .to_string();
+
+        const PRODUCT_ID: u64 = 1207660923; // Alone in the Dark 1
+
+        let builds =
+            fetch_builds(&access_token, PRODUCT_ID, "windows").expect("fetch_builds failed");
+        let build = pick_build(&builds).expect("no build returned");
+        let repo = fetch_repository(&access_token, build).expect("fetch_repository failed");
+
+        let metadata_depot = repo
+            .depots
+            .iter()
+            .find(|d| d.is_gog_depot)
+            .expect("no isGogDepot metadata depot found on this build");
+        let manifest = fetch_depot_manifest(&access_token, metadata_depot)
+            .expect("fetch_depot_manifest failed");
+        let endpoints =
+            fetch_secure_link(&access_token, PRODUCT_ID).expect("fetch_secure_link failed");
+
+        let dest_root = std::env::temp_dir().join("tatu-gog-download-test");
+        let _ = std::fs::remove_dir_all(&dest_root);
+
+        download_depot(
+            PRODUCT_ID,
+            &endpoints,
+            metadata_depot,
+            &manifest,
+            &dest_root,
+            |item| eprintln!("downloading {}", item.path),
+        )
+        .expect("download_depot failed");
+
+        let mut files_checked = 0;
+        for item in manifest.items.iter().filter(|i| i.is_file()) {
+            let on_disk = dest_root.join(&item.path);
+            let expected_size: u64 = item.chunks.iter().map(|c| c.size).sum();
+            let actual_size = std::fs::metadata(&on_disk)
+                .unwrap_or_else(|e| panic!("{on_disk:?} missing after download_depot: {e}"))
+                .len();
+            assert_eq!(actual_size, expected_size, "{on_disk:?} size mismatch");
+            files_checked += 1;
+        }
+        assert!(files_checked > 0, "manifest had no file entries to check");
+
+        std::fs::remove_dir_all(&dest_root).ok();
     }
 }

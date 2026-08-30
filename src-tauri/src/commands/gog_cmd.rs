@@ -1,7 +1,10 @@
+use std::path::PathBuf;
+
 use tauri::{Emitter, Manager, State};
 
 use crate::SharedState;
 use crate::gog_account::{self, GogTokens};
+use crate::gog_download;
 
 /// Delay between per-game title lookups during a library sync — same
 /// politeness convention `drm_cmd`'s bulk sync already uses for PCGamingWiki
@@ -141,4 +144,106 @@ pub async fn fetch_gog_extra_details(app_id: u64) -> Result<gog_account::GogExtr
     tokio::task::spawn_blocking(move || gog_account::fetch_extra_details(app_id))
         .await
         .map_err(|e| format!("Task error: {e}"))
+}
+
+/// Downloads and installs `product_id` under `cartridge_base` in the
+/// background, emitting `gog_download_progress` per file and
+/// `gog_download_done`/`gog_download_error` at the end — same
+/// background-thread-plus-events shape `fetch_gog_library` already uses.
+///
+/// `cartridge_base` is taken as-is from the caller rather than any
+/// GOG-specific cartridge layout decided here (that's a separate,
+/// not-yet-designed piece, #243) — the actual game folder name under it
+/// comes from GOG's own `Repository.install_directory`, not invented by
+/// this command.
+#[tauri::command]
+pub fn gog_download_game(
+    app: tauri::AppHandle,
+    product_id: u64,
+    cartridge_base: String,
+    language: String,
+    state: State<'_, SharedState>,
+) -> Result<(), String> {
+    let tokens = {
+        let s = state.lock().map_err(|e| e.to_string())?;
+        s.gog_tokens
+            .clone()
+            .ok_or("No hay una cuenta GOG conectada")?
+    };
+
+    std::thread::spawn(move || {
+        if let Err(e) = run_gog_download(&app, &tokens, product_id, &cartridge_base, &language) {
+            let _ = app.emit("gog_download_error", e);
+        }
+    });
+
+    Ok(())
+}
+
+fn run_gog_download(
+    app: &tauri::AppHandle,
+    tokens: &GogTokens,
+    product_id: u64,
+    cartridge_base: &str,
+    language: &str,
+) -> Result<(), String> {
+    let access_token = refreshed_access_token(app, tokens)?;
+
+    let builds = gog_download::fetch_builds(&access_token, product_id, "windows")?;
+    let build = gog_download::pick_build(&builds).ok_or("GOG no devolvió ningún build")?;
+    if build.generation != 2 {
+        return Err(format!(
+            "build generation {} no soportada (solo content-system v2)",
+            build.generation
+        ));
+    }
+    if build.product_id != product_id.to_string() {
+        return Err(format!(
+            "el build pertenece al producto {}, no a {product_id}",
+            build.product_id
+        ));
+    }
+    let _ = app.emit(
+        "gog_download_started",
+        serde_json::json!({
+            "product_id": product_id,
+            "version_name": build.version_name,
+            "os": build.os,
+        }),
+    );
+    let repo = gog_download::fetch_repository(&access_token, build)?;
+    if !repo.dependencies.is_empty() {
+        return Err(format!(
+            "este juego necesita dependencias externas ({}) — todavía no soportado",
+            repo.dependencies.join(", ")
+        ));
+    }
+    let depot =
+        gog_download::pick_depot(&repo, language).ok_or("El repositorio no tiene depots")?;
+    let manifest = gog_download::fetch_depot_manifest(&access_token, depot)?;
+    let endpoints = gog_download::fetch_secure_link(&access_token, product_id)?;
+
+    let dest_root = gog_download::install_root(&PathBuf::from(cartridge_base), &repo);
+    let total = manifest.items.iter().filter(|i| i.is_file()).count();
+    let mut done = 0usize;
+    gog_download::download_depot(
+        product_id,
+        &endpoints,
+        depot,
+        &manifest,
+        &dest_root,
+        |item| {
+            done += 1;
+            let _ = app.emit(
+                "gog_download_progress",
+                serde_json::json!({ "current": done, "total": total, "path": item.path }),
+            );
+        },
+    )?;
+
+    let _ = app.emit(
+        "gog_download_done",
+        serde_json::json!({ "product_id": product_id }),
+    );
+    Ok(())
 }
