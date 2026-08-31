@@ -27,7 +27,13 @@ signal clicked(index: int)
 const ASPECT_RATIO := 220.0 / 330.0
 const NAME_OVERLAY_HEIGHT_RATIO := 56.0 / 330.0
 const CORNER_RADIUS := 18
-const SELECTED_SCALE := Vector2(1.08, 1.08)
+const SELECTED_SCALE := Vector2(1.05, 1.05)
+# Live-reported (2026-08-31): the non-selected cards barely shrunk/faded at
+# all (baseline was a flat 1.0/opaque, only the selected card grew above
+# it) — pushed further apart so the selected card actually reads as
+# "the one in focus" against the rest, and the background behind the
+# unselected cards shows through more.
+const UNSELECTED_SCALE := Vector2(0.78, 0.78)
 const SELECT_DURATION := 0.4
 const FONT_DISPLAY := "res://assets/fonts/Rajdhani-SemiBold.ttf"
 
@@ -119,13 +125,15 @@ func resize(height: float) -> void:
 ## Called by the carousel every time the selection changes — this card does
 ## not track its own selected state.
 func set_selected(selected: bool) -> void:
-	var target_scale := SELECTED_SCALE if selected else Vector2.ONE
-	var target_modulate := Color.WHITE if selected else Color(1, 1, 1, 0.6)
+	var target_scale := SELECTED_SCALE if selected else UNSELECTED_SCALE
+	var target_modulate := Color.WHITE if selected else Color(1, 1, 1, 0.35)
 	if _tween:
 		_tween.kill()
 	_tween = create_tween().set_parallel(true)
+	# TRANS_CUBIC instead of TRANS_BOUNCE (user request, 2026-08-31): smooth
+	# deceleration into the target size, no overshoot/oscillation at the end.
 	_tween.tween_property(self, "scale", target_scale, SELECT_DURATION) \
-		.set_trans(Tween.TRANS_BOUNCE).set_ease(Tween.EASE_OUT)
+		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 	_tween.tween_property(self, "modulate", target_modulate, SELECT_DURATION * 0.6) \
 		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 
