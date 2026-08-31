@@ -7,7 +7,7 @@ use crate::drm::Preservability;
 use crate::steam::library_paths;
 
 use super::drives::list_removable_drives;
-use super::marker::{CartridgeApp, add_app, has_cartridge_structure, list_apps};
+use super::marker::{AppSource, CartridgeApp, add_app, has_cartridge_structure, list_apps};
 
 /// Steam's own client owns everything from here: download, EULA, its own
 /// disk-selection prompt if more than one library qualifies.
@@ -57,6 +57,7 @@ pub fn poll_install_status(
         CartridgeApp {
             app_id,
             name: name.to_string(),
+            source: AppSource::Steam,
             preservability,
             standalone: false,
             exe_path: String::new(),
@@ -117,6 +118,7 @@ pub fn sync_marker_with_installed_apps(mount_point: &Path) -> Result<(), String>
             CartridgeApp {
                 app_id,
                 name,
+                source: AppSource::Steam,
                 preservability: Preservability::default(),
                 standalone: false,
                 exe_path: String::new(),
@@ -318,6 +320,7 @@ mod tests {
             CartridgeApp {
                 app_id: 1,
                 name: "Already Tracked".to_string(),
+                source: AppSource::Steam,
                 preservability: Preservability::Easy,
                 standalone: true,
                 exe_path: "steamapps/common/Game/game.exe".to_string(),

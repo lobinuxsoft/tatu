@@ -201,12 +201,40 @@ pub async fn fetch_cartridge_art(
     cartridge::fetch_cartridge_art(api_key, PathBuf::from(mount_point), app_id).await
 }
 
+/// Same as `fetch_cartridge_art`, for a GOG app — no Steam appid to key
+/// SteamGridDB off, so `title` (the name already known from `gog_library`)
+/// drives a title search instead. See `cartridge::fetch_gog_cartridge_art`.
+#[tauri::command]
+pub async fn fetch_gog_cartridge_art(
+    state: State<'_, SharedState>,
+    app_id: u64,
+    title: String,
+    mount_point: String,
+) -> Result<(), String> {
+    let api_key = {
+        let s = state.lock().map_err(|e| e.to_string())?;
+        s.steamgriddb_api_key.clone()
+    };
+    cartridge::fetch_gog_cartridge_art(api_key, PathBuf::from(mount_point), app_id, title).await
+}
+
 /// Caches this app's short Steam store description onto the cartridge
 /// (#205), for the launcher's info panel (#204). Public endpoint, no API
 /// key. Same best-effort treatment as `fetch_cartridge_art`.
 #[tauri::command]
 pub async fn fetch_cartridge_description(app_id: u64, mount_point: String) -> Result<(), String> {
     cartridge::fetch_cartridge_description(PathBuf::from(mount_point), app_id).await
+}
+
+/// Same as `fetch_cartridge_description`, for a GOG app matched to a Steam
+/// listing by title. See `cartridge::fetch_gog_cartridge_description`.
+#[tauri::command]
+pub async fn fetch_gog_cartridge_description(
+    app_id: u64,
+    title: String,
+    mount_point: String,
+) -> Result<(), String> {
+    cartridge::fetch_gog_cartridge_description(PathBuf::from(mount_point), app_id, title).await
 }
 
 /// Caches this app's Steam store screenshots onto the cartridge (#213's
@@ -217,6 +245,17 @@ pub async fn fetch_cartridge_screenshots(app_id: u64, mount_point: String) -> Re
     cartridge::fetch_cartridge_screenshots(PathBuf::from(mount_point), app_id).await
 }
 
+/// Same as `fetch_cartridge_screenshots`, for a GOG app matched to a Steam
+/// listing by title. See `cartridge::fetch_gog_cartridge_screenshots`.
+#[tauri::command]
+pub async fn fetch_gog_cartridge_screenshots(
+    app_id: u64,
+    title: String,
+    mount_point: String,
+) -> Result<(), String> {
+    cartridge::fetch_gog_cartridge_screenshots(PathBuf::from(mount_point), app_id, title).await
+}
+
 /// Caches this app's Steam trailer, transcoded to `.ogv`, onto the
 /// cartridge (#212). Opt-in — only called when the Cartucho tab's
 /// "Preparar launcher" step has the trailer toggle checked, unlike art and
@@ -224,6 +263,17 @@ pub async fn fetch_cartridge_screenshots(app_id: u64, mount_point: String) -> Re
 #[tauri::command]
 pub async fn fetch_cartridge_trailer(app_id: u64, mount_point: String) -> Result<(), String> {
     cartridge::fetch_cartridge_trailer(PathBuf::from(mount_point), app_id).await
+}
+
+/// Same as `fetch_cartridge_trailer`, for a GOG app matched to a Steam
+/// listing by title. See `cartridge::fetch_gog_cartridge_trailer`.
+#[tauri::command]
+pub async fn fetch_gog_cartridge_trailer(
+    app_id: u64,
+    title: String,
+    mount_point: String,
+) -> Result<(), String> {
+    cartridge::fetch_gog_cartridge_trailer(PathBuf::from(mount_point), app_id, title).await
 }
 
 /// Bundles the shared umu-run + Proton + Steam Linux Runtime files onto the
