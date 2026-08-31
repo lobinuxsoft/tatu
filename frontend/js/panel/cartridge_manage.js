@@ -275,13 +275,33 @@ async function prepareLauncher(drive, apps, includeTrailers) {
       await invoke("bundle_linux_runtime", { mountPoint });
     }
 
-    for (let i = 0; i < apps.length; i++) {
-      const app = apps[i];
-      setStatus(`Bajando arte, descripción y capturas (${i + 1}/${apps.length}): ${app.name}`);
+    // GOG apps carry a GOG product id in `app_id`, not a Steam appid, so
+    // none of these three can key off it directly. Each GOG variant tries
+    // to resolve the same title to a Steam listing first (real per-appid
+    // art/description/screenshots when a GOG game also happens to be sold
+    // on Steam) and falls back to SteamGridDB's own title search for art
+    // only when no Steam match exists — description/screenshots have no
+    // non-Steam source wired here at all, so those two are just empty
+    // without a match. Live-reported (#243 follow-up): a downloaded GOG
+    // game showed a blank launcher card next to Steam entries with real art.
+    const steamApps = apps.filter(a => a.source !== "gog");
+    const gogApps = apps.filter(a => a.source === "gog");
+    for (let i = 0; i < steamApps.length; i++) {
+      const app = steamApps[i];
+      setStatus(`Bajando arte, descripción y capturas (${i + 1}/${steamApps.length}): ${app.name}`);
       await Promise.all([
         invoke("fetch_cartridge_art", { appId: app.app_id, mountPoint }).catch(() => {}),
         invoke("fetch_cartridge_description", { appId: app.app_id, mountPoint }).catch(() => {}),
         invoke("fetch_cartridge_screenshots", { appId: app.app_id, mountPoint }).catch(() => {}),
+      ]);
+    }
+    for (let i = 0; i < gogApps.length; i++) {
+      const app = gogApps[i];
+      setStatus(`Bajando arte, descripción y capturas (GOG) (${i + 1}/${gogApps.length}): ${app.name}`);
+      await Promise.all([
+        invoke("fetch_gog_cartridge_art", { appId: app.app_id, title: app.name, mountPoint }).catch(() => {}),
+        invoke("fetch_gog_cartridge_description", { appId: app.app_id, title: app.name, mountPoint }).catch(() => {}),
+        invoke("fetch_gog_cartridge_screenshots", { appId: app.app_id, title: app.name, mountPoint }).catch(() => {}),
       ]);
     }
 
@@ -289,10 +309,15 @@ async function prepareLauncher(drive, apps, includeTrailers) {
     // real wall-clock time (ffmpeg, not just an HTTP GET), worth its own
     // per-game progress line instead of hiding inside the loop above.
     if (includeTrailers) {
-      for (let i = 0; i < apps.length; i++) {
-        const app = apps[i];
-        setStatus(`Bajando trailer (${i + 1}/${apps.length}): ${app.name}...`);
+      for (let i = 0; i < steamApps.length; i++) {
+        const app = steamApps[i];
+        setStatus(`Bajando trailer (${i + 1}/${steamApps.length}): ${app.name}...`);
         await invoke("fetch_cartridge_trailer", { appId: app.app_id, mountPoint }).catch(() => {});
+      }
+      for (let i = 0; i < gogApps.length; i++) {
+        const app = gogApps[i];
+        setStatus(`Bajando trailer (GOG) (${i + 1}/${gogApps.length}): ${app.name}...`);
+        await invoke("fetch_gog_cartridge_trailer", { appId: app.app_id, title: app.name, mountPoint }).catch(() => {});
       }
     }
 

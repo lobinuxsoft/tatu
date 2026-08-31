@@ -39,6 +39,11 @@
 .detail-tab-panel.active { display: block; flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .detail-tab-panel.active { display: block; }
 .detail-desc { font-size: 0.82rem; color: var(--fg-dim); margin: 0.5rem 0; line-height: 1.5; }
+.detail-desc-toggle { margin: 0.5rem 0; }
+.detail-desc-toggle > summary { font-family: var(--font-display); color: var(--fg-muted); font-size: 0.7rem; text-transform: var(--display-transform); letter-spacing: var(--display-tracking); font-weight: 700; cursor: pointer; user-select: none; }
+.detail-desc-toggle > summary:hover { color: var(--fg-strong); }
+.detail-desc-toggle[open] > summary { color: var(--accent); margin-bottom: 0.3rem; }
+.gog-dl-path { font-size: 0.72rem; color: var(--fg-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 0.3rem; }
 .detail-tags { display: flex; flex-wrap: wrap; gap: 0.3rem; margin: 0.5rem 0; }
 .detail-info-row { display: flex; gap: 0.5rem; margin-bottom: 0.5rem; font-size: 0.82rem; }
 .detail-info-label { font-family: var(--font-display); color: var(--fg-muted); min-width: 95px; flex-shrink: 0; font-size: 0.7rem; text-transform: var(--display-transform); letter-spacing: var(--display-tracking); font-weight: 700; }
