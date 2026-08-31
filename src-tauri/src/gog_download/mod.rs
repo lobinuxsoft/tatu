@@ -39,7 +39,7 @@ pub struct Build {
     pub link: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct Repository {
     #[serde(rename = "installDirectory")]
     pub install_directory: String,
@@ -252,8 +252,19 @@ pub fn download_chunk(endpoints: &[CdnEndpoint], chunk: &Chunk) -> Result<Vec<u8
     let mut last_err = "no CDN endpoints available".to_string();
     for endpoint in endpoints {
         let url = build_chunk_url(endpoint, &chunk.compressed_md5);
+        // ureq caps `read_to_vec()` at 10MB by default — real GOG chunks
+        // exceed that (confirmed live: a 443MB game hit the cap on its
+        // first oversized chunk, failing every endpoint with a body-size
+        // error instead of a real network/checksum failure). The manifest
+        // already tells us the exact expected size, so the limit is set
+        // from that instead of a guessed constant.
         let compressed = match ureq::get(&url).call() {
-            Ok(mut response) => match response.body_mut().read_to_vec() {
+            Ok(mut response) => match response
+                .body_mut()
+                .with_config()
+                .limit(chunk.compressed_size + 4096)
+                .read_to_vec()
+            {
                 Ok(bytes) => bytes,
                 Err(e) => {
                     last_err = format!("{}: read failed: {e}", endpoint.endpoint_name);
@@ -386,13 +397,20 @@ pub fn download_file(
 /// (`size`/`compressed_size`) against what the manifest's chunks actually
 /// summed to — catches a stale manifest or wrong depot picked, a class of
 /// mistake per-chunk MD5 checks alone can't see.
+/// `on_progress` returning `false` stops the download after the current
+/// file — cooperative cancellation, checked once per file rather than
+/// threaded into every chunk request. Live UX finding (2026-08-30): a
+/// download modal that could only ever be dismissed by clicking outside it
+/// (no real cancel) left the user unable to tell whether a download was
+/// still running in the background — real cancellation needed a real stop
+/// signal, not just hiding the UI.
 pub fn download_depot(
     product_id: u64,
     endpoints: &[CdnEndpoint],
     depot: &Depot,
     manifest: &DepotManifest,
     dest_root: &Path,
-    mut on_progress: impl FnMut(&DepotItem),
+    mut on_progress: impl FnMut(&DepotItem) -> bool,
 ) -> Result<(), String> {
     if depot.product_id != product_id.to_string() {
         return Err(format!(
@@ -407,7 +425,9 @@ pub fn download_depot(
         if !item.is_file() {
             continue;
         }
-        on_progress(item);
+        if !on_progress(item) {
+            return Err("download cancelled".to_string());
+        }
         download_file(endpoints, item, dest_root)?;
         for chunk in &item.chunks {
             actual_size += chunk.size;
@@ -605,7 +625,10 @@ mod tests {
             metadata_depot,
             &manifest,
             &dest_root,
-            |item| eprintln!("downloading {}", item.path),
+            |item| {
+                eprintln!("downloading {}", item.path);
+                true
+            },
         )
         .expect("download_depot failed");
 

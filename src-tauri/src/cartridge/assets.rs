@@ -19,6 +19,18 @@ struct GridImage {
 }
 
 #[derive(Debug, Deserialize)]
+struct SteamGridDbSearch {
+    success: bool,
+    #[serde(default)]
+    data: Vec<SteamGridDbSearchResult>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SteamGridDbSearchResult {
+    id: u64,
+}
+
+#[derive(Debug, Deserialize)]
 struct AppDetailsEntry {
     success: bool,
     data: Option<AppDetailsData>,
@@ -75,16 +87,10 @@ pub async fn fetch_cartridge_art(
 }
 
 fn fetch_cartridge_art_sync(api_key: &str, mount_point: &Path, app_id: u64) -> Result<(), String> {
-    let dir = mount_point.join("assets").join(app_id.to_string());
     if api_key.is_empty() {
         return Err("No SteamGridDB API key configured".to_string());
     }
-
-    let agent = ureq::Agent::new_with_config(
-        ureq::config::Config::builder()
-            .timeout_global(Some(Duration::from_secs(15)))
-            .build(),
-    );
+    let agent = new_steamgriddb_agent();
 
     let grids: GridsResponse = agent
         .get(format!(
@@ -97,6 +103,101 @@ fn fetch_cartridge_art_sync(api_key: &str, mount_point: &Path, app_id: u64) -> R
         .read_json()
         .map_err(|e| format!("SteamGridDB response parse failed: {e}"))?;
 
+    save_first_grid_image(&agent, mount_point, app_id, grids)
+}
+
+/// Same SteamGridDB cover art cache as `fetch_cartridge_art`, for a GOG
+/// game (#243 follow-up, live-reported: the launcher showed a blank card
+/// for a downloaded GOG game while every Steam entry next to it had real
+/// art). Tries `find_steam_appid_by_title` first and reuses the exact same
+/// `/grids/steam/{id}` lookup Steam apps get if a confirmed Steam match
+/// exists — real per-appid art beats a fuzzy title search. Only falls back
+/// to SteamGridDB's own `/search/autocomplete` (first result trusted, same
+/// "good enough without a confirmed exact match" level
+/// `drm::gog::confirmed_on_gog` already accepts elsewhere in this
+/// codebase) when no Steam listing was found at all.
+pub async fn fetch_gog_cartridge_art(
+    api_key: String,
+    mount_point: PathBuf,
+    app_id: u64,
+    title: String,
+) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        fetch_gog_cartridge_art_sync(&api_key, &mount_point, app_id, &title)
+    })
+    .await
+    .map_err(|e| format!("Task error: {e}"))?
+}
+
+fn fetch_gog_cartridge_art_sync(
+    api_key: &str,
+    mount_point: &Path,
+    app_id: u64,
+    title: &str,
+) -> Result<(), String> {
+    if api_key.is_empty() {
+        return Err("No SteamGridDB API key configured".to_string());
+    }
+    let agent = new_steamgriddb_agent();
+
+    let grids_url = match find_steam_appid_by_title(&agent, title) {
+        Some(steam_app_id) => {
+            format!("https://www.steamgriddb.com/api/v2/grids/steam/{steam_app_id}")
+        }
+        None => {
+            let search: SteamGridDbSearch = agent
+                .get(format!(
+                    "https://www.steamgriddb.com/api/v2/search/autocomplete/{}",
+                    urlencoding::encode(title)
+                ))
+                .header("Authorization", &format!("Bearer {api_key}"))
+                .call()
+                .map_err(|e| format!("SteamGridDB search failed: {e}"))?
+                .into_body()
+                .read_json()
+                .map_err(|e| format!("SteamGridDB search response parse failed: {e}"))?;
+            if !search.success {
+                return Err("SteamGridDB reported an unsuccessful search".to_string());
+            }
+            let Some(matched) = search.data.first() else {
+                return Ok(());
+            };
+            format!(
+                "https://www.steamgriddb.com/api/v2/grids/game/{}",
+                matched.id
+            )
+        }
+    };
+
+    let grids: GridsResponse = agent
+        .get(&grids_url)
+        .header("Authorization", &format!("Bearer {api_key}"))
+        .call()
+        .map_err(|e| format!("SteamGridDB request failed: {e}"))?
+        .into_body()
+        .read_json()
+        .map_err(|e| format!("SteamGridDB response parse failed: {e}"))?;
+
+    save_first_grid_image(&agent, mount_point, app_id, grids)
+}
+
+fn new_steamgriddb_agent() -> ureq::Agent {
+    ureq::Agent::new_with_config(
+        ureq::config::Config::builder()
+            .timeout_global(Some(Duration::from_secs(15)))
+            .build(),
+    )
+}
+
+/// Downloads and saves the first grid image in `grids` to
+/// `assets/<app_id>/grid.<ext>`, if any — no match is not an error (see
+/// `fetch_cartridge_art`'s own doc comment).
+fn save_first_grid_image(
+    agent: &ureq::Agent,
+    mount_point: &Path,
+    app_id: u64,
+    grids: GridsResponse,
+) -> Result<(), String> {
     if !grids.success {
         return Err("SteamGridDB reported an unsuccessful request".to_string());
     }
@@ -113,6 +214,7 @@ fn fetch_cartridge_art_sync(api_key: &str, mount_point: &Path, app_id: u64) -> R
         .read_to_vec()
         .map_err(|e| format!("Cover art read failed: {e}"))?;
 
+    let dir = mount_point.join("assets").join(app_id.to_string());
     fs::create_dir_all(&dir).map_err(|e| format!("Cannot create {}: {e}", dir.display()))?;
     // A re-fetch can land a different extension than last time (SteamGridDB
     // switches formats between calls) — remove any stale grid.* first so
@@ -139,6 +241,65 @@ fn remove_grid_art(dir: &Path) {
     }
 }
 
+/// GETs and parses `appdetails` for `steam_app_id`, returning `None` for
+/// "nothing here" the same way every caller below already treated it
+/// (missing key, `success: false`, or absent `data`) — shared by every
+/// Steam-appdetails-backed asset fetch, native Steam or GOG-via-Steam-match
+/// alike, so the request/parse shape only lives in one place.
+fn fetch_appdetails(
+    agent: &ureq::Agent,
+    steam_app_id: u64,
+) -> Result<Option<AppDetailsData>, String> {
+    let mut response: HashMap<String, AppDetailsEntry> = agent
+        .get(format!(
+            "https://store.steampowered.com/api/appdetails?appids={steam_app_id}"
+        ))
+        .call()
+        .map_err(|e| format!("Steam appdetails request failed: {e}"))?
+        .into_body()
+        .read_json()
+        .map_err(|e| format!("Steam appdetails response parse failed: {e}"))?;
+    Ok(response
+        .remove(&steam_app_id.to_string())
+        .and_then(|entry| entry.success.then_some(entry.data).flatten()))
+}
+
+/// Resolves `title` to a Steam appid via Steam's own (public,
+/// unauthenticated) store search — lets a GOG title that also happens to be
+/// sold on Steam (live case, 2026-08-30: "Leap of Love") reuse the much
+/// richer Steam pipeline (description, screenshots, trailer, real
+/// per-appid cover art) instead of being stuck with nothing but a
+/// title-searched SteamGridDB cover. Only an EXACT normalized-title match
+/// is trusted — same rigor `gog_account::fetch_genres_and_developers`
+/// already applies to its own cross-catalog title search, for the same
+/// reason: the first "similar" result is not good enough, a wrong appid
+/// would cache a completely different game's art under this one.
+fn find_steam_appid_by_title(agent: &ureq::Agent, title: &str) -> Option<u64> {
+    #[derive(Deserialize)]
+    struct SearchResponse {
+        #[serde(default)]
+        items: Vec<SearchItem>,
+    }
+    #[derive(Deserialize)]
+    struct SearchItem {
+        id: u64,
+        name: String,
+    }
+
+    let url = format!(
+        "https://store.steampowered.com/api/storesearch/?term={}&cc=us&l=english",
+        urlencoding::encode(title)
+    );
+    let response: SearchResponse = agent.get(&url).call().ok()?.into_body().read_json().ok()?;
+
+    let target = crate::gog_account::normalize_title(title);
+    response
+        .items
+        .into_iter()
+        .find(|item| crate::gog_account::normalize_title(&item.name) == target)
+        .map(|item| item.id)
+}
+
 /// Caches this app's short store description at
 /// `assets/<app_id>/description.txt` on the cartridge — the carousel's info
 /// panel (#204) reads this local file, same offline-first reasoning as the
@@ -146,43 +307,47 @@ fn remove_grid_art(dir: &Path) {
 /// Always re-fetched, same "cheap enough to just redo it" reasoning as the
 /// cover art.
 pub async fn fetch_cartridge_description(mount_point: PathBuf, app_id: u64) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || fetch_cartridge_description_sync(&mount_point, app_id))
-        .await
-        .map_err(|e| format!("Task error: {e}"))?
+    tokio::task::spawn_blocking(move || {
+        fetch_cartridge_description_sync(&mount_point, app_id, app_id)
+    })
+    .await
+    .map_err(|e| format!("Task error: {e}"))?
 }
 
-fn fetch_cartridge_description_sync(mount_point: &Path, app_id: u64) -> Result<(), String> {
-    let dir = mount_point.join("assets").join(app_id.to_string());
+/// Same as `fetch_cartridge_description`, for a GOG app matched to a Steam
+/// listing by title (see `find_steam_appid_by_title`) — `Ok(())` with
+/// nothing written when no match exists, same "not an error" treatment as
+/// no description found on a real Steam app.
+pub async fn fetch_gog_cartridge_description(
+    mount_point: PathBuf,
+    app_id: u64,
+    title: String,
+) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        let agent = new_steamgriddb_agent();
+        let Some(steam_app_id) = find_steam_appid_by_title(&agent, &title) else {
+            return Ok(());
+        };
+        fetch_cartridge_description_sync(&mount_point, app_id, steam_app_id)
+    })
+    .await
+    .map_err(|e| format!("Task error: {e}"))?
+}
 
-    let agent = ureq::Agent::new_with_config(
-        ureq::config::Config::builder()
-            .timeout_global(Some(Duration::from_secs(15)))
-            .build(),
-    );
-
-    let mut response: HashMap<String, AppDetailsEntry> = agent
-        .get(format!(
-            "https://store.steampowered.com/api/appdetails?appids={app_id}"
-        ))
-        .call()
-        .map_err(|e| format!("Steam appdetails request failed: {e}"))?
-        .into_body()
-        .read_json()
-        .map_err(|e| format!("Steam appdetails response parse failed: {e}"))?;
-
-    let Some(entry) = response.remove(&app_id.to_string()) else {
-        return Ok(());
-    };
-    let Some(description) = entry
-        .success
-        .then_some(entry.data)
-        .flatten()
+fn fetch_cartridge_description_sync(
+    mount_point: &Path,
+    asset_app_id: u64,
+    steam_app_id: u64,
+) -> Result<(), String> {
+    let agent = new_steamgriddb_agent();
+    let Some(description) = fetch_appdetails(&agent, steam_app_id)?
         .map(|d| d.short_description)
         .filter(|d| !d.is_empty())
     else {
         return Ok(());
     };
 
+    let dir = mount_point.join("assets").join(asset_app_id.to_string());
     fs::create_dir_all(&dir).map_err(|e| format!("Cannot create {}: {e}", dir.display()))?;
     fs::write(dir.join("description.txt"), description)
         .map_err(|e| format!("Cannot write description: {e}"))
@@ -198,43 +363,46 @@ fn fetch_cartridge_description_sync(mount_point: &Path, app_id: u64) -> Result<(
 /// (often a dozen-plus, unlike a single grid image) on every "Preparar
 /// launcher" click would add up as a cartridge's library grows.
 pub async fn fetch_cartridge_screenshots(mount_point: PathBuf, app_id: u64) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || fetch_cartridge_screenshots_sync(&mount_point, app_id))
-        .await
-        .map_err(|e| format!("Task error: {e}"))?
+    tokio::task::spawn_blocking(move || {
+        fetch_cartridge_screenshots_sync(&mount_point, app_id, app_id)
+    })
+    .await
+    .map_err(|e| format!("Task error: {e}"))?
 }
 
-fn fetch_cartridge_screenshots_sync(mount_point: &Path, app_id: u64) -> Result<(), String> {
+/// Same as `fetch_cartridge_screenshots`, for a GOG app matched to a Steam
+/// listing by title — see `fetch_gog_cartridge_description`.
+pub async fn fetch_gog_cartridge_screenshots(
+    mount_point: PathBuf,
+    app_id: u64,
+    title: String,
+) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        let agent = new_steamgriddb_agent();
+        let Some(steam_app_id) = find_steam_appid_by_title(&agent, &title) else {
+            return Ok(());
+        };
+        fetch_cartridge_screenshots_sync(&mount_point, app_id, steam_app_id)
+    })
+    .await
+    .map_err(|e| format!("Task error: {e}"))?
+}
+
+fn fetch_cartridge_screenshots_sync(
+    mount_point: &Path,
+    asset_app_id: u64,
+    steam_app_id: u64,
+) -> Result<(), String> {
     let dir = mount_point
         .join("assets")
-        .join(app_id.to_string())
+        .join(asset_app_id.to_string())
         .join("screenshots");
     if fs::read_dir(&dir).is_ok_and(|mut entries| entries.next().is_some()) {
         return Ok(());
     }
 
-    let agent = ureq::Agent::new_with_config(
-        ureq::config::Config::builder()
-            .timeout_global(Some(Duration::from_secs(15)))
-            .build(),
-    );
-
-    let mut response: HashMap<String, AppDetailsEntry> = agent
-        .get(format!(
-            "https://store.steampowered.com/api/appdetails?appids={app_id}"
-        ))
-        .call()
-        .map_err(|e| format!("Steam appdetails request failed: {e}"))?
-        .into_body()
-        .read_json()
-        .map_err(|e| format!("Steam appdetails response parse failed: {e}"))?;
-
-    let Some(entry) = response.remove(&app_id.to_string()) else {
-        return Ok(());
-    };
-    let screenshots = entry
-        .success
-        .then_some(entry.data)
-        .flatten()
+    let agent = new_steamgriddb_agent();
+    let screenshots = fetch_appdetails(&agent, steam_app_id)?
         .map(|d| d.screenshots)
         .unwrap_or_default();
     if screenshots.is_empty() {
@@ -269,41 +437,42 @@ fn fetch_cartridge_screenshots_sync(mount_point: &Path, app_id: u64) -> Result<(
 /// falls back to a cached screenshot or the blurred cover art when this
 /// file is absent.
 pub async fn fetch_cartridge_trailer(mount_point: PathBuf, app_id: u64) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || fetch_cartridge_trailer_sync(&mount_point, app_id))
+    tokio::task::spawn_blocking(move || fetch_cartridge_trailer_sync(&mount_point, app_id, app_id))
         .await
         .map_err(|e| format!("Task error: {e}"))?
 }
 
-fn fetch_cartridge_trailer_sync(mount_point: &Path, app_id: u64) -> Result<(), String> {
-    let dir = mount_point.join("assets").join(app_id.to_string());
+/// Same as `fetch_cartridge_trailer`, for a GOG app matched to a Steam
+/// listing by title — see `fetch_gog_cartridge_description`.
+pub async fn fetch_gog_cartridge_trailer(
+    mount_point: PathBuf,
+    app_id: u64,
+    title: String,
+) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        let agent = new_steamgriddb_agent();
+        let Some(steam_app_id) = find_steam_appid_by_title(&agent, &title) else {
+            return Ok(());
+        };
+        fetch_cartridge_trailer_sync(&mount_point, app_id, steam_app_id)
+    })
+    .await
+    .map_err(|e| format!("Task error: {e}"))?
+}
+
+fn fetch_cartridge_trailer_sync(
+    mount_point: &Path,
+    asset_app_id: u64,
+    steam_app_id: u64,
+) -> Result<(), String> {
+    let dir = mount_point.join("assets").join(asset_app_id.to_string());
     let dest = dir.join("trailer.ogv");
     if dest.is_file() {
         return Ok(());
     }
 
-    let agent = ureq::Agent::new_with_config(
-        ureq::config::Config::builder()
-            .timeout_global(Some(Duration::from_secs(15)))
-            .build(),
-    );
-
-    let mut response: HashMap<String, AppDetailsEntry> = agent
-        .get(format!(
-            "https://store.steampowered.com/api/appdetails?appids={app_id}"
-        ))
-        .call()
-        .map_err(|e| format!("Steam appdetails request failed: {e}"))?
-        .into_body()
-        .read_json()
-        .map_err(|e| format!("Steam appdetails response parse failed: {e}"))?;
-
-    let Some(entry) = response.remove(&app_id.to_string()) else {
-        return Ok(());
-    };
-    let Some(master_url) = entry
-        .success
-        .then_some(entry.data)
-        .flatten()
+    let agent = new_steamgriddb_agent();
+    let Some(master_url) = fetch_appdetails(&agent, steam_app_id)?
         .and_then(|d| d.movies.into_iter().find_map(|m| m.hls_h264))
     else {
         return Ok(());
@@ -499,7 +668,7 @@ mod tests {
         fs::create_dir_all(&app_dir).unwrap();
         fs::write(app_dir.join("trailer.ogv"), b"already here").unwrap();
 
-        fetch_cartridge_trailer_sync(dir.path(), 1).unwrap();
+        fetch_cartridge_trailer_sync(dir.path(), 1, 1).unwrap();
 
         assert_eq!(
             fs::read(app_dir.join("trailer.ogv")).unwrap(),
@@ -514,7 +683,7 @@ mod tests {
         fs::create_dir_all(&shots_dir).unwrap();
         fs::write(shots_dir.join("00.jpg"), b"already here").unwrap();
 
-        fetch_cartridge_screenshots_sync(dir.path(), 1).unwrap();
+        fetch_cartridge_screenshots_sync(dir.path(), 1, 1).unwrap();
 
         let entries: Vec<_> = fs::read_dir(&shots_dir).unwrap().collect();
         assert_eq!(entries.len(), 1);

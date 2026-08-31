@@ -115,14 +115,12 @@ fn request_token(params: &[(&str, &str)]) -> Result<GogTokens, String> {
         .collect::<Vec<_>>()
         .join("&");
     let url = format!("https://auth.gog.com/token?{query}");
-    let mut response = ureq::get(&url)
-        .header("User-Agent", USER_AGENT)
-        .call()
-        .map_err(|e| format!("GOG token request failed: {e}"))?;
-    let body: serde_json::Value = response
-        .body_mut()
-        .read_json()
-        .map_err(|e| format!("GOG token response parse failed: {e}"))?;
+    // Retried like every other GOG call here (see `get_json_retrying`) —
+    // this one matters more than most: `refresh` runs before basically
+    // every GOG action (library sync, size check, download), so a single
+    // transient network blip here fails the whole action, not just one
+    // field.
+    let body = get_json_retrying(&url).ok_or_else(|| "GOG token request failed".to_string())?;
     let access_token = body
         .get("access_token")
         .and_then(|v| v.as_str())
@@ -139,26 +137,90 @@ fn request_token(params: &[(&str, &str)]) -> Result<GogTokens, String> {
     })
 }
 
-/// The IDs the account owns — `embed.gog.com/user/data/games` returns just
-/// numeric product IDs, no titles (confirmed against community docs).
+/// The IDs the account owns. `embed.gog.com/user/data/games`'s `owned`
+/// array turned out to include ids with no real product behind them: an
+/// orphaned id with zero data on any
+/// GOG endpoint (`api.gog.com/products/1486951595` → `{"error":"Product not
+/// found"}`), and whole bundle-container ids (e.g. "Alone in the Dark: The
+/// Trilogy 1+2+3") that aren't themselves a single installable game — both
+/// showed up live as garbage list rows (#243 follow-up). `getFilteredProducts`
+/// (`mediaType=1`, the same endpoint GOG's own library website uses) already
+/// filters down to real, installable games, so the id list comes from there
+/// instead — `fetch_details` per id below is unchanged, still the source of
+/// icon/background/release_date/genres/developers.
 fn fetch_owned_ids(access_token: &str) -> Result<Vec<u64>, String> {
-    let mut response = ureq::get("https://embed.gog.com/user/data/games")
-        .header("User-Agent", USER_AGENT)
-        .header("Authorization", &format!("Bearer {access_token}"))
-        .call()
-        .map_err(|e| format!("GOG library request failed: {e}"))?;
-    let body: serde_json::Value = response
-        .body_mut()
-        .read_json()
-        .map_err(|e| format!("GOG library response parse failed: {e}"))?;
-    let ids = body
-        .get("owned")
-        .and_then(|v| v.as_array())
-        .ok_or("GOG library response missing 'owned'")?
-        .iter()
-        .filter_map(|v| v.as_u64())
-        .collect();
+    let mut ids = Vec::new();
+    let mut page = 1u64;
+    loop {
+        let url =
+            format!("https://embed.gog.com/account/getFilteredProducts?mediaType=1&page={page}");
+        let mut response = ureq::get(&url)
+            .header("User-Agent", USER_AGENT)
+            .header("Authorization", &format!("Bearer {access_token}"))
+            .call()
+            .map_err(|e| format!("GOG library request failed: {e}"))?;
+        let body: serde_json::Value = response
+            .body_mut()
+            .read_json()
+            .map_err(|e| format!("GOG library response parse failed: {e}"))?;
+
+        let products = body
+            .get("products")
+            .and_then(|v| v.as_array())
+            .ok_or("GOG library response missing 'products'")?;
+        for p in products {
+            let is_game = p.get("isGame").and_then(|v| v.as_bool()).unwrap_or(false);
+            let base_missing = p
+                .get("isBaseProductMissing")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let available = p
+                .get("availability")
+                .and_then(|a| a.get("isAvailableInAccount"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
+            if let (true, false, true, Some(id)) = (
+                is_game,
+                base_missing,
+                available,
+                p.get("id").and_then(|v| v.as_u64()),
+            ) {
+                ids.push(id);
+            }
+        }
+
+        let total_pages = body.get("totalPages").and_then(|v| v.as_u64()).unwrap_or(1);
+        if page >= total_pages {
+            break;
+        }
+        page += 1;
+    }
     Ok(ids)
+}
+
+/// Retries a GET+JSON-parse up to 3 times (short backoff between attempts)
+/// before giving up. Confirmed live (2026-08-30): a single transient
+/// network blip during a bulk library sync silently downgraded a real,
+/// resolvable game (`Being a DIK - Season 1`, product id 1181224050) to
+/// showing its raw numeric id as the title — the request that would have
+/// succeeded on a second try was never retried, and nothing surfaced the
+/// failure, so the bad entry stuck around until the next full re-sync.
+fn get_json_retrying(url: &str) -> Option<serde_json::Value> {
+    const ATTEMPTS: u32 = 3;
+    for attempt in 1..=ATTEMPTS {
+        let body = ureq::get(url)
+            .header("User-Agent", USER_AGENT)
+            .call()
+            .ok()
+            .and_then(|mut r| r.body_mut().read_json::<serde_json::Value>().ok());
+        if body.is_some() {
+            return body;
+        }
+        if attempt < ATTEMPTS {
+            std::thread::sleep(std::time::Duration::from_millis(400));
+        }
+    }
+    None
 }
 
 /// Resolves a product id to its title via GOG's public, unauthenticated
@@ -186,10 +248,7 @@ fn fetch_details(id: u64) -> GogOwnedGame {
         developers: Vec::new(),
     };
     let url = format!("https://api.gog.com/products/{id}");
-    let Ok(mut response) = ureq::get(&url).header("User-Agent", USER_AGENT).call() else {
-        return fallback();
-    };
-    let Ok(body) = response.body_mut().read_json::<serde_json::Value>() else {
+    let Some(body) = get_json_retrying(&url) else {
         return fallback();
     };
 
@@ -313,10 +372,7 @@ fn fetch_genres_and_developers(title: &str) -> (Vec<String>, Vec<String>) {
         "https://catalog.gog.com/v1/catalog?query=like:{}&limit=10",
         urlencoding::encode(title)
     );
-    let Ok(mut response) = ureq::get(&url).header("User-Agent", USER_AGENT).call() else {
-        return empty;
-    };
-    let Ok(body) = response.body_mut().read_json::<serde_json::Value>() else {
+    let Some(body) = get_json_retrying(&url) else {
         return empty;
     };
     let Some(products) = body.get("products").and_then(|v| v.as_array()) else {
@@ -356,7 +412,7 @@ fn fetch_genres_and_developers(title: &str) -> (Vec<String>, Vec<String>) {
 /// its own copy rather than shared across modules: three lines, and the
 /// two call sites belong to different concerns (DRM classification vs.
 /// account/library data).
-fn normalize_title(title: &str) -> String {
+pub(crate) fn normalize_title(title: &str) -> String {
     title
         .to_lowercase()
         .chars()

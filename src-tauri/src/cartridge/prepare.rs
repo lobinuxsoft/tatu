@@ -4,7 +4,7 @@ use crate::drm::{self, DrmInfo, Preservability};
 
 use super::goldberg::inject_goldberg;
 use super::install::sync_marker_with_installed_apps;
-use super::marker::{CartridgeApp, add_app, list_apps};
+use super::marker::{AppSource, CartridgeApp, add_app, list_apps};
 
 /// Per-app outcome, for the UI to report progress and results as it goes.
 /// Carries the full `DrmInfo`, not just `Preservability` — the caller also
@@ -42,8 +42,11 @@ pub struct PrepareDrmResult {
 ///   already enforces on its own: no safe automatic action exists for
 ///   either.
 ///
-/// Non-Steam/GOG entries aren't covered — there's no cartridge tracking for
-/// those yet at all (#236).
+/// GOG apps (`AppSource::Gog`, #243) are skipped entirely before any of the
+/// above: their `app_id` is a GOG product id, not a Steam appid, so
+/// `drm::fetch_drm_info` would be querying Steam DRM sources with the wrong
+/// kind of number. Non-Steam (non-GOG) entries still aren't covered — no
+/// cartridge tracking for those yet at all (#236).
 pub fn refresh_drm_and_inject(
     mount_point: &Path,
     template_x86: &Path,
@@ -58,6 +61,21 @@ pub fn refresh_drm_and_inject(
     let mut results = Vec::with_capacity(apps.len());
 
     for app in apps {
+        // GOG apps are never Steam entries and have no Steam DRM to
+        // reclassify — `Preservability::Alternative` is already their
+        // final, correct answer from the moment they're installed. Calling
+        // `fetch_drm_info` with a GOG product id would query Steam's own
+        // DRM sources by a number that isn't a Steam appid at all.
+        if app.source == AppSource::Gog {
+            results.push(PrepareDrmResult {
+                app_id: app.app_id,
+                name: app.name,
+                drm_info: None,
+                goldberg_injected: false,
+                error: None,
+            });
+            continue;
+        }
         let info = match drm::fetch_drm_info(app.app_id) {
             Ok(info) => info,
             Err(e) => {
@@ -84,6 +102,7 @@ pub fn refresh_drm_and_inject(
             CartridgeApp {
                 app_id: app.app_id,
                 name: app.name.clone(),
+                source: app.source,
                 preservability: fresh.clone(),
                 standalone: app.standalone,
                 exe_path: app.exe_path,

@@ -33,8 +33,15 @@ const TRAILER_FILENAME := "trailer.ogv"
 # Cards size off the carousel area's own height, not a fixed pixel value —
 # resizing the window (or running on a different screen entirely) has to
 # rescale them, not leave them stuck at whatever size they started at.
-const CARD_HEIGHT_RATIO := 0.62
+# Reduced from 0.62 (2026-08-31, user request): a smaller cover leaves more
+# of the blurred background trailer/screenshot actually visible around it.
+const CARD_HEIGHT_RATIO := 0.48
 const CARD_GAP_RATIO := 0.06
+# Where the row sits vertically within the carousel clip area — 0.5 is dead
+# center, 1.0 would rest its bottom edge on the clip's own bottom edge.
+# Biased down (2026-08-31, user request) so more of the background
+# trailer/screenshot shows above the cards instead of being split evenly.
+const CARD_VERTICAL_BIAS_RATIO := 0.68
 const SCROLL_DURATION := 0.4
 # Every size below is a RATIO of the window's own size, never a fixed pixel
 # constant — a first pass used fixed pixels throughout (300px panels,
@@ -56,8 +63,19 @@ const HINT_ICON_RATIO := 0.02
 # The action bar's own bottom margin and the gap between its four action
 # groups, both ratios of the window rather than fixed pixels — same rule
 # as every other size in this file.
-const ACTION_BAR_MARGIN_RATIO := 0.03
+# Live-reported (2026-08-31): a visible gap sat between the glass bar and
+# the actual bottom edge of the screen — flush against the edge reads more
+# like a real console/Deck button-prompt bar.
+const ACTION_BAR_MARGIN_RATIO := 0.0
 const ACTION_BAR_GAP_RATIO := 0.03
+# Height of the frosted-glass strip behind the action bar, and the padding
+# between that strip's edge and the icons/labels inside it — the bar had no
+# background at all before this (live-reported, 2026-08-31: icons/text
+# vanished against a bright background image). Same shader the side panels
+# already use (`glass_panel.gdshader`), just a bottom-anchored strip instead
+# of a full-height side one.
+const ACTION_BAR_GLASS_HEIGHT_RATIO := 0.07
+const ACTION_BAR_GLASS_PADDING_RATIO := 0.012
 
 # Same display/body fonts Tatu's own web frontend themes already use (OFL,
 # vendored under assets/fonts/ — see assets/README.md for provenance).
@@ -132,6 +150,8 @@ var _left_glass: ColorRect
 var _left_margin: MarginContainer
 var _right_glass: ColorRect
 var _right_margin: MarginContainer
+var _action_bar_glass: ColorRect
+var _action_bar_margin: MarginContainer
 
 # Everything whose size scales with the window — populated as each is
 # built, resized together in _resize_layout().
@@ -193,7 +213,12 @@ func _resize_layout() -> void:
 		icon.custom_minimum_size = Vector2(icon_size, icon_size)
 
 	var bar_margin := int(_carousel_clip.size.y * ACTION_BAR_MARGIN_RATIO)
-	_action_bar.offset_bottom = -bar_margin
+	var bar_height := int(_carousel_clip.size.y * ACTION_BAR_GLASS_HEIGHT_RATIO)
+	var bar_padding := int(_carousel_clip.size.y * ACTION_BAR_GLASS_PADDING_RATIO)
+	_action_bar_glass.offset_bottom = -bar_margin
+	_action_bar_glass.offset_top = -bar_margin - bar_height
+	for side in ["left", "top", "right", "bottom"]:
+		_action_bar_margin.add_theme_constant_override("margin_%s" % side, bar_padding)
 	_action_bar.add_theme_constant_override(
 		"separation", int(_carousel_clip.size.x * ACTION_BAR_GAP_RATIO)
 	)
@@ -356,15 +381,33 @@ func _build_layout() -> void:
 	_action_close = _action_hint(ICON_CLOSE, "Close")
 	_action_bar = HBoxContainer.new()
 	_action_bar.alignment = BoxContainer.ALIGNMENT_CENTER
-	_action_bar.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	_action_bar.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	for action in [_action_launch, _action_add_to_steam, _action_gallery, _action_close]:
+		_action_bar.add_child(action)
+
+	# Frosted-glass background, same shader + structure the side panels
+	# already use (glass ColorRect -> MarginContainer -> content), just a
+	# bottom-anchored strip instead of a full-height side one. Live-reported
+	# (2026-08-31): the bar had no background at all before this, and its
+	# white icons/text vanished against a bright background image.
+	_action_bar_glass = ColorRect.new()
+	_action_bar_glass.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	_action_bar_glass.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	_action_bar_glass.material = ShaderMaterial.new()
+	_action_bar_glass.material.shader = load("res://shaders/glass_panel.gdshader")
 	# Added before the screenshot viewer and the launch overlay below, both
 	# of which cover the whole screen — without a z_index they'd draw over
 	# this bar instead of under it, hiding the input prompts (live-tested).
-	_action_bar.z_index = 100
-	for action in [_action_launch, _action_add_to_steam, _action_gallery, _action_close]:
-		_action_bar.add_child(action)
-	add_child(_action_bar)
+	_action_bar_glass.z_index = 100
+	_action_bar_margin = MarginContainer.new()
+	_action_bar_margin.set_anchors_preset(Control.PRESET_FULL_RECT)
+	# Centers the row inside the glass strip on BOTH axes — a MarginContainer
+	# alone only insets the child by the margins below, it doesn't center it
+	# if the strip ends up taller than the row's own natural height.
+	var bar_center := CenterContainer.new()
+	bar_center.add_child(_action_bar)
+	_action_bar_margin.add_child(bar_center)
+	_action_bar_glass.add_child(_action_bar_margin)
+	add_child(_action_bar_glass)
 
 	_empty_state = Label.new()
 	_empty_state.text = "No hay juegos instalados en este cartucho."
@@ -720,16 +763,19 @@ func _trailer_path(app_id: int) -> String:
 func _center_on_selected(animate: bool) -> void:
 	var card := _cards[_selected_index]
 	var target_x := _carousel_clip.size.x / 2.0 - (card.position.x + card.size.x / 2.0)
-	var target_y := (_carousel_clip.size.y - _carousel_row.size.y) / 2.0
+	var target_y := (_carousel_clip.size.y - _carousel_row.size.y) * CARD_VERTICAL_BIAS_RATIO
 	var target := Vector2(target_x, target_y)
 	if _scroll_tween:
 		_scroll_tween.kill()
 	if not animate:
 		_carousel_row.position = target
 		return
+	# TRANS_CUBIC instead of TRANS_BACK (user request, 2026-08-31): TRANS_BACK
+	# overshoots past the target and springs back — smooth deceleration reads
+	# calmer for a row of cards sliding into place.
 	_scroll_tween = create_tween()
 	_scroll_tween.tween_property(_carousel_row, "position", target, SCROLL_DURATION) \
-		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 
 func _on_launch_requested() -> void:
 	var app: Dictionary = _apps[_selected_index]

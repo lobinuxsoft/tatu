@@ -25,7 +25,8 @@ mod symlinks;
 
 pub use assets::{
     fetch_cartridge_art, fetch_cartridge_description, fetch_cartridge_screenshots,
-    fetch_cartridge_trailer,
+    fetch_cartridge_trailer, fetch_gog_cartridge_art, fetch_gog_cartridge_description,
+    fetch_gog_cartridge_screenshots, fetch_gog_cartridge_trailer,
 };
 pub use drives::{RemovableDrive, list_removable_drives};
 #[cfg(unix)]
@@ -36,7 +37,7 @@ pub use install::{
     sync_marker_with_installed_apps, uninstall_from_cartridge,
 };
 pub use launcher::install_launcher_binaries;
-pub use marker::{CartridgeApp, has_cartridge_structure, list_apps};
+pub use marker::{AppSource, CartridgeApp, add_app, has_cartridge_structure, list_apps};
 pub use prepare::{PrepareDrmResult, refresh_drm_and_inject};
 pub use runtime::bundle_linux_runtime;
 #[cfg(unix)]

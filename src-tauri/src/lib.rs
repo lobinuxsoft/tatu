@@ -61,7 +61,9 @@ macro_rules! tracker_handler {
             commands::gog_cmd::fetch_gog_library,
             commands::gog_cmd::get_gog_game_context,
             commands::gog_cmd::fetch_gog_extra_details,
+            commands::gog_cmd::gog_get_download_size,
             commands::gog_cmd::gog_download_game,
+            commands::gog_cmd::gog_cancel_download,
             commands::collection_cmd::get_steam_favorites,
             commands::collection_cmd::list_steam_collections,
             commands::collection_cmd::import_completed_from_collection,
@@ -75,6 +77,10 @@ macro_rules! tracker_handler {
             commands::cartridge_cmd::poll_install_status,
             commands::cartridge_cmd::inject_goldberg,
             commands::cartridge_cmd::fetch_cartridge_art,
+            commands::cartridge_cmd::fetch_gog_cartridge_art,
+            commands::cartridge_cmd::fetch_gog_cartridge_description,
+            commands::cartridge_cmd::fetch_gog_cartridge_screenshots,
+            commands::cartridge_cmd::fetch_gog_cartridge_trailer,
             commands::cartridge_cmd::fetch_cartridge_description,
             commands::cartridge_cmd::fetch_cartridge_screenshots,
             commands::cartridge_cmd::fetch_cartridge_trailer,
@@ -99,7 +105,8 @@ pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(Mutex::new(app_state))
-        .manage(commands::window_cmd::DetailTarget::default());
+        .manage(commands::window_cmd::DetailTarget::default())
+        .manage(commands::gog_cmd::GogDownloadCancel::default());
 
     #[cfg(unix)]
     let builder = {

@@ -22,10 +22,41 @@ pub const MARKER_FORMAT_VERSION: u32 = 1;
 /// matching by accident.
 pub const CARTRIDGE_LABEL: &str = "64M3_C4R7R1D63";
 
+/// A Steam appid and a GOG product id are both plain `u64`s with no shared
+/// namespace (same reasoning as `commands::window_cmd::DetailSource`) — in
+/// practice GOG ids observed so far run 10 digits (1.1-2.0 billion) against
+/// Steam appids still under 4 million, so a real collision is unlikely
+/// today, but nothing enforces that. This field is the record of which
+/// namespace `app_id` actually belongs to; it is NOT yet threaded through
+/// every command that looks an app up by `app_id` alone (uninstall, install
+/// polling, Goldberg injection) — those still assume global uniqueness,
+/// same as before this field existed. Widening that lookup is separate
+/// follow-up work, not done here.
+///
+/// 🔴 Learned the hard way, live (2026-08-30): this field must stay OUT of
+/// `compute_checksum` below, same as `standalone`/`exe_path` already are.
+/// It was briefly included there and instantly invalidated every marker
+/// ever written before this field existed (`is_trustworthy()` recomputes
+/// the checksum on every read, and old markers never hashed a `source`
+/// suffix) — the cartridge stopped being recognized at all, straight into
+/// the "format this drive" screen on a drive with real games already on
+/// it. Never include newly-added `CartridgeApp` fields in the checksum
+/// unless a full re-format is an acceptable cost for every drive already
+/// in the wild.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AppSource {
+    #[default]
+    Steam,
+    Gog,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CartridgeApp {
     pub app_id: u64,
     pub name: String,
+    #[serde(default)]
+    pub source: AppSource,
     /// From `drm::DrmInfo` at install time (#195) — `Easy` is what makes an
     /// app a #199 (Goldberg injection) candidate; the UI (#196) shows the
     /// rest as-is.
@@ -210,6 +241,7 @@ mod tests {
         CartridgeApp {
             app_id,
             name: name.to_string(),
+            source: AppSource::Steam,
             preservability: Preservability::Unknown,
             standalone: false,
             exe_path: String::new(),
@@ -311,6 +343,7 @@ mod tests {
             CartridgeApp {
                 app_id: 1,
                 name: "New Name".to_string(),
+                source: AppSource::Steam,
                 preservability: Preservability::Easy,
                 standalone: false,
                 exe_path: String::new(),

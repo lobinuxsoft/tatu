@@ -182,7 +182,7 @@ fn is_bind_section(raw: &[u8; 8]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cartridge::marker::{CartridgeApp, add_app, read_marker, write_marker};
+    use crate::cartridge::marker::{AppSource, CartridgeApp, add_app, read_marker, write_marker};
 
     fn section_name(bytes: &[u8]) -> [u8; 8] {
         let mut name = [0u8; 8];
@@ -221,6 +221,7 @@ mod tests {
             CartridgeApp {
                 app_id,
                 name: "Test Game".to_string(),
+                source: AppSource::Steam,
                 preservability: Preservability::Easy,
                 standalone: false,
                 exe_path: String::new(),

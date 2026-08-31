@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use sysinfo::Disks;
 
 use super::install::{acf_field, appmanifest_path};
-use super::marker::list_apps;
+use super::marker::{AppSource, list_apps};
 
 /// One installed game's total footprint on the cartridge — every file keyed
 /// to its app_id, summed into a single number. The player doesn't care that
@@ -88,23 +88,37 @@ pub fn usage(mount_point: &Path) -> Result<CartridgeUsage, String> {
     for app in list_apps(mount_point)? {
         let mut bytes = size_of(&mount_point.join("assets").join(app.app_id.to_string()));
 
-        if let Ok(content) = fs::read_to_string(appmanifest_path(mount_point, app.app_id))
-            && let Some(installdir) = acf_field(&content, "installdir")
-        {
-            bytes += size_of(
-                &mount_point
-                    .join("steamapps")
-                    .join("common")
-                    .join(&installdir),
-            );
-        }
-        for subdir in ["compatdata", "shadercache", "downloading"] {
-            bytes += size_of(
-                &mount_point
-                    .join("steamapps")
-                    .join(subdir)
-                    .join(app.app_id.to_string()),
-            );
+        match app.source {
+            AppSource::Steam => {
+                if let Ok(content) = fs::read_to_string(appmanifest_path(mount_point, app.app_id))
+                    && let Some(installdir) = acf_field(&content, "installdir")
+                {
+                    bytes += size_of(
+                        &mount_point
+                            .join("steamapps")
+                            .join("common")
+                            .join(&installdir),
+                    );
+                }
+                for subdir in ["compatdata", "shadercache", "downloading"] {
+                    bytes += size_of(
+                        &mount_point
+                            .join("steamapps")
+                            .join(subdir)
+                            .join(app.app_id.to_string()),
+                    );
+                }
+            }
+            // `exe_path` is "GOG/<install_directory>/.../<exe>" (forward
+            // slashes, always — see `CartridgeApp::exe_path`'s own doc
+            // comment) — the install directory is its second component,
+            // the same "exe lives at the install root" case
+            // `gog_cmd::run_gog_download` already resolves the exe under.
+            AppSource::Gog => {
+                if let Some(install_dir) = app.exe_path.split('/').nth(1) {
+                    bytes += size_of(&mount_point.join("GOG").join(install_dir));
+                }
+            }
         }
 
         apps_bytes += bytes;
@@ -129,13 +143,14 @@ pub fn usage(mount_point: &Path) -> Result<CartridgeUsage, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cartridge::marker::{CartridgeApp, add_app, write_marker};
+    use crate::cartridge::marker::{AppSource, CartridgeApp, add_app, write_marker};
     use crate::drm::Preservability;
 
     fn app(app_id: u64, name: &str) -> CartridgeApp {
         CartridgeApp {
             app_id,
             name: name.to_string(),
+            source: AppSource::Steam,
             preservability: Preservability::Unknown,
             standalone: false,
             exe_path: String::new(),
