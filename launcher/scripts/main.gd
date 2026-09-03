@@ -111,6 +111,12 @@ const RUNTIME_ARCHIVE := "SteamLinuxRuntime_4.tar.xz"
 const PROTON_ARCHIVE := "GE-Proton11-5-x86_64.tar.gz"
 const PROTON_DIRNAME := "GE-Proton11-5-x86_64"
 
+# #209: GOG-shortcut side, applied via CDP once Steam is back up after
+# `_launch_via_steam`'s own restart below.
+const CEF_DEBUG_FILE := ".cef-enable-remote-debugging"
+const CEF_WAIT_TIMEOUT_SEC := 30.0
+const CEF_POLL_INTERVAL_SEC := 2.0
+
 var _apps: Array = []
 var _selected_index: int = 0
 var _cards: Array[GameCard] = []
@@ -941,6 +947,7 @@ func _launch_via_steam() -> void:
 		f.close()
 
 	_start_steam(steam_dir)
+	await _apply_gog_steam_shortcuts()
 	# Live-tested (2026-08-28): Steam's own shader-cache download+commit for a
 	# freshly-launched app on a USB cartridge took ~10 minutes and stalled the
 	# client's main thread the whole time — looks exactly like a hang. Only
@@ -950,6 +957,42 @@ func _launch_via_steam() -> void:
 	_action_status.text = "Abriendo Steam... el primer lanzamiento de cada juego puede tardar varios minutos (shader cache) — no lo cierres aunque parezca colgado."
 	await get_tree().create_timer(4.0).timeout
 	get_tree().quit()
+
+## #209: GOG games never show up in a real Steam library no matter how many
+## folders get scanned — Steam only recognizes ITS OWN manifests there. A
+## Non-Steam shortcut is the only way in, applied via CDP against the same
+## Steam instance `_launch_via_steam` just restarted above. A no-op when
+## the cartridge has no GOG apps at all.
+func _apply_gog_steam_shortcuts() -> void:
+	if not _apps.any(func(a): return String(a.get("source", "steam")) == "gog"):
+		return
+	_ensure_cef_debug_file()
+	_action_status.text = "Configurando accesos directos de GOG en Steam..."
+	if not await _wait_for_cef():
+		push_warning("Steam CEF debug port never came up — GOG shortcuts skipped (#209)")
+		return
+	await SteamShortcuts.apply_gog_apps(SteamCefClient.new(), _cartridge_root(), _apps)
+
+## Mirrors CapyDeploy's controller.rs::ensure_cef_debug_file — an empty
+## sentinel Steam checks for at startup before opening its CDP debug port.
+## Best-effort: a machine that's never had this file needs Steam restarted
+## once before the port comes up, which `_launch_via_steam` is already
+## doing right above every call site of this function.
+func _ensure_cef_debug_file() -> void:
+	var path := _steam_install_dir().path_join(CEF_DEBUG_FILE)
+	if FileAccess.file_exists(path):
+		return
+	var f := FileAccess.open(path, FileAccess.WRITE)
+	if f:
+		f.close()
+
+func _wait_for_cef() -> bool:
+	var deadline := Time.get_ticks_msec() + int(CEF_WAIT_TIMEOUT_SEC * 1000)
+	while Time.get_ticks_msec() < deadline:
+		if SteamCefClient.is_available():
+			return true
+		await get_tree().create_timer(CEF_POLL_INTERVAL_SEC).timeout
+	return false
 
 ## udisks2 forces `windows_names` onto every NTFS drive it automounts by
 ## default (storaged-project/udisks#620) — it forbids the `:` in Wine's own
