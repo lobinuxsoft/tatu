@@ -77,7 +77,13 @@ pub fn login_pcgw(username: &str, bot_password: &str) -> Option<ureq::Agent> {
     );
 
     let token_url = format!("{PCGW_API}?action=query&meta=tokens&type=login&format=json");
-    let token_body: serde_json::Value = agent.get(&token_url).call().ok()?.body_mut().read_json().ok()?;
+    let token_body: serde_json::Value = agent
+        .get(&token_url)
+        .call()
+        .ok()?
+        .body_mut()
+        .read_json()
+        .ok()?;
     let login_token = token_body
         .get("query")?
         .get("tokens")?

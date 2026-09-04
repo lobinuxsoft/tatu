@@ -91,11 +91,7 @@ fn pick_main_exe(root: &Path, exes: &[(PathBuf, u64)]) -> Option<String> {
     // to a name that doesn't exist at the install root (live-caught on
     // FINAL FANTASY VII REMAKE: chose `End/Binaries/Win64/ff7remake_.exe`
     // correctly by size, then recorded bare `ff7remake_.exe`).
-    chosen
-        .strip_prefix(root)
-        .ok()?
-        .to_str()
-        .map(String::from)
+    chosen.strip_prefix(root).ok()?.to_str().map(String::from)
 }
 
 fn is_non_game_exe(path: &Path) -> bool {
