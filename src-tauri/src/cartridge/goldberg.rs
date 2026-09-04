@@ -22,6 +22,7 @@ pub fn inject_goldberg(
     preservability: Preservability,
     template_x86: &Path,
     template_x64: &Path,
+    steam_id: &str,
 ) -> Result<(), String> {
     if preservability != Preservability::Easy {
         return Err(format!(
@@ -79,6 +80,31 @@ pub fn inject_goldberg(
                 settings_dir.join("steam_appid.txt").display()
             )
         })?;
+
+        // Without Steam running, the game can't read the client's own
+        // language setting — gbe_fork answers ISteamApps::
+        // GetCurrentGameLanguage() from this file instead, so a standalone
+        // launch defaults to whatever the real Steam client would show a
+        // Spanish-speaking account (live-caught: FF7 Remake ran in English
+        // standalone despite the source Steam library being set to
+        // Spanish). "spanish" is Valve's own API string for it, same one
+        // every Steamworks game already checks against.
+        // A fixed, real account_steamid (rather than Goldberg's default
+        // random-per-launch one) matters beyond identity: many games bake
+        // the SteamID64 straight into their local save path (e.g. FF7
+        // Remake's "Documents/My Games/.../Steam/<steamid>/"). Without this,
+        // every standalone launch writes to a fresh, different folder that
+        // never lines up with the save Steam Cloud already knows about.
+        let mut config = "[user::general]\nlanguage=spanish\n".to_string();
+        if !steam_id.is_empty() {
+            config.push_str(&format!("account_steamid={steam_id}\n"));
+        }
+        fs::write(settings_dir.join("configs.user.ini"), config).map_err(|e| {
+            format!(
+                "Cannot write {}: {e}",
+                settings_dir.join("configs.user.ini").display()
+            )
+        })?;
     }
 
     fs::write(install_dir.join("steam_appid.txt"), app_id.to_string())
@@ -88,14 +114,68 @@ pub fn inject_goldberg(
     // run — resolve it once here, the same heuristic already used for the
     // cheat-runtime feature, and record it on the marker.
     let exe_name = pick_main_exe_in(&install_dir)?;
-    let exe_path = install_dir
-        .join(&exe_name)
+    let exe_full_path = install_dir.join(&exe_name);
+
+    // Valve's own convention has SteamAPI_Init fall back to a
+    // `steam_appid.txt` in the PROCESS'S OWN CURRENT DIRECTORY when no real
+    // Steam client is present — distinct from gbe_fork's own DLL-relative
+    // `steam_settings/` lookup already covered above. The launcher always
+    // sets CWD to the exe's own folder (see main.gd's own comment on
+    // this), which for an engine that buries its exe several folders deep
+    // (UE's `<Game>/Binaries/Win64/`) is neither of the two locations
+    // already written.
+    if let Some(exe_dir) = exe_full_path.parent() {
+        fs::write(exe_dir.join("steam_appid.txt"), app_id.to_string()).map_err(|e| {
+            format!(
+                "Cannot write {}: {e}",
+                exe_dir.join("steam_appid.txt").display()
+            )
+        })?;
+    }
+
+    let exe_path = exe_full_path
         .strip_prefix(mount_point)
         .map_err(|_| "Resolved exe path escaped the cartridge root".to_string())?
         .to_string_lossy()
         .replace('\\', "/");
 
     set_standalone(mount_point, app_id, exe_path)
+}
+
+/// Whether Goldberg's own copy is still the active DLL. Steam's own
+/// "verify integrity of game files" (or a game update re-downloading the
+/// depot's original DLL) can silently put the real DLL back in place —
+/// the marker's `standalone` flag has no way to notice that by itself, so
+/// `refresh_drm_and_inject` uses this to re-inject even when the marker
+/// still says `standalone: true` (live-caught on FF7 Remake, 2026-09-04:
+/// a verify-integrity run reverted the DLL and the button did nothing
+/// until the marker was hand-edited).
+pub(super) fn is_still_injected(
+    mount_point: &Path,
+    app_id: u64,
+    template_x86: &Path,
+    template_x64: &Path,
+) -> bool {
+    let Ok(install_dir) = install_dir(mount_point, app_id) else {
+        return true;
+    };
+    let mut files = Vec::new();
+    walk(&install_dir, &mut files);
+
+    let matches_template = |actual: &[&PathBuf], template: &Path| -> bool {
+        if actual.is_empty() {
+            return true;
+        }
+        let Ok(template_bytes) = fs::read(template) else {
+            return true;
+        };
+        actual
+            .iter()
+            .all(|p| fs::read(p).map(|b| b == template_bytes).unwrap_or(true))
+    };
+
+    matches_template(&named(&files, "steam_api64.dll"), template_x64)
+        && matches_template(&named(&files, "steam_api.dll"), template_x86)
 }
 
 /// `steamapps/common/<installdir>`, where `installdir` comes from the same
@@ -142,13 +222,24 @@ fn named<'a>(files: &'a [PathBuf], filename: &str) -> Vec<&'a PathBuf> {
 /// Renames the original DLL to `<stem>_o.<ext>` (never deleted — that's
 /// what lets the install still launch through Steam afterward) and drops
 /// the vendored Goldberg template in its place.
+///
+/// Skips the rename when `_o` already exists: re-running injection (a
+/// newer Goldberg template, or Steam's own "verify integrity" having put
+/// the real DLL back as active) used to blindly rename whatever was
+/// currently active over the backup — the second time this ran, that
+/// "original" was already Goldberg's own copy from the first run,
+/// permanently destroying the one genuine backup with a fake one
+/// (live-caught on FF7 Remake, 2026-09-03/04). The backup, once made, is
+/// the real DLL for good; only the active copy ever gets replaced again.
 fn swap_dll(original: &Path, template: &Path) -> Result<(), String> {
     let stem = original.file_stem().and_then(|s| s.to_str()).unwrap_or("");
     let ext = original.extension().and_then(|s| s.to_str()).unwrap_or("");
     let backup = original.with_file_name(format!("{stem}_o.{ext}"));
 
-    fs::rename(original, &backup)
-        .map_err(|e| format!("Cannot rename {}: {e}", original.display()))?;
+    if !backup.exists() {
+        fs::rename(original, &backup)
+            .map_err(|e| format!("Cannot rename {}: {e}", original.display()))?;
+    }
     fs::copy(template, original).map_err(|e| {
         format!(
             "Cannot copy Goldberg template to {}: {e}",
@@ -209,6 +300,7 @@ mod tests {
             Preservability::Hard,
             Path::new("x86.dll"),
             Path::new("x64.dll"),
+            "",
         )
         .unwrap_err();
         assert!(err.contains("not classified Easy"));
@@ -253,7 +345,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (x86, x64) = setup_cartridge_with_app(dir.path(), 1, "Empty Game");
 
-        let err = inject_goldberg(dir.path(), 1, Preservability::Easy, &x86, &x64).unwrap_err();
+        let err = inject_goldberg(dir.path(), 1, Preservability::Easy, &x86, &x64, "").unwrap_err();
         assert!(err.contains("No steam_api"));
     }
 
@@ -266,7 +358,7 @@ mod tests {
         fs::write(&original, b"real steam api").unwrap();
         fs::write(install_dir.join("DOOM.exe"), vec![0u8; 1024]).unwrap();
 
-        inject_goldberg(dir.path(), 379720, Preservability::Easy, &x86, &x64).unwrap();
+        inject_goldberg(dir.path(), 379720, Preservability::Easy, &x86, &x64, "").unwrap();
 
         assert_eq!(
             fs::read(install_dir.join("steam_api64_o.dll")).unwrap(),
@@ -284,6 +376,49 @@ mod tests {
     }
 
     #[test]
+    fn reinjection_keeps_the_real_backup() {
+        let dir = tempfile::tempdir().unwrap();
+        let (x86, x64) = setup_cartridge_with_app(dir.path(), 379720, "DOOM");
+        let install_dir = dir.path().join("steamapps").join("common").join("DOOM");
+        fs::write(install_dir.join("steam_api64.dll"), b"real steam api").unwrap();
+        fs::write(install_dir.join("DOOM.exe"), vec![0u8; 1024]).unwrap();
+
+        inject_goldberg(dir.path(), 379720, Preservability::Easy, &x86, &x64, "").unwrap();
+        // A second run (a newer Goldberg template, or Steam's own "verify
+        // integrity" never having restored the real DLL) must not treat
+        // the now-active Goldberg copy as "the original" and rename it
+        // over the real backup.
+        fs::write(&x64, b"newer goldberg x64 template").unwrap();
+        inject_goldberg(dir.path(), 379720, Preservability::Easy, &x86, &x64, "").unwrap();
+
+        assert_eq!(
+            fs::read(install_dir.join("steam_api64_o.dll")).unwrap(),
+            b"real steam api"
+        );
+        assert_eq!(
+            fs::read(install_dir.join("steam_api64.dll")).unwrap(),
+            b"newer goldberg x64 template"
+        );
+    }
+
+    #[test]
+    fn drift_is_detected_when_the_real_dll_is_restored() {
+        let dir = tempfile::tempdir().unwrap();
+        let (x86, x64) = setup_cartridge_with_app(dir.path(), 379720, "DOOM");
+        let install_dir = dir.path().join("steamapps").join("common").join("DOOM");
+        fs::write(install_dir.join("steam_api64.dll"), b"real steam api").unwrap();
+        fs::write(install_dir.join("DOOM.exe"), vec![0u8; 1024]).unwrap();
+        inject_goldberg(dir.path(), 379720, Preservability::Easy, &x86, &x64, "").unwrap();
+
+        assert!(is_still_injected(dir.path(), 379720, &x86, &x64));
+
+        // Steam's own "verify integrity" restoring the real DLL as active,
+        // completely outside Tatu's own control.
+        fs::write(install_dir.join("steam_api64.dll"), b"real steam api").unwrap();
+        assert!(!is_still_injected(dir.path(), 379720, &x86, &x64));
+    }
+
+    #[test]
     fn injection_writes_steam_settings_next_to_the_dll() {
         let dir = tempfile::tempdir().unwrap();
         let (x86, x64) = setup_cartridge_with_app(dir.path(), 379720, "DOOM");
@@ -291,7 +426,7 @@ mod tests {
         fs::write(install_dir.join("steam_api64.dll"), b"real steam api").unwrap();
         fs::write(install_dir.join("DOOM.exe"), vec![0u8; 1024]).unwrap();
 
-        inject_goldberg(dir.path(), 379720, Preservability::Easy, &x86, &x64).unwrap();
+        inject_goldberg(dir.path(), 379720, Preservability::Easy, &x86, &x64, "").unwrap();
 
         // gbe_fork reads this location before its exe-run-path fallback —
         // without it, SteamAPI_Init can fail silently (#228 live incident:
@@ -321,7 +456,7 @@ mod tests {
         )
         .unwrap();
 
-        inject_goldberg(dir.path(), 1, Preservability::Easy, &x86, &x64).unwrap();
+        inject_goldberg(dir.path(), 1, Preservability::Easy, &x86, &x64, "").unwrap();
 
         assert!(nested.join("steam_api64_o.dll").exists());
         assert_eq!(fs::read(&original).unwrap(), fs::read(&x64).unwrap());

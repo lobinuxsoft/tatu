@@ -2,7 +2,7 @@ use std::path::Path;
 
 use crate::drm::{self, DrmInfo, Preservability};
 
-use super::goldberg::inject_goldberg;
+use super::goldberg::{inject_goldberg, is_still_injected};
 use super::install::sync_marker_with_installed_apps;
 use super::marker::{AppSource, CartridgeApp, add_app, list_apps};
 
@@ -33,7 +33,9 @@ pub struct PrepareDrmResult {
 /// Every `Preservability` kind maps to a defined action (or deliberately
 /// none), so this never has to guess:
 /// - `Easy`, not yet standalone → inject Goldberg.
-/// - `Easy`, already standalone → nothing to do, already handled.
+/// - `Easy`, already standalone → re-inject only if the active DLL drifted
+///   away from Goldberg's own (see `is_still_injected`), otherwise nothing
+///   to do.
 /// - `Trivial` / `Removed` → nothing needed, the Steam copy already has no
 ///   active DRM to work around.
 /// - `Alternative` (GOG) → nothing to do to the Steam copy itself — the
@@ -51,6 +53,8 @@ pub fn refresh_drm_and_inject(
     mount_point: &Path,
     template_x86: &Path,
     template_x64: &Path,
+    pcgw_agent: Option<&ureq::Agent>,
+    steam_id: &str,
 ) -> Result<Vec<PrepareDrmResult>, String> {
     // Reconciles the marker against Steam's own manifests first (#244) — a
     // game installed directly through Steam, rather than this app's own
@@ -76,7 +80,7 @@ pub fn refresh_drm_and_inject(
             });
             continue;
         }
-        let info = match drm::fetch_drm_info(app.app_id) {
+        let info = match drm::fetch_drm_info(app.app_id, pcgw_agent) {
             Ok(info) => info,
             Err(e) => {
                 results.push(PrepareDrmResult {
@@ -111,8 +115,18 @@ pub fn refresh_drm_and_inject(
 
         let mut goldberg_injected = false;
         let mut error = None;
-        if fresh == Preservability::Easy && !app.standalone {
-            match inject_goldberg(mount_point, app.app_id, fresh, template_x86, template_x64) {
+        let drifted = fresh == Preservability::Easy
+            && app.standalone
+            && !is_still_injected(mount_point, app.app_id, template_x86, template_x64);
+        if fresh == Preservability::Easy && (!app.standalone || drifted) {
+            match inject_goldberg(
+                mount_point,
+                app.app_id,
+                fresh,
+                template_x86,
+                template_x64,
+                steam_id,
+            ) {
                 Ok(()) => goldberg_injected = true,
                 Err(e) => error = Some(e),
             }
