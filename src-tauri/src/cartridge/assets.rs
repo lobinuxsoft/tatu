@@ -270,7 +270,7 @@ fn fetch_appdetails(
 /// richer Steam pipeline (description, screenshots, trailer, real
 /// per-appid cover art) instead of being stuck with nothing but a
 /// title-searched SteamGridDB cover. Only an EXACT normalized-title match
-/// is trusted — same rigor `gog_account::fetch_genres_and_developers`
+/// is trusted — same rigor `gog_account::fetch_genres_developers_publishers`
 /// already applies to its own cross-catalog title search, for the same
 /// reason: the first "similar" result is not good enough, a wrong appid
 /// would cache a completely different game's art under this one.

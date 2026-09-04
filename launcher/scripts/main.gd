@@ -842,7 +842,22 @@ func _launch_via_proton(app_id: int, app_name: String, exe_path: String) -> void
 		await _show_status("No se pudo preparar el runtime de Linux para %s" % app_name, 2.5)
 		return
 
-	var wineprefix := _tatu_local_dir().path_join("wineprefix").path_join(str(app_id))
+	# A save file's own path is often keyed by the account's SteamID64 (e.g.
+	# "Documents/My Games/<Game>/Steam/<steamid>/..."), which Goldberg writes
+	# using whatever `account_steamid` inject_goldberg configured (see
+	# goldberg.rs). That alone isn't enough for Steam Cloud to ever see a
+	# standalone-made save, though: a private Tatu-only wineprefix keeps it
+	# on a completely different filesystem tree from the one Steam's own
+	# client watches. Reusing the SAME prefix Steam already created for this
+	# app (steamapps/compatdata/<app_id>/pfx) puts the save in the exact
+	# folder Steam Cloud syncs, with no swap or passthrough needed — a
+	# standalone play session becomes indistinguishable, on disk, from one
+	# Steam itself launched. Falls back to Tatu's own prefix only if Steam
+	# never created one on this cartridge (never played through Steam yet).
+	var steam_prefix := _cartridge_root().path_join("steamapps").path_join("compatdata").path_join(str(app_id)).path_join("pfx")
+	var wineprefix := steam_prefix
+	if not DirAccess.dir_exists_absolute(steam_prefix):
+		wineprefix = _tatu_local_dir().path_join("wineprefix").path_join(str(app_id))
 	DirAccess.make_dir_recursive_absolute(wineprefix)
 
 	OS.set_environment("GAMEID", "umu-default")

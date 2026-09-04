@@ -1,7 +1,7 @@
 import { state, TL, TC } from "../state.js";
 import { esc, formatBytes, gCat } from "../utils.js";
 import { renderDrmInlineBadge } from "../panel/drm_view.js";
-import { buildGameRow, renderLetterGroupedList } from "./game_list.js";
+import { buildGameRow, matchesQuery, renderLetterGroupedList } from "./game_list.js";
 
 export function renderSteam() {
   const content = document.getElementById("content");
@@ -28,7 +28,7 @@ export function renderSteam() {
   state.G.forEach(g => {
     const cat = gCat(g), chk = state.completed.has(g.id);
     if (!state.tog[cat]) return;
-    if (state.q && !g.name.toLowerCase().includes(state.q) && !(g.genres && g.genres.some(x => x.toLowerCase().includes(state.q)))) return;
+    if (state.q && !matchesQuery(g, state.q)) return;
     if (state.sf === "done" && !chk) return;
     if (state.sf === "pending" && chk) return;
     if (state.sf === "unplayed" && (g.hours > 0 || chk)) return;

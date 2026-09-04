@@ -11,6 +11,15 @@ import { AL } from "../state.js";
 // Steam-specific data dimensions (Steam app categories, PCGamingWiki DRM
 // classification) with no GOG equivalent, not part of the list template.
 
+/// Search-box match shared by Steam and GOG: name, or any genre/developer/
+/// publisher tag. Uses `name || title` since GOG rows carry `title` instead.
+export function matchesQuery(g, q) {
+  const name = g.name || g.title || "";
+  if (name.toLowerCase().includes(q)) return true;
+  const inList = (list) => list && list.some(x => x.toLowerCase().includes(q));
+  return inList(g.genres) || inList(g.developers) || inList(g.publishers);
+}
+
 /// One row — checkbox, thumbnail, name, tag pills, right-hand column.
 export function buildGameRow({ id, listKey, chk, name, imgHtml = "", extraNameHtml = "", tagsHtml = "", rightText = "—" }) {
   const tags = tagsHtml ? `<div class="tags">${tagsHtml}</div>` : "";

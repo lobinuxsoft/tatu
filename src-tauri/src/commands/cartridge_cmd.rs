@@ -6,6 +6,7 @@ use tauri_plugin_opener::OpenerExt;
 
 use crate::SharedState;
 use crate::cartridge::{self, RemovableDrive};
+use crate::drm;
 
 #[tauri::command]
 pub async fn list_removable_drives() -> Result<Vec<RemovableDrive>, String> {
@@ -118,12 +119,14 @@ pub fn inject_goldberg(
     app_id: u64,
     mount_point: String,
 ) -> Result<(), String> {
-    let preservability = {
+    let (preservability, steam_id) = {
         let s = state.lock().map_err(|e| e.to_string())?;
-        s.drm_cache
+        let preservability = s
+            .drm_cache
             .get(&app_id)
             .map(|info| info.preservability.clone())
-            .unwrap_or_default()
+            .unwrap_or_default();
+        (preservability, s.steam_id.clone())
     };
 
     let template_x86 = app
@@ -144,6 +147,7 @@ pub fn inject_goldberg(
         preservability,
         &template_x86,
         &template_x64,
+        &steam_id,
     )
 }
 
@@ -171,8 +175,20 @@ pub fn refresh_cartridge_drm(
         )
         .map_err(|e| e.to_string())?;
 
-    let results =
-        cartridge::refresh_drm_and_inject(Path::new(&mount_point), &template_x86, &template_x64)?;
+    let (pcgw_agent, steam_id) = {
+        let s = state.lock().map_err(|e| e.to_string())?;
+        (
+            drm::login_pcgw(&s.pcgw_username, &s.pcgw_bot_password),
+            s.steam_id.clone(),
+        )
+    };
+    let results = cartridge::refresh_drm_and_inject(
+        Path::new(&mount_point),
+        &template_x86,
+        &template_x64,
+        pcgw_agent.as_ref(),
+        &steam_id,
+    )?;
 
     let mut s = state.lock().map_err(|e| e.to_string())?;
     for result in &results {

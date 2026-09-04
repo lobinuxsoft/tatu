@@ -25,6 +25,8 @@ pub fn get_state(state: State<'_, SharedState>) -> Result<serde_json::Value, Str
         "steam_api_key": s.steam_api_key,
         "steam_id": s.steam_id,
         "steamgriddb_api_key": s.steamgriddb_api_key,
+        "pcgw_username": s.pcgw_username,
+        "pcgw_bot_password": s.pcgw_bot_password,
         "ach_progress": ach_progress,
         "hltb_cache": s.hltb_cache,
         "drm_cache": s.drm_cache,
@@ -67,6 +69,8 @@ pub fn get_settings(state: State<'_, SharedState>) -> Result<serde_json::Value, 
         "steam_api_key": s.steam_api_key,
         "steam_id": s.steam_id,
         "steamgriddb_api_key": s.steamgriddb_api_key,
+        "pcgw_username": s.pcgw_username,
+        "pcgw_bot_password": s.pcgw_bot_password,
         // Never the raw tokens — the renderer only needs to know whether an
         // account is connected and what it last saw, every real GOG call
         // stays in Rust.
@@ -80,12 +84,16 @@ pub fn save_settings(
     steam_api_key: String,
     steam_id: String,
     steamgriddb_api_key: String,
+    pcgw_username: String,
+    pcgw_bot_password: String,
     state: State<'_, SharedState>,
 ) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     s.steam_api_key = steam_api_key;
     s.steam_id = steam_id;
     s.steamgriddb_api_key = steamgriddb_api_key;
+    s.pcgw_username = pcgw_username;
+    s.pcgw_bot_password = pcgw_bot_password;
     s.save();
     Ok(())
 }

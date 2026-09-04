@@ -33,10 +33,15 @@
       <button class="sync-btn" id="importBtn" title="Marca como completados los juegos de una colección que ya tengas armada en Steam (por ejemplo: TERMINADOS).">Importar Terminados</button>
       <button class="sync-btn" id="sizeBtn" title="Escanea libraryfolders.vdf y registra el tamaño en disco de cada juego instalado.">Escanear tamaño</button>
       <button class="sync-btn" id="drmBtn" title="Consulta DRM (Steam Store + PCGamingWiki) para todos los juegos sin caché. Tarda ~1s por juego.">Cargar DRM</button>
+      <button class="sync-btn" id="detailsBtn" title="Trae género, developer y publisher desde Steam Store para todos los juegos sin ese dato. Tarda ~1s por juego.">Cargar Detalles</button>
     </div>
     <div class="progress-wrap" id="drmProgressWrap" style="display:none;">
       <div class="progress-bar" id="drmProgressBar"></div>
       <div class="progress-text" id="drmProgressText"></div>
+    </div>
+    <div class="progress-wrap" id="detailsProgressWrap" style="display:none;">
+      <div class="progress-bar" id="detailsProgressBar"></div>
+      <div class="progress-text" id="detailsProgressText"></div>
     </div>
     <div class="stats">
       <div class="stat"><div class="stat-value c1" id="sComp">0</div><div class="stat-label">Completados</div></div>
@@ -46,7 +51,7 @@
       <div class="stat"><div class="stat-value c5" id="sSize">&mdash;</div><div class="stat-label">Tamaño (filtro)</div></div>
     </div>
     <div class="progress-wrap"><div class="progress-bar" id="pBar"></div><div class="progress-text" id="pText">0%</div></div>
-    <div class="controls"><input type="text" class="search" id="search" placeholder="Buscar juego o género..." autocomplete="off"></div>
+    <div class="controls"><input type="text" class="search" id="search" placeholder="Buscar juego, género, developer o publisher..." autocomplete="off"></div>
     <div class="filter-section" id="catRow">
       <span class="filter-label">Categoría:</span>
       <button class="tbtn on" data-t="game">Juegos <span class="cnt" id="cG"></span></button>
@@ -108,7 +113,7 @@
       <div class="stat"><div class="stat-value c2" id="gogPend">0</div><div class="stat-label">Pendientes</div></div>
     </div>
     <div class="progress-wrap"><div class="progress-bar" id="gogpBar"></div><div class="progress-text" id="gogpText">0%</div></div>
-    <div class="controls"><input type="text" class="search" id="gogSearch" placeholder="Buscar juego o género..." autocomplete="off"></div>
+    <div class="controls"><input type="text" class="search" id="gogSearch" placeholder="Buscar juego, género, developer o publisher..." autocomplete="off"></div>
     <div class="letter-nav" id="lNavGog"></div>
     <div id="gogContent"><div class="empty-state">Conectá tu cuenta de GOG en <strong>Settings</strong> y dale a "Actualizar biblioteca".</div></div>
   </div>
@@ -362,6 +367,24 @@
           Gratis, la generás con tu propia cuenta en
           <a href="https://www.steamgriddb.com/profile/preferences/api" style="color:var(--accent); cursor:pointer;">steamgriddb.com/profile/preferences/api</a>.
           Sin ella, instalar un juego en un cartucho no cachea su carátula.
+        </p>
+      </div>
+
+      <h2 style="color:var(--accent); font-size:1.2rem; margin-bottom:1rem;">DRM (PCGamingWiki)</h2>
+
+      <div style="margin-bottom:1.2rem;">
+        <label style="display:block; font-size:0.8rem; color:#8b949e; margin-bottom:0.3rem;">Usuario (user@botname)</label>
+        <input type="text" id="cfgPcgwUsername" class="search" style="width:100%; font-family:monospace;" placeholder="tunombre@tatu">
+        <label style="display:block; font-size:0.8rem; color:#8b949e; margin:0.6rem 0 0.3rem;">Bot Password</label>
+        <div style="display:flex; gap:0.4rem;">
+          <input type="password" id="cfgPcgwBotPassword" class="search" style="flex:1; font-family:monospace;" placeholder="Tu bot password de PCGamingWiki...">
+          <button class="sync-btn" id="togglePcgwBotPasswordBtn" style="white-space:nowrap;">Mostrar</button>
+        </div>
+        <p style="font-size:0.7rem; color:var(--fg-ghost); margin-top:0.3rem;">
+          Desde agosto de 2026 PCGamingWiki exige login para consultar su API de DRM. Creá una cuenta gratis
+          y un bot password (no tu contraseña real) en
+          <a href="https://www.pcgamingwiki.com/wiki/Special:BotPasswords" style="color:var(--accent); cursor:pointer;">pcgamingwiki.com/wiki/Special:BotPasswords</a>.
+          Sin esto, "Cargar DRM" clasifica todo como Desconocido.
         </p>
       </div>
 
