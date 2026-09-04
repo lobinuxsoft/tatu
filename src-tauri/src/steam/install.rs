@@ -23,10 +23,10 @@ pub(crate) fn steam_install_dir() -> Option<PathBuf> {
         // The installer writes the real path to the registry, and it is often
         // not on C: — Steam is routinely moved to a second drive. Guessing
         // Program Files first would find a leftover empty dir on those setups.
-        if let Some(from_registry) = windows_steam_path_from_registry() {
-            if from_registry.exists() {
-                return Some(from_registry);
-            }
+        if let Some(from_registry) = windows_steam_path_from_registry()
+            && from_registry.exists()
+        {
+            return Some(from_registry);
         }
         let default = PathBuf::from(r"C:\Program Files (x86)\Steam");
         if default.exists() {
@@ -112,9 +112,8 @@ pub fn detect_steam_id() -> Option<String> {
 /// Failure modes folded into an empty vec: Steam not installed, the
 /// VDF missing or unreadable, no `"path"` entries inside.
 ///
-/// Its only consumer is `steam::exe`, which is gated off on Windows until
-/// the Win32 backend lands (#181) — hence the same gate here.
-#[cfg(unix)]
+/// `steam::exe` (Linux-only, cheat panel) and `cartridge` (#195, both
+/// platforms) are the consumers — no platform gate here.
 pub(crate) fn library_paths() -> Vec<PathBuf> {
     use std::fs;
 
@@ -135,7 +134,6 @@ pub(crate) fn library_paths() -> Vec<PathBuf> {
 /// from a `libraryfolders.vdf` blob. Windows-style `\\` separators
 /// are normalised to forward slashes so callers can join them with
 /// `Path::join` portably.
-#[cfg(any(unix, test))]
 pub(crate) fn parse_library_paths(content: &str) -> Vec<String> {
     use regex::Regex;
     use std::sync::OnceLock;

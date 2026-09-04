@@ -1,6 +1,7 @@
-import { state, TL, TC, AL } from "../state.js";
-import { esc, formatBytes, gCat, gLetter } from "../utils.js";
+import { state, TL, TC } from "../state.js";
+import { esc, formatBytes, gCat } from "../utils.js";
 import { renderDrmInlineBadge } from "../panel/drm_view.js";
+import { buildGameRow, matchesQuery, renderLetterGroupedList } from "./game_list.js";
 
 export function renderSteam() {
   const content = document.getElementById("content");
@@ -27,7 +28,7 @@ export function renderSteam() {
   state.G.forEach(g => {
     const cat = gCat(g), chk = state.completed.has(g.id);
     if (!state.tog[cat]) return;
-    if (state.q && !g.name.toLowerCase().includes(state.q) && !(g.genres && g.genres.some(x => x.toLowerCase().includes(state.q)))) return;
+    if (state.q && !matchesQuery(g, state.q)) return;
     if (state.sf === "done" && !chk) return;
     if (state.sf === "pending" && chk) return;
     if (state.sf === "unplayed" && (g.hours > 0 || chk)) return;
@@ -63,8 +64,7 @@ export function renderSteam() {
 
   if (sortByDuration) {
     nav.innerHTML = "";
-    let rows = "";
-    filtered.forEach(g => { rows += buildRow(g); });
+    const rows = filtered.map(buildRow).join("");
     if (rows) {
       const sec = document.createElement("div");
       sec.className = "letter-group";
@@ -72,21 +72,11 @@ export function renderSteam() {
       content.appendChild(sec);
     }
   } else {
-    const groups = {}, gs = {};
-    filtered.forEach(g => {
-      const L = gLetter(g.name);
-      if (!groups[L]) { groups[L] = []; gs[L] = { t: 0, d: 0 }; }
-      groups[L].push(g); gs[L].t++; if (g.chk) gs[L].d++;
-    });
-    nav.innerHTML = AL.map(l => `<a href="#g-${l}" class="${groups[l] ? "hl" : ""}">${l}</a>`).join("");
-    Object.keys(groups).sort((a, b) => a === "#" ? -1 : b === "#" ? 1 : a.localeCompare(b)).forEach(L => {
-      const gg = groups[L], st = gs[L], pct = st.t ? Math.round(st.d / st.t * 100) : 0;
-      const sec = document.createElement("div");
-      sec.className = "letter-group"; sec.id = "g-" + L;
-      let rows = "";
-      gg.forEach(g => { rows += buildRow(g); });
-      sec.innerHTML = `<div class="letter-header"><div class="letter-big">${L}</div><div class="letter-info">${st.d}/${st.t}</div><div class="letter-bar"><div class="letter-bar-fill" style="width:${pct}%"></div></div></div><table><thead><tr><th></th><th>Juego</th><th>Horas</th></tr></thead><tbody>${rows}</tbody></table>`;
-      content.appendChild(sec);
+    renderLetterGroupedList({
+      items: filtered,
+      buildRowHtml: buildRow,
+      contentEl: content,
+      navEl: nav,
     });
   }
 
@@ -98,16 +88,20 @@ export function renderSteam() {
   document.getElementById("sPend").textContent = vis - comp;
   document.getElementById("sHours").textContent = Math.round(hrs).toLocaleString();
   document.getElementById("sVis").textContent = vis;
-  document.getElementById("sSize").textContent = bytes > 0 ? formatBytes(bytes) : "\u2014";
+  document.getElementById("sSize").textContent = bytes > 0 ? formatBytes(bytes) : "—";
   document.getElementById("pBar").style.width = pct + "%";
   document.getElementById("pText").textContent = pct + "% (" + comp + "/" + vis + ")";
 }
 
+// Steam-specific tag pills (achievements/cromos/HLTB/size/DRM) computed
+// here, then handed to the shared row template — the template doesn't
+// need to know any of this is Steam-only, it just renders whatever tags
+// html it's given.
 function buildRow(g) {
   const img = g.icon
     ? `<img src="https://media.steampowered.com/steamcommunity/public/images/apps/${g.id}/${g.icon}.jpg" loading="lazy">`
     : "";
-  const h = g.hours > 0 ? g.hours + "h" : "\u2014";
+  const h = g.hours > 0 ? g.hours + "h" : "—";
   let tagsHtml = "";
   if (g.tag) tagsHtml += `<span class="tag ${TC[g.tag]}">${TL[g.tag]}</span>`;
   if (g.achievements > 0) {
@@ -139,7 +133,14 @@ function buildRow(g) {
     const prefix = isAppinfo ? "~" : "";
     tagsHtml += `<span class="tag ${cls}" title="${esc(tip)}">\u{1F4BE} ${prefix}${formatBytes(sz.bytes)}</span>`;
   }
-  const tagsRow = tagsHtml ? `<div class="tags">${tagsHtml}</div>` : "";
-  const drmInline = renderDrmInlineBadge(state.drmCache[g.id]);
-  return `<tr class="${g.chk ? "done" : ""}"><td><input type="checkbox" data-id="${g.id}" data-list="steam" ${g.chk ? "checked" : ""}></td><td><div class="game-cell"><span class="gn">${img}${esc(g.name)}${drmInline}</span>${tagsRow}</div></td><td>${h}</td></tr>`;
+  return buildGameRow({
+    id: g.id,
+    listKey: "steam",
+    chk: g.chk,
+    name: g.name,
+    imgHtml: img,
+    extraNameHtml: renderDrmInlineBadge(state.drmCache[g.id]),
+    tagsHtml,
+    rightText: h,
+  });
 }

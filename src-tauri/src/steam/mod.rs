@@ -2,6 +2,10 @@ mod collections;
 mod games;
 mod install;
 
+// Cross-platform: cartridge Goldberg injection (#206/#207) needs to pick a
+// game's main .exe on whichever OS Tatu itself is running on.
+pub(crate) mod exe_pick;
+
 // Both only feed the cheat panel: `exe` resolves the game binary a cheat
 // table attaches to, `launch_options` sets WINEDLLOVERRIDES so Proton loads
 // the Mono collector. Neither has a meaning on native Windows.
@@ -15,8 +19,11 @@ pub use collections::{
 };
 #[cfg(unix)]
 pub(crate) use exe::detect_game_exe;
+pub(crate) use exe_pick::pick_main_exe_in;
 pub use games::{Game, fetch_details_for, fetch_games, fetch_single_detail};
 pub use install::detect_steam_id;
-pub(crate) use install::steam_install_dir;
+pub(crate) use install::{library_paths, steam_install_dir};
 #[cfg(unix)]
-pub(crate) use launch_options::{LaunchOptOutcome, set_winhttp_override};
+pub(crate) use launch_options::{
+    LaunchOptOutcome, force_proton_compat, set_winhttp_override, stop_steam_for_config_edit,
+};

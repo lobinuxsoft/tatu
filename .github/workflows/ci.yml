@@ -15,6 +15,20 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      # Tauri's build.rs hard-fails `cargo build`/`check`/`clippy`/`test` if a
+      # declared bundle resource is missing on disk — not just at actual
+      # bundling time. The launcher binaries (#204) are never committed (the
+      # stock Godot export template alone exceeds GitHub's 100MiB commit
+      # limit) and only get built for real by a release job (follow-up,
+      # tracked separately) — these empty stand-ins are enough to satisfy
+      # that check everywhere else.
+      - name: Create placeholder launcher resources
+        shell: bash
+        run: |
+          mkdir -p src-tauri/vendor/launcher/linux src-tauri/vendor/launcher/windows
+          : > src-tauri/vendor/launcher/linux/tatu-launcher
+          : > src-tauri/vendor/launcher/windows/tatu-launcher.exe
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
@@ -41,6 +55,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+
+      # Tauri's build.rs hard-fails `cargo build`/`check`/`clippy`/`test` if a
+      # declared bundle resource is missing on disk — not just at actual
+      # bundling time. The launcher binaries (#204) are never committed (the
+      # stock Godot export template alone exceeds GitHub's 100MiB commit
+      # limit) and only get built for real by a release job (follow-up,
+      # tracked separately) — these empty stand-ins are enough to satisfy
+      # that check everywhere else.
+      - name: Create placeholder launcher resources
+        shell: bash
+        run: |
+          mkdir -p src-tauri/vendor/launcher/linux src-tauri/vendor/launcher/windows
+          : > src-tauri/vendor/launcher/linux/tatu-launcher
+          : > src-tauri/vendor/launcher/windows/tatu-launcher.exe
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -74,6 +102,20 @@ jobs:
             binary: tatu-tracker.exe
     steps:
       - uses: actions/checkout@v6
+
+      # Tauri's build.rs hard-fails `cargo build`/`check`/`clippy`/`test` if a
+      # declared bundle resource is missing on disk — not just at actual
+      # bundling time. The launcher binaries (#204) are never committed (the
+      # stock Godot export template alone exceeds GitHub's 100MiB commit
+      # limit) and only get built for real by a release job (follow-up,
+      # tracked separately) — these empty stand-ins are enough to satisfy
+      # that check everywhere else.
+      - name: Create placeholder launcher resources
+        shell: bash
+        run: |
+          mkdir -p src-tauri/vendor/launcher/linux src-tauri/vendor/launcher/windows
+          : > src-tauri/vendor/launcher/linux/tatu-launcher
+          : > src-tauri/vendor/launcher/windows/tatu-launcher.exe
 
       - uses: dtolnay/rust-toolchain@stable
 

@@ -5,6 +5,8 @@ import { doneLoading, startLoading } from "../loading.js";
 import { renderSteam } from "../render/steam.js";
 import { emit } from "../tauri.js";
 import { renderDrmBadge, renderDrmExplanation, renderPreservabilityBlock } from "./drm_view.js";
+import { openCartridgeModal } from "../modals/cartridge.js";
+import { headerImg, infoRow, infoRowInner, tagsRow } from "./detail_template.js";
 
 
 // Caches (DRM, HowLongToBeat, achievements) are refreshed from whichever
@@ -24,7 +26,7 @@ export async function loadGameDetails(gameId) {
     if (idx >= 0) state.G[idx] = { ...state.G[idx], ...g };
 
     const imgEl = document.getElementById("dpHeaderImg");
-    if (imgEl && g.header_img) imgEl.innerHTML = `<img class="detail-header-img" src="${g.header_img}" alt="">`;
+    if (imgEl && g.header_img) imgEl.innerHTML = headerImg(g.header_img);
 
     const metaEl = document.getElementById("dpMetaExtra");
     if (metaEl) {
@@ -40,29 +42,27 @@ export async function loadGameDetails(gameId) {
     let html = "";
     if (g.short_description) html += `<div class="detail-desc">${g.short_description}</div>`;
 
-    if (g.genres && g.genres.length) {
-      html += `<div class="detail-info-row"><span class="detail-info-label">Generos</span><div class="detail-tags">`;
-      g.genres.forEach(x => { html += `<span class="tag tag-genre">${esc(x)}</span>`; });
-      html += `</div></div>`;
-    }
+    html += tagsRow("Generos", g.genres);
     if (g.developers && g.developers.length) {
-      html += `<div class="detail-info-row"><span class="detail-info-label">Developer</span><span class="detail-info-value">${esc(g.developers.join(", "))}</span></div>`;
+      html += infoRow("Developer", esc(g.developers.join(", ")));
     }
     if (g.has_cards) {
-      html += `<div class="detail-info-row"><span class="detail-info-label">Cromos</span><span class="detail-info-value"><span class="tag tag-cards">\u{1F0CF} Tiene cromos de Steam</span></span></div>`;
+      html += infoRow("Cromos", `<span class="tag tag-cards">\u{1F0CF} Tiene cromos de Steam</span>`);
     }
     if (g.metacritic) {
-      html += `<div class="detail-info-row"><span class="detail-info-label">Metacritic</span><span class="detail-info-value"><span class="metacritic-badge ${mcColor(g.metacritic)}">${g.metacritic}</span></span></div>`;
+      html += infoRow("Metacritic", `<span class="metacritic-badge ${mcColor(g.metacritic)}">${g.metacritic}</span>`);
     }
     if (g.tag) {
-      html += `<div class="detail-info-row"><span class="detail-info-label">Categoria</span><span class="detail-info-value"><span class="tag ${TC[g.tag]}">${TL[g.tag]}</span></span></div>`;
+      html += infoRow("Categoria", `<span class="tag ${TC[g.tag]}">${TL[g.tag]}</span>`);
     }
-    html += `<div class="detail-info-row"><span class="detail-info-label">Horas</span><span class="detail-info-value">${g.hours > 0 ? g.hours + "h" : "Sin jugar"}</span></div>`;
-    html += `<div id="dpHltb" class="detail-info-row"><span class="detail-info-label">Duracion (HLTB)</span><span class="detail-info-value" style="color:#6e7681">Buscando...</span></div>`;
-    html += `<div id="dpDrm" class="detail-info-row"><span class="detail-info-label">DRM</span><span class="detail-info-value" style="color:#6e7681">Consultando...</span></div>`;
+    html += infoRow("Horas", g.hours > 0 ? g.hours + "h" : "Sin jugar");
+    html += infoRow("Duracion (HLTB)", `<span style="color:#6e7681">Buscando...</span>`, "dpHltb");
+    html += infoRow("DRM", `<span style="color:#6e7681">Consultando...</span>`, "dpDrm");
 
     if (!html) html = `<div class="ach-empty">No hay detalles disponibles.</div>`;
+    html = `<div class="detail-info-row"><button class="cartridge-btn" id="cartridgeBtn">💾 Instalar en cartucho</button></div>` + html;
     infoEl.innerHTML = html;
+    document.getElementById("cartridgeBtn").onclick = () => openCartridgeModal(gameId);
     loadHltb(g.name, gameId);
     loadDrm(gameId);
 
@@ -218,7 +218,7 @@ export async function loadDrm(gameId) {
     const badge = renderDrmBadge(info);
     const explanation = renderDrmExplanation(info);
     const preservation = renderPreservabilityBlock(info, gameName);
-    el.innerHTML = `<span class="detail-info-label">DRM</span><div class="detail-info-value drm-detail-value">${badge}${explanation}${preservation}</div>`;
+    el.innerHTML = infoRowInner("DRM", `${badge}${explanation}${preservation}`, "div", "drm-detail-value");
   } catch (_) {
     const el = document.getElementById("dpDrm");
     if (el) {
@@ -245,7 +245,7 @@ export async function loadHltb(gameName, gameId) {
     if (r.extra_hours > 0) html += `<span class="tag tag-ach">Main+Extra: ${r.extra_hours}h</span>`;
     if (r.completionist_hours > 0) html += `<span class="tag tag-cards">100%: ${r.completionist_hours}h</span>`;
     html += "</div>";
-    el.innerHTML = `<span class="detail-info-label">Duracion (HLTB)</span><span class="detail-info-value">${html}</span>`;
+    el.innerHTML = infoRowInner("Duracion (HLTB)", html);
     refreshLibraryViews();
   } catch (_) {
     const el = document.getElementById("dpHltb");

@@ -7,7 +7,7 @@ edition = "2024"
 tauri = { version = "2", features = ["devtools"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-ureq = { version = "3", features = ["json"] }
+ureq = { version = "3", features = ["json", "cookies"] }
 tokio = { version = "1", features = ["rt"] }
 dirs = "6"
 tauri-plugin-opener = "2"
@@ -15,6 +15,27 @@ regex = "1"
 steam-vdf-parser = "0.1.1"
 thiserror = "2"
 urlencoding = "2"
+# Cartridge marker self-check (#194): MD5 over the marker's own fields, not
+# the installed games — RustCrypto's maintained implementation.
+md-5 = "0.11"
+# Verifying the vendored Proton/Steam Linux Runtime downloads (#206) against
+# their own published SHA256/SHA512 sums — same RustCrypto family as md-5.
+sha2 = "0.10"
+# Extracting umu-run out of umu-launcher's zipapp release tarball (#206).
+tar = "0.4"
+# Goldberg injection (#199): PE section scan to detect a SteamStub wrapper
+# before swapping steam_api(64).dll — detection only, no unpacking, so the
+# "pe" feature is all this needs.
+goblin = { version = "0.10", default-features = false, features = [
+    "std",
+    "pe32",
+    "pe64",
+] }
+# Cartridge disk usage (#228): total/free space per mount point, cross-
+# platform (statvfs on Linux, GetDiskFreeSpaceExW on Windows) without hand-
+# rolling either — only the "disk" feature, no process/network/user scanning.
+sysinfo = { version = "0.39.6", default-features = false, features = ["disk"] }
+flate2 = "1.1.10"
 
 # The cheat runtime is the Linux ptrace backend (nix, /proc, ELF symbols).
 # Windows gets the tracker only until tatu-win lands (#181); gating the deps
@@ -26,11 +47,24 @@ ce-launcher = { path = "../crates/ce-launcher" }
 # zip. ce-launcher already pulls the same crate at the same major version
 # — keep them aligned to avoid two copies in the dep tree.
 zip = "8"
+# Cartridge drive enumeration (#193) talks to udisks2 over D-Bus. This is a
+# maintained wrapper around zbus rather than hand-rolled proxies — no sudo,
+# same service the desktop's own Settings > Storage UI uses.
+udisks2 = "0.3"
 
 # Steam is relocatable on Windows, so the install dir comes from
 # HKCU\Software\Valve\Steam\SteamPath rather than a guessed Program Files.
 [target.'cfg(windows)'.dependencies]
 winreg = "0.56"
+# Cartridge drive enumeration (#193): GetLogicalDrives/GetDriveTypeW and
+# volume info are raw Win32 calls, same crate cheat-mono-collector already
+# uses for its Windows-only build.
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+    "Win32_System_WindowsProgramming",
+    "Win32_System_SystemServices",
+] }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

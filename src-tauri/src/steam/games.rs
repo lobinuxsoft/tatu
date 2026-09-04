@@ -26,6 +26,9 @@ pub struct Game {
     /// Developer names.
     #[serde(default)]
     pub developers: Vec<String>,
+    /// Publisher names.
+    #[serde(default)]
+    pub publishers: Vec<String>,
     /// Short description from Steam store.
     #[serde(default)]
     pub short_description: String,
@@ -74,6 +77,7 @@ pub fn fetch_games(api_key: &str, steam_id: &str) -> Result<Vec<Game>, String> {
                 header_img: String::new(),
                 metacritic: None,
                 developers: vec![],
+                publishers: vec![],
                 short_description: String::new(),
             })
         })
@@ -125,6 +129,12 @@ pub fn fetch_single_detail(game: &mut Game) -> bool {
         game.developers = devs
             .iter()
             .filter_map(|d| d.as_str().map(String::from))
+            .collect();
+    }
+    if let Some(pubs) = data["publishers"].as_array() {
+        game.publishers = pubs
+            .iter()
+            .filter_map(|p| p.as_str().map(String::from))
             .collect();
     }
     if let Some(desc) = data["short_description"].as_str() {

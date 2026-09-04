@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::achievements::GameAchievements;
 use crate::disk::DiskSize;
 use crate::drm::DrmInfo;
+use crate::gog_account::GogTokens;
 use crate::hltb::HltbResult;
 use crate::inventory::GameCards;
 use crate::shortcuts::NonSteamGame;
@@ -27,6 +28,11 @@ pub struct AppState {
     pub steam_api_key: String,
     #[serde(default)]
     pub steam_id: String,
+    /// SteamGridDB API key (#205), used to cache cover art onto a cartridge
+    /// at install time — separate key from `steam_api_key` above, different
+    /// service, own free signup.
+    #[serde(default)]
+    pub steamgriddb_api_key: String,
     #[serde(default)]
     pub achievement_cache: HashMap<u64, GameAchievements>,
     #[serde(default)]
@@ -40,6 +46,29 @@ pub struct AppState {
     /// Disk size cache (installed + previously measured), keyed by Steam app ID.
     #[serde(default)]
     pub size_cache: HashMap<u64, DiskSize>,
+    /// GOG account OAuth2 tokens (#243), once the user connects one — same
+    /// plaintext-in-state.json posture as `steam_api_key` above, no special
+    /// handling added here that the rest of this file doesn't already have.
+    #[serde(default)]
+    pub gog_tokens: Option<GogTokens>,
+    /// Cached from the last successful library fetch, so the settings
+    /// screen has something to show without re-hitting GOG on every launch.
+    #[serde(default)]
+    pub gog_library: Vec<crate::gog_account::GogOwnedGame>,
+    /// Completed tracking for the GOG tab — same shape as `completed`/
+    /// `completed_nonsteam` above, kept separate since a GOG id and a
+    /// Steam appid share the same numeric type but not the same namespace.
+    #[serde(default)]
+    pub completed_gog: HashSet<u64>,
+    /// PCGamingWiki bot password login (`user@botname`) — required since
+    /// their August 2026 server migration locked `cargoquery` (the DRM data
+    /// source) behind auth. Same plaintext-in-state.json posture as
+    /// `steam_api_key`; a bot password is scoped/revocable, never the
+    /// account's real password.
+    #[serde(default)]
+    pub pcgw_username: String,
+    #[serde(default)]
+    pub pcgw_bot_password: String,
 }
 
 impl AppState {

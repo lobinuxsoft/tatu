@@ -16,6 +16,16 @@ use std::ops::Range;
 /// The navigation path to the per-app settings inside `localconfig.vdf`.
 pub const APPS_PATH: &[&str] = &["UserLocalConfigStore", "Software", "Valve", "Steam", "apps"];
 
+/// The navigation path to per-app Steam Play overrides inside the OTHER
+/// Steam config file, `config.vdf` (top-level install dir, not per-account).
+pub const COMPAT_TOOL_MAPPING_PATH: &[&str] = &[
+    "InstallConfigStore",
+    "Software",
+    "Valve",
+    "Steam",
+    "CompatToolMapping",
+];
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum VdfError {
     /// A key along the navigation path was missing (file isn't the expected
@@ -91,6 +101,60 @@ pub fn set_launch_options(src: &str, app_id: &str, value: &str) -> Result<String
         let line = format!("\n\t\t\t\t\t\t\"LaunchOptions\"\t\t\"{escaped}\"");
         Ok(splice(src, insert_at..insert_at, &line))
     }
+}
+
+/// Force `app_id` onto `tool_name` (e.g. `"proton_experimental"`) in
+/// `config.vdf`'s `CompatToolMapping` — the same effect as "Force the use of
+/// a specific Steam Play compatibility tool" in the game's own Properties
+/// dialog. Replaces an existing mapping for this app_id wholesale rather
+/// than merging, since a stale `name`/`config` pair from a previous forced
+/// tool would otherwise survive underneath the new one.
+pub fn set_compat_tool(src: &str, app_id: &str, tool_name: &str) -> Result<String, VdfError> {
+    let toks = tokenize(src)?;
+    let mapping = navigate(&toks, src, COMPAT_TOOL_MAPPING_PATH)?;
+    let mapping_inner = brace_token_range(&toks, &mapping);
+    let block = format!(
+        "\"{app_id}\"\n\t\t{{\n\t\t\t\"name\"\t\t\"{tool_name}\"\n\t\t\t\"config\"\t\t\"\"\n\t\t\t\"priority\"\t\t\"250\"\n\t\t}}"
+    );
+
+    match find_key_and_block(&toks, src, mapping_inner, app_id) {
+        // key_start..close+1 spans `"app_id" { ... }` in full, so the
+        // replacement fully owns both the key and its block.
+        Some((key_start, close)) => Ok(splice(src, key_start..close + 1, &block)),
+        None => {
+            let insert_at = mapping.end;
+            Ok(splice(src, insert_at..insert_at, &format!("\n\t\t{block}")))
+        }
+    }
+}
+
+/// Like [`find_block`], but also returns the byte offset where the matching
+/// key's OPENING quote starts — needed to replace a `"key" { ... }` pair
+/// wholesale rather than just the block's insides.
+fn find_key_and_block(
+    toks: &[Tok],
+    src: &str,
+    level: Range<usize>,
+    key: &str,
+) -> Option<(usize, usize)> {
+    let mut i = level.start;
+    while i < level.end {
+        match &toks[i] {
+            Tok::Str { inner } if unescape(&src[inner.clone()]) == key => {
+                if matches!(toks.get(i + 1), Some(Tok::Open(_))) {
+                    let close_idx = matching_close(toks, i + 1);
+                    if let Tok::Close(close_pos) = toks[close_idx] {
+                        return Some((inner.start - 1, close_pos));
+                    }
+                }
+                i += 2;
+            }
+            Tok::Str { .. } => i = skip_value(toks, i),
+            Tok::Open(_) => i = matching_close(toks, i) + 1,
+            Tok::Close(_) => break,
+        }
+    }
+    None
 }
 
 fn splice(src: &str, range: Range<usize>, with: &str) -> String {

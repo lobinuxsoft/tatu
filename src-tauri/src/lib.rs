@@ -1,7 +1,10 @@
 mod achievements;
+mod cartridge;
 mod commands;
 mod disk;
 mod drm;
+mod gog_account;
+mod gog_download;
 mod hltb;
 mod inventory;
 mod shortcuts;
@@ -36,10 +39,12 @@ macro_rules! tracker_handler {
     ($($extra:path),* $(,)?) => {
         tauri::generate_handler![
             commands::state_cmd::get_state,
+            commands::state_cmd::get_game_context,
             commands::state_cmd::get_settings,
             commands::state_cmd::save_settings,
             commands::state_cmd::save_completed,
             commands::state_cmd::save_completed_nonsteam,
+            commands::state_cmd::save_completed_gog,
             commands::sync_cmd::sync_steam,
             commands::sync_cmd::sync_nonsteam,
             commands::sync_cmd::fetch_details,
@@ -49,10 +54,41 @@ macro_rules! tracker_handler {
             commands::detail_cmd::search_hltb,
             commands::drm_cmd::get_game_drm,
             commands::drm_cmd::fetch_all_drm,
+            commands::gog_cmd::gog_login_url,
+            commands::gog_cmd::gog_is_connected,
+            commands::gog_cmd::gog_connect,
+            commands::gog_cmd::gog_disconnect,
+            commands::gog_cmd::fetch_gog_library,
+            commands::gog_cmd::get_gog_game_context,
+            commands::gog_cmd::fetch_gog_extra_details,
+            commands::gog_cmd::gog_get_download_size,
+            commands::gog_cmd::gog_download_game,
+            commands::gog_cmd::gog_cancel_download,
             commands::collection_cmd::get_steam_favorites,
             commands::collection_cmd::list_steam_collections,
             commands::collection_cmd::import_completed_from_collection,
             commands::disk_cmd::scan_sizes,
+            commands::cartridge_cmd::list_removable_drives,
+            commands::cartridge_cmd::has_cartridge_structure,
+            commands::cartridge_cmd::is_registered_library,
+            commands::cartridge_cmd::get_cartridge_usage,
+            commands::cartridge_cmd::trigger_install,
+            commands::cartridge_cmd::find_pending_cartridge,
+            commands::cartridge_cmd::poll_install_status,
+            commands::cartridge_cmd::inject_goldberg,
+            commands::cartridge_cmd::fetch_cartridge_art,
+            commands::cartridge_cmd::fetch_gog_cartridge_art,
+            commands::cartridge_cmd::fetch_gog_cartridge_description,
+            commands::cartridge_cmd::fetch_gog_cartridge_screenshots,
+            commands::cartridge_cmd::fetch_gog_cartridge_trailer,
+            commands::cartridge_cmd::fetch_cartridge_description,
+            commands::cartridge_cmd::fetch_cartridge_screenshots,
+            commands::cartridge_cmd::fetch_cartridge_trailer,
+            commands::cartridge_cmd::bundle_linux_runtime,
+            commands::cartridge_cmd::uninstall_from_cartridge,
+            commands::cartridge_cmd::list_cartridge_apps,
+            commands::cartridge_cmd::install_launcher_binaries,
+            commands::cartridge_cmd::refresh_cartridge_drm,
             commands::misc_cmd::detect_steam_id,
             commands::misc_cmd::cheats_supported,
             commands::misc_cmd::state_path,
@@ -69,7 +105,8 @@ pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(Mutex::new(app_state))
-        .manage(commands::window_cmd::DetailTarget::default());
+        .manage(commands::window_cmd::DetailTarget::default())
+        .manage(commands::gog_cmd::GogDownloadCancel::default());
 
     #[cfg(unix)]
     let builder = {
@@ -119,6 +156,10 @@ pub fn run() {
                 commands::cheat_runtime_cmd::prereqs::cheat_runtime_install_mono_collector,
                 commands::cheat_runtime_cmd::prereqs::cheat_runtime_set_winhttp_override,
                 commands::cheat_search_cmd::open_fearless_search,
+                commands::cartridge_cmd::format_as_cartridge,
+                commands::cartridge_cmd::mount_cartridge,
+                commands::cartridge_cmd::ensure_symlinks,
+                commands::cartridge_cmd::force_proton_compat,
             ])
     };
 

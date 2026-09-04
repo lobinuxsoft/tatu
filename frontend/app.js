@@ -2,11 +2,13 @@ import { invoke, getVersion, listen } from "./js/tauri.js";
 import { state } from "./js/state.js";
 import { renderSteam } from "./js/render/steam.js";
 import { renderNonSteam } from "./js/render/nonsteam.js";
+import { renderGog } from "./js/render/gog.js";
 import { installExternalLinks } from "./js/links.js";
 import { openImportModal, closeImportModal } from "./js/modals/import.js";
-import { doSync, doSyncNonSteam, doScanSizes, doFetchAllDrm } from "./js/actions.js";
+import { doSync, doSyncNonSteam, doScanSizes, doFetchAllDrm, doFetchAllDetails, doFetchGogLibrary } from "./js/actions.js";
 import { loadSettingsUI, checkConfigWarning, installSettingsHandlers } from "./js/settings.js";
 import { initTheme, installThemeSwitcher } from "./js/themes.js";
+import { openCartridgeManagePanel } from "./js/panel/cartridge_manage.js";
 
 initTheme();
 
@@ -31,8 +33,13 @@ async function init() {
     state.sizeCache = data.size_cache || {};
     state.NS = data.non_steam || [];
     state.completedNS = new Set(data.completed_nonsteam || []);
+    state.GOG = data.gog_library || [];
+    state.completedGog = new Set(data.completed_gog || []);
 
-    loadSettingsUI(data.steam_api_key, data.steam_id);
+    loadSettingsUI(
+      data.steam_api_key, data.steam_id, data.steamgriddb_api_key,
+      data.pcgw_username, data.pcgw_bot_password, data.gog_connected,
+    );
 
     if (!data.steam_id) {
       try {
@@ -53,6 +60,7 @@ async function init() {
     if (state.G.length > 0) renderSteam();
     else if (state.hasConfig) await doSync();
     renderNonSteam();
+    renderGog();
   } catch (e) {
     document.getElementById("content").innerHTML = '<div class="loading" style="color:#f85149">Error: ' + e + '</div>';
   }
@@ -92,6 +100,7 @@ document.querySelector(".tabs").addEventListener("click", e => {
   document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
   tab.classList.add("active");
   document.getElementById("panel-" + tab.dataset.tab).classList.add("active");
+  if (tab.dataset.tab === "cartridge") openCartridgeManagePanel();
 });
 
 // --- Sync / action buttons ---
@@ -103,7 +112,9 @@ document.getElementById("syncBtn").addEventListener("click", () => {
   doSync();
 });
 document.getElementById("nsSyncBtn").addEventListener("click", doSyncNonSteam);
+document.getElementById("gogTabSyncBtn").addEventListener("click", doFetchGogLibrary);
 document.getElementById("drmBtn").addEventListener("click", doFetchAllDrm);
+document.getElementById("detailsBtn").addEventListener("click", doFetchAllDetails);
 document.getElementById("sizeBtn").addEventListener("click", doScanSizes);
 document.getElementById("importBtn").addEventListener("click", openImportModal);
 document.getElementById("importClose").addEventListener("click", closeImportModal);
@@ -145,6 +156,10 @@ document.addEventListener("change", async e => {
       if (e.target.checked) state.completedNS.add(id); else state.completedNS.delete(id);
       renderNonSteam();
       await invoke("save_completed_nonsteam", { completed: [...state.completedNS] });
+    } else if (list === "gog") {
+      if (e.target.checked) state.completedGog.add(id); else state.completedGog.delete(id);
+      renderGog();
+      await invoke("save_completed_gog", { completed: [...state.completedGog] });
     }
   }
 });
@@ -161,6 +176,17 @@ document.getElementById("lNav").addEventListener("click", e => {
     if (t) t.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 });
+document.getElementById("gogSearch").addEventListener("input", e => {
+  state.gogQ = e.target.value.toLowerCase().trim();
+  renderGog();
+});
+document.getElementById("lNavGog").addEventListener("click", e => {
+  if (e.target.tagName === "A") {
+    e.preventDefault();
+    const t = document.querySelector(e.target.getAttribute("href"));
+    if (t) t.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+});
 document.getElementById("content").addEventListener("click", e => {
   if (e.target.type === "checkbox") return;
   const tr = e.target.closest("tr");
@@ -169,7 +195,20 @@ document.getElementById("content").addEventListener("click", e => {
   if (!cb) return;
   // #187: the detail view is its own window, so it can be moved, resized past
   // this window's bounds, and left open beside the list.
-  invoke("open_detail_window", { appId: parseInt(cb.dataset.id, 10) })
+  invoke("open_detail_window", { appId: parseInt(cb.dataset.id, 10), source: "steam" })
+    .catch(e => console.error("open_detail_window failed", e));
+});
+
+// #243: same detail-window mechanism as Steam above, distinct `source` so
+// the backend looks the id up in gog_library instead of games/non_steam —
+// a GOG product id and a Steam appid share no namespace.
+document.getElementById("gogContent").addEventListener("click", e => {
+  if (e.target.type === "checkbox") return;
+  const tr = e.target.closest("tr");
+  if (!tr) return;
+  const cb = tr.querySelector("input[data-id][data-list='gog']");
+  if (!cb) return;
+  invoke("open_detail_window", { appId: parseInt(cb.dataset.id, 10), source: "gog" })
     .catch(e => console.error("open_detail_window failed", e));
 });
 
