@@ -2,10 +2,12 @@ import { invoke, opener } from "./tauri.js";
 import { state } from "./state.js";
 import { renderGog } from "./render/gog.js";
 
-export function loadSettingsUI(apiKey, steamId, sgdbApiKey, gogConnected) {
+export function loadSettingsUI(apiKey, steamId, sgdbApiKey, pcgwUsername, pcgwBotPassword, gogConnected) {
   document.getElementById("cfgApiKey").value = apiKey || "";
   document.getElementById("cfgSteamId").value = steamId || "";
   document.getElementById("cfgSgdbApiKey").value = sgdbApiKey || "";
+  document.getElementById("cfgPcgwUsername").value = pcgwUsername || "";
+  document.getElementById("cfgPcgwBotPassword").value = pcgwBotPassword || "";
   state.hasConfig = !!(apiKey && steamId);
   renderGogConnectionState(!!gogConnected);
 }
@@ -42,6 +44,13 @@ export function installSettingsHandlers() {
     else { inp.type = "password"; btn.textContent = "Mostrar"; }
   });
 
+  document.getElementById("togglePcgwBotPasswordBtn").addEventListener("click", () => {
+    const inp = document.getElementById("cfgPcgwBotPassword");
+    const btn = document.getElementById("togglePcgwBotPasswordBtn");
+    if (inp.type === "password") { inp.type = "text"; btn.textContent = "Ocultar"; }
+    else { inp.type = "password"; btn.textContent = "Mostrar"; }
+  });
+
   document.getElementById("detectSteamIdBtn").addEventListener("click", async () => {
     const btn = document.getElementById("detectSteamIdBtn");
     btn.disabled = true; btn.textContent = "Detectando...";
@@ -63,9 +72,14 @@ export function installSettingsHandlers() {
     const key = document.getElementById("cfgApiKey").value.trim();
     const id = document.getElementById("cfgSteamId").value.trim();
     const sgdbKey = document.getElementById("cfgSgdbApiKey").value.trim();
+    const pcgwUsername = document.getElementById("cfgPcgwUsername").value.trim();
+    const pcgwBotPassword = document.getElementById("cfgPcgwBotPassword").value.trim();
     const msg = document.getElementById("settingsMsg");
     try {
-      await invoke("save_settings", { steamApiKey: key, steamId: id, steamgriddbApiKey: sgdbKey });
+      await invoke("save_settings", {
+        steamApiKey: key, steamId: id, steamgriddbApiKey: sgdbKey,
+        pcgwUsername, pcgwBotPassword,
+      });
       state.hasConfig = !!(key && id);
       checkConfigWarning();
       msg.style.color = "#2ea043";

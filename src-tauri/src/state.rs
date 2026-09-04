@@ -60,6 +60,15 @@ pub struct AppState {
     /// Steam appid share the same numeric type but not the same namespace.
     #[serde(default)]
     pub completed_gog: HashSet<u64>,
+    /// PCGamingWiki bot password login (`user@botname`) — required since
+    /// their August 2026 server migration locked `cargoquery` (the DRM data
+    /// source) behind auth. Same plaintext-in-state.json posture as
+    /// `steam_api_key`; a bot password is scoped/revocable, never the
+    /// account's real password.
+    #[serde(default)]
+    pub pcgw_username: String,
+    #[serde(default)]
+    pub pcgw_bot_password: String,
 }
 
 impl AppState {

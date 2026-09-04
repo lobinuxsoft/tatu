@@ -17,11 +17,15 @@ use classify::{RawDrm, merge};
 use gog::upgrade_if_on_gog;
 #[cfg(unix)]
 use probe::upgrade_from_installed_files;
+pub use sources::login_pcgw;
 use sources::{fetch_from_pcgamingwiki, fetch_from_steam};
 
 /// Fetch DRM information for a Steam app ID, querying Steam Store and
 /// PCGamingWiki and merging the results with a Steam-copy-centric heuristic.
-pub fn fetch_drm_info(app_id: u64) -> Result<DrmInfo, String> {
+/// `pcgw_agent` is `None` when the user hasn't set up PCGamingWiki
+/// credentials yet (see `login_pcgw`) — PCGW is skipped rather than
+/// treated as an error, same as any other source that comes back empty.
+pub fn fetch_drm_info(app_id: u64, pcgw_agent: Option<&ureq::Agent>) -> Result<DrmInfo, String> {
     let mut raw = RawDrm::default();
     let mut steam_name = None;
 
@@ -32,7 +36,9 @@ pub fn fetch_drm_info(app_id: u64) -> Result<DrmInfo, String> {
         steam_name = steam.name;
     }
 
-    if let Some(pcgw) = fetch_from_pcgamingwiki(app_id) {
+    if let Some(agent) = pcgw_agent
+        && let Some(pcgw) = fetch_from_pcgamingwiki(agent, app_id)
+    {
         raw.pcgw_stores = pcgw.stores;
         raw.pcgw_uses = pcgw.uses;
         raw.pcgw_removed = pcgw.removed;

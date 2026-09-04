@@ -5,7 +5,7 @@ import { renderNonSteam } from "./js/render/nonsteam.js";
 import { renderGog } from "./js/render/gog.js";
 import { installExternalLinks } from "./js/links.js";
 import { openImportModal, closeImportModal } from "./js/modals/import.js";
-import { doSync, doSyncNonSteam, doScanSizes, doFetchAllDrm, doFetchGogLibrary } from "./js/actions.js";
+import { doSync, doSyncNonSteam, doScanSizes, doFetchAllDrm, doFetchAllDetails, doFetchGogLibrary } from "./js/actions.js";
 import { loadSettingsUI, checkConfigWarning, installSettingsHandlers } from "./js/settings.js";
 import { initTheme, installThemeSwitcher } from "./js/themes.js";
 import { openCartridgeManagePanel } from "./js/panel/cartridge_manage.js";
@@ -36,7 +36,10 @@ async function init() {
     state.GOG = data.gog_library || [];
     state.completedGog = new Set(data.completed_gog || []);
 
-    loadSettingsUI(data.steam_api_key, data.steam_id, data.steamgriddb_api_key, data.gog_connected);
+    loadSettingsUI(
+      data.steam_api_key, data.steam_id, data.steamgriddb_api_key,
+      data.pcgw_username, data.pcgw_bot_password, data.gog_connected,
+    );
 
     if (!data.steam_id) {
       try {
@@ -111,6 +114,7 @@ document.getElementById("syncBtn").addEventListener("click", () => {
 document.getElementById("nsSyncBtn").addEventListener("click", doSyncNonSteam);
 document.getElementById("gogTabSyncBtn").addEventListener("click", doFetchGogLibrary);
 document.getElementById("drmBtn").addEventListener("click", doFetchAllDrm);
+document.getElementById("detailsBtn").addEventListener("click", doFetchAllDetails);
 document.getElementById("sizeBtn").addEventListener("click", doScanSizes);
 document.getElementById("importBtn").addEventListener("click", openImportModal);
 document.getElementById("importClose").addEventListener("click", closeImportModal);

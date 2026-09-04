@@ -45,7 +45,7 @@ pub struct GogOwnedGame {
     #[serde(default)]
     pub background_url: Option<String>,
     /// Empty when no confident title match is found on `catalog.gog.com`
-    /// (see `fetch_genres_and_developers`) — GOG's by-id product endpoint
+    /// (see `fetch_genres_developers_publishers`) — GOG's by-id product endpoint
     /// this module otherwise relies on has neither field at all, no matter
     /// which `expand` values are requested (checked live against every
     /// documented one). The catalog's own search is relevance-ranked, not
@@ -56,6 +56,8 @@ pub struct GogOwnedGame {
     pub genres: Vec<String>,
     #[serde(default)]
     pub developers: Vec<String>,
+    #[serde(default)]
+    pub publishers: Vec<String>,
     #[serde(default)]
     pub release_date: Option<String>,
 }
@@ -246,6 +248,7 @@ fn fetch_details(id: u64) -> GogOwnedGame {
         release_date: None,
         genres: Vec::new(),
         developers: Vec::new(),
+        publishers: Vec::new(),
     };
     let url = format!("https://api.gog.com/products/{id}");
     let Some(body) = get_json_retrying(&url) else {
@@ -272,7 +275,7 @@ fn fetch_details(id: u64) -> GogOwnedGame {
         .get("release_date")
         .and_then(|v| v.as_str())
         .map(str::to_string);
-    let (genres, developers) = fetch_genres_and_developers(&title);
+    let (genres, developers, publishers) = fetch_genres_developers_publishers(&title);
 
     GogOwnedGame {
         id,
@@ -282,6 +285,7 @@ fn fetch_details(id: u64) -> GogOwnedGame {
         release_date,
         genres,
         developers,
+        publishers,
     }
 }
 
@@ -366,8 +370,8 @@ fn fetch_description_and_screenshots(id: u64) -> GogExtraDetails {
 /// exact title match after normalizing (not just the first "like:" hit,
 /// which can easily be an unrelated game sharing a word) — an unmatched
 /// title returns empty rather than guessing.
-fn fetch_genres_and_developers(title: &str) -> (Vec<String>, Vec<String>) {
-    let empty = (Vec::new(), Vec::new());
+fn fetch_genres_developers_publishers(title: &str) -> (Vec<String>, Vec<String>, Vec<String>) {
+    let empty = (Vec::new(), Vec::new(), Vec::new());
     let url = format!(
         "https://catalog.gog.com/v1/catalog?query=like:{}&limit=10",
         urlencoding::encode(title)
@@ -404,7 +408,11 @@ fn fetch_genres_and_developers(title: &str) -> (Vec<String>, Vec<String>) {
             })
             .unwrap_or_default()
     };
-    (names_of("genres"), names_of("developers"))
+    (
+        names_of("genres"),
+        names_of("developers"),
+        names_of("publishers"),
+    )
 }
 
 /// Same normalization `drm::gog::normalize_title` uses — lowercase,

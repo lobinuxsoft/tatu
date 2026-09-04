@@ -97,6 +97,47 @@ export async function doFetchAllDrm() {
   }
 }
 
+// Bulk companion to detail_cmd's per-game lazy fetch (`get_game_details`
+// only fills genres/developers/publishers for a game once its own detail
+// panel is opened) — needed for the search box to actually match those
+// fields across a library nobody has clicked through row by row.
+export async function doFetchAllDetails() {
+  const btn = document.getElementById("detailsBtn");
+  const info = document.getElementById("syncInfo");
+  const wrap = document.getElementById("detailsProgressWrap");
+  const bar = document.getElementById("detailsProgressBar");
+  const text = document.getElementById("detailsProgressText");
+  btn.disabled = true; btn.textContent = "Cargando Detalles...";
+  const prevInfo = info.textContent;
+
+  wrap.style.display = "";
+  bar.style.width = "0%";
+  text.textContent = "Detalles 0/0";
+
+  const unlisten = await listen("detail_progress", e => {
+    const p = e.payload || {};
+    bar.style.width = `${(p.current / p.total) * 100}%`;
+    text.textContent = `Detalles ${p.current}/${p.total}`;
+  });
+  const unlistenDone = await listen("details_done", e => {
+    const p = e.payload || {};
+    if (p.games) { state.G = p.games; renderSteam(); }
+    info.textContent = prevInfo || "Detalles cargados";
+    wrap.style.display = "none";
+    btn.disabled = false; btn.textContent = "Cargar Detalles";
+    unlisten(); unlistenDone();
+  });
+
+  try {
+    await invoke("fetch_details");
+  } catch (e) {
+    info.textContent = "Error al cargar detalles: " + e;
+    wrap.style.display = "none";
+    btn.disabled = false; btn.textContent = "Cargar Detalles";
+    unlisten(); unlistenDone();
+  }
+}
+
 // One request per owned title (#243) — same reasoning doFetchAllDrm has for
 // its own progress bar: silently blocking a tab for however long a real
 // library takes to resolve looks exactly like a hang.
