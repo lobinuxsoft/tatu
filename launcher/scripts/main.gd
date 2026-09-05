@@ -849,15 +849,30 @@ func _launch_via_proton(app_id: int, app_name: String, exe_path: String, source:
 	# standalone-made save, though: a private Tatu-only wineprefix keeps it
 	# on a completely different filesystem tree from the one Steam's own
 	# client watches. Reusing the SAME prefix Steam already created for this
-	# app (steamapps/compatdata/<app_id>/pfx) puts the save in the exact
-	# folder Steam Cloud syncs, with no swap or passthrough needed — a
-	# standalone play session becomes indistinguishable, on disk, from one
-	# Steam itself launched. Falls back to Tatu's own prefix only if Steam
-	# never created one on this cartridge (never played through Steam yet).
+	# app puts the save in the exact folder Steam Cloud syncs, with no swap
+	# or passthrough needed — a standalone play session becomes
+	# indistinguishable, on disk, from one Steam itself launched.
+	#
+	# That real prefix isn't always on the cartridge itself, though: Steam
+	# scopes `compatdata` per LIBRARY FOLDER, not per account — a game
+	# installed for real on the user's main library for years, then also
+	# copied onto this cartridge, has its actual save-bearing prefix sitting
+	# on that OTHER library, while the cartridge's own `compatdata/<app_id>`
+	# is either missing or an empty stub Steam pre-creates just from seeing
+	# the manifest (live-caught, 2026-09-05: FINAL FANTASY XVI had a 755MB
+	# real prefix on `/var/mnt/DATA/SteamLibrary`, while the cartridge's own
+	# copy had no `system.reg` at all — Wine never even booted there once).
+	# `_find_real_prefix` below checks every library Steam knows about
+	# (`libraryfolders.vdf`, the same file `_launch_via_steam` already
+	# parses for #208) before ever falling back to a fresh prefix.
 	var steam_prefix := _cartridge_root().path_join("steamapps").path_join("compatdata").path_join(str(app_id)).path_join("pfx")
 	var wineprefix := steam_prefix
-	if not DirAccess.dir_exists_absolute(steam_prefix):
-		wineprefix = _tatu_local_dir().path_join("wineprefix").path_join(str(app_id))
+	if not _is_real_prefix(steam_prefix):
+		var external_prefix := _find_real_prefix(app_id)
+		if not external_prefix.is_empty():
+			wineprefix = external_prefix
+		else:
+			wineprefix = _tatu_local_dir().path_join("wineprefix").path_join(str(app_id))
 	DirAccess.make_dir_recursive_absolute(wineprefix)
 
 	# A real appid + store (not "umu-default"/"none") is what lets umu's own
@@ -1077,6 +1092,41 @@ func _steam_install_dir() -> String:
 		var path := home.path_join(rel)
 		if DirAccess.dir_exists_absolute(path):
 			return path
+	return ""
+
+## Wine only writes `system.reg` once it actually boots inside a prefix —
+## Steam itself pre-creates an empty `compatdata/<app_id>` stub the moment it
+## sees a matching manifest in a scanned library, well before ever launching
+## the game there, so directory existence alone (the check this replaced)
+## can't tell a real prefix from that stub.
+func _is_real_prefix(pfx_path: String) -> bool:
+	return FileAccess.file_exists(pfx_path.path_join("system.reg"))
+
+## Every `compatdata/<app_id>/pfx` Steam has ever populated for real, across
+## every library folder this machine's Steam knows about (not just the
+## cartridge) — first one found wins, `_launch_via_proton` only calls this
+## once its own cartridge-local prefix already failed `_is_real_prefix`.
+func _find_real_prefix(app_id: int) -> String:
+	var steam_dir := _steam_install_dir()
+	if steam_dir.is_empty():
+		return ""
+
+	var paths: Array[String] = [steam_dir]
+	for rel in ["config/libraryfolders.vdf", "steamapps/libraryfolders.vdf"]:
+		var path := steam_dir.path_join(rel)
+		if not FileAccess.file_exists(path):
+			continue
+		for p in load("res://scripts/steam_library.gd").registered_paths(FileAccess.get_file_as_string(path)):
+			if not paths.has(p):
+				paths.append(p)
+
+	var cartridge := _cartridge_root()
+	for library in paths:
+		if library == cartridge:
+			continue
+		var candidate := library.path_join("steamapps/compatdata/%d/pfx" % app_id)
+		if _is_real_prefix(candidate):
+			return candidate
 	return ""
 
 func _is_steam_running() -> bool:

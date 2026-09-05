@@ -225,6 +225,41 @@ pub fn set_standalone(mount_point: &Path, app_id: u64, exe_path: String) -> Resu
         .map_err(|e| format!("Cannot write {MARKER_FILENAME}: {e}"))
 }
 
+/// Rewrite the app list in caller-supplied order and persist it (#272) — the
+/// launcher (`main.gd::_load_apps`) just iterates `apps` as-is, and the
+/// checksum already ignores array order (`checksum_ignores_app_order`
+/// above), so reordering needs no new field, just a fresh write. `order`
+/// must be exactly the same set of app_ids already on the cartridge, no
+/// more, no less: a mismatch means the caller's copy of the list is stale
+/// (an app got added/removed by another flow since it was fetched), and
+/// silently dropping or duplicating entries would be worse than refusing.
+pub fn reorder_apps(mount_point: &Path, order: &[u64]) -> Result<(), String> {
+    let marker = read_marker(mount_point)
+        .ok_or_else(|| format!("{} has no valid cartridge marker", mount_point.display()))?;
+
+    if order.len() != marker.apps.len()
+        || !order
+            .iter()
+            .all(|id| marker.apps.iter().any(|a| a.app_id == *id))
+    {
+        return Err("El orden recibido no coincide con los juegos del cartucho".to_string());
+    }
+
+    let mut apps = marker.apps;
+    let reordered: Vec<CartridgeApp> = order
+        .iter()
+        .map(|id| {
+            let idx = apps.iter().position(|a| a.app_id == *id).unwrap();
+            apps.remove(idx)
+        })
+        .collect();
+
+    let rebuilt = CartridgeMarker::new(reordered, marker.created_at);
+    let json = serde_json::to_string_pretty(&rebuilt).map_err(|e| e.to_string())?;
+    fs::write(mount_point.join(MARKER_FILENAME), json)
+        .map_err(|e| format!("Cannot write {MARKER_FILENAME}: {e}"))
+}
+
 #[allow(dead_code)]
 fn now_secs() -> u64 {
     std::time::SystemTime::now()
@@ -380,5 +415,32 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         write_marker(dir.path()).unwrap();
         assert!(set_standalone(dir.path(), 1, String::new()).is_err());
+    }
+
+    #[test]
+    fn reorder_apps_persists_the_new_order() {
+        let dir = tempfile::tempdir().unwrap();
+        write_marker(dir.path()).unwrap();
+        add_app(dir.path(), app(1, "A")).unwrap();
+        add_app(dir.path(), app(2, "B")).unwrap();
+        add_app(dir.path(), app(3, "C")).unwrap();
+
+        reorder_apps(dir.path(), &[3, 1, 2]).unwrap();
+
+        let marker = read_marker(dir.path()).expect("still trustworthy after reorder_apps");
+        let ids: Vec<u64> = marker.apps.iter().map(|a| a.app_id).collect();
+        assert_eq!(ids, vec![3, 1, 2]);
+    }
+
+    #[test]
+    fn reorder_apps_rejects_a_mismatched_set() {
+        let dir = tempfile::tempdir().unwrap();
+        write_marker(dir.path()).unwrap();
+        add_app(dir.path(), app(1, "A")).unwrap();
+        add_app(dir.path(), app(2, "B")).unwrap();
+
+        assert!(reorder_apps(dir.path(), &[1]).is_err());
+        assert!(reorder_apps(dir.path(), &[1, 2, 3]).is_err());
+        assert!(reorder_apps(dir.path(), &[1, 3]).is_err());
     }
 }

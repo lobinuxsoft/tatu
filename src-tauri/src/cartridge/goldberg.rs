@@ -1,10 +1,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use goblin::pe::PE;
-
 use crate::drm::Preservability;
-use crate::steam::pick_main_exe_in;
+use crate::steam::{pick_main_exe_in, steam_install_dir};
 
 use super::install::{acf_field, appmanifest_path};
 use super::marker::set_standalone;
@@ -35,32 +33,22 @@ pub fn inject_goldberg(
     let mut files = Vec::new();
     walk(&install_dir, &mut files);
 
-    // Resolved early (before the DLL swap below) so this only ever checks
-    // the exe that's ACTUALLY going to be launched, not every SteamStub
-    // section found anywhere in the tree. A stub-wrapped install commonly
-    // buries the real engine binary several folders deep, behind a clean,
-    // unwrapped branded launcher that Steam's own appinfo.vdf already
-    // records as the real entry point (`pick_main_exe_in` reads it) — that
-    // launcher only needs Goldberg's DLL swap below, nothing else, even
-    // though the engine binary it spawns as a child still carries a
-    // SteamStub wrapper of its own. Steamless (tried here for a while, see
-    // #271/#273) turned out to be solving a problem that didn't need
-    // solving: live-verified across every game tonight that a
-    // SteamStub-wrapped child launched BY an already-Goldberg'd launcher
-    // runs fine on its own — the stub check is satisfied some other way
-    // once the parent process is already talking to Goldberg, not by
-    // unwrapping the child's own PE. A wrapped ENTRY POINT (no separate
-    // launcher to go through instead) is the one case this still can't
-    // help with — refused outright, same as before Steamless ever entered
-    // the picture.
+    // Resolved early (before the DLL swap below), via appinfo.vdf when
+    // available — the exact file Steam's own "Play" button launches.
+    // Whether THIS exe (or anything else in the tree) carries a SteamStub
+    // wrapper turned out not to matter at all: live-verified 2026-09-05
+    // against KINGDOM HEARTS -HD 1.5+2.5 ReMIX- (2552430), whose
+    // `appinfo.vdf` entry point is itself SteamStub-wrapped with no
+    // separate unwrapped launcher to go through instead — it ran fine
+    // standalone as the literal top-level process, no unpacking, no child
+    // process, nothing else needed beyond the DLL swap below. Steamless
+    // (#271/#273) and the SteamStub refusal this replaced were both built
+    // on the same wrong assumption (a wrapped entry point needs
+    // unwrapping, or at least a clean launcher to hide behind) — neither
+    // is true. Goldberg's DLL sitting next to the exe is the only thing
+    // that ever mattered.
     let exe_name = pick_main_exe_in(&install_dir, app_id)?;
     let exe_full_path = install_dir.join(&exe_name);
-    if exe_has_steam_stub(&exe_full_path) {
-        return Err(format!(
-            "App {app_id}'s entry point ({exe_name}) is wrapped in a SteamStub packer \
-             with no unwrapped launcher to use instead — cannot make it standalone"
-        ));
-    }
 
     let dll64 = named(&files, "steam_api64.dll");
     let dll32 = named(&files, "steam_api.dll");
@@ -111,9 +99,34 @@ pub fn inject_goldberg(
         // Remake's "Documents/My Games/.../Steam/<steamid>/"). Without this,
         // every standalone launch writes to a fresh, different folder that
         // never lines up with the save Steam Cloud already knows about.
+        //
+        // That covers games that build their OWN save path off the SteamID.
+        // Games that instead go through ISteamRemoteStorage (Steam Cloud
+        // API) never touch the real userdata folder at all under Goldberg —
+        // gbe_fork emulates the Cloud API by writing to its own private
+        // `GSE Saves/<appid>/remote/` tree inside this same wineprefix,
+        // invisible to the real Steam client and to a save made through it
+        // (live-confirmed missing for FF13, 2026-09-05, whose save-file
+        // list under real Steam is `userdata/<accountid>/292120/remote/`,
+        // untouched by any standalone run). gbe_fork's own
+        // `[user::saves] local_save_path` setting (confirmed against its
+        // `settings_parser.cpp`/`local_storage.cpp` source) needs no DLL
+        // change for this: it replaces Goldberg's private save root
+        // wholesale, and the emu appends `<appid>/remote/` to whatever it's
+        // given exactly like it does today — pointing it at the real
+        // `userdata/<accountid>` directory (the same one `list_steam_
+        // collections` already resolves for the same account) lands
+        // Goldberg's cloud writes in the literal folder the real Steam
+        // client reads.
         let mut config = "[user::general]\nlanguage=spanish\n".to_string();
         if !steam_id.is_empty() {
             config.push_str(&format!("account_steamid={steam_id}\n"));
+            if let Some(userdata_dir) = real_userdata_dir(steam_id) {
+                config.push_str(&format!(
+                    "\n[user::saves]\nlocal_save_path={}\n",
+                    to_wine_path(&userdata_dir)
+                ));
+            }
         }
         fs::write(settings_dir.join("configs.user.ini"), config).map_err(|e| {
             format!(
@@ -188,6 +201,26 @@ pub(super) fn is_still_injected(
         && matches_template(&named(&files, "steam_api.dll"), template_x86)
 }
 
+/// The real Steam client's own per-account save root
+/// (`<steam>/userdata/<account_id>`) — same account-id formula
+/// `list_steam_collections` already uses for the same purpose.
+fn real_userdata_dir(steam_id: &str) -> Option<PathBuf> {
+    let id64: u64 = steam_id.parse().ok()?;
+    let account_id = id64.checked_sub(76561197960265728)?;
+    Some(
+        steam_install_dir()?
+            .join("userdata")
+            .join(account_id.to_string()),
+    )
+}
+
+/// Every new Wine prefix auto-maps the Unix root to `Z:\` — this is what
+/// lets a Windows-side config value (`local_save_path`) reach a real path
+/// on the host filesystem from inside Proton.
+fn to_wine_path(path: &Path) -> String {
+    format!("Z:{}", path.display()).replace('/', "\\")
+}
+
 /// `steamapps/common/<installdir>`, where `installdir` comes from the same
 /// manifest #195 already polls for `StateFlags`.
 fn install_dir(mount_point: &Path, app_id: u64) -> Result<PathBuf, String> {
@@ -253,47 +286,10 @@ fn swap_dll(original: &Path, template: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Whether `exe` carries a SteamStub v1/v2 wrapper — detected by its
-/// telltale `.bind` section. SteamStub v3.x rewrites the entry point
-/// instead of adding a named section and is NOT caught by this: an
-/// undetected v3.x stub just fails to launch standalone, same as if this
-/// check didn't exist — a known gap, not a silent regression, given
-/// injection still failed loud when the pattern IS one we recognize.
-fn exe_has_steam_stub(exe: &Path) -> bool {
-    let Ok(bytes) = fs::read(exe) else {
-        return false;
-    };
-    let Ok(pe) = PE::parse(&bytes) else {
-        return false;
-    };
-    pe.sections.iter().any(|s| is_bind_section(&s.name))
-}
-
-fn is_bind_section(raw: &[u8; 8]) -> bool {
-    let name = String::from_utf8_lossy(raw);
-    name.trim_end_matches('\0') == ".bind"
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::cartridge::marker::{AppSource, CartridgeApp, add_app, read_marker, write_marker};
-
-    fn section_name(bytes: &[u8]) -> [u8; 8] {
-        let mut name = [0u8; 8];
-        name[..bytes.len()].copy_from_slice(bytes);
-        name
-    }
-
-    #[test]
-    fn bind_section_is_recognized() {
-        assert!(is_bind_section(&section_name(b".bind")));
-    }
-
-    #[test]
-    fn unrelated_section_is_not_flagged() {
-        assert!(!is_bind_section(&section_name(b".text")));
-    }
 
     #[test]
     fn non_easy_preservability_is_refused() {
@@ -450,6 +446,19 @@ mod tests {
             fs::read_to_string(install_dir.join("steam_settings").join("steam_appid.txt")).unwrap(),
             "379720"
         );
+    }
+
+    #[test]
+    fn wine_path_maps_unix_root_to_z_drive() {
+        assert_eq!(
+            to_wine_path(Path::new("/home/user/.local/share/Steam/userdata/1")),
+            "Z:\\home\\user\\.local\\share\\Steam\\userdata\\1"
+        );
+    }
+
+    #[test]
+    fn userdata_dir_is_none_for_a_garbage_steamid() {
+        assert!(real_userdata_dir("not-a-steamid").is_none());
     }
 
     #[test]

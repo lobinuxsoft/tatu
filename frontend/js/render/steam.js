@@ -114,6 +114,7 @@ function buildRow(g) {
     }
   }
   if (g.has_cards) tagsHtml += `<span class="tag tag-cards">\u{1F0CF} Cromos</span>`;
+  if (state.cartridgeCache.has(`steam:${g.id}`)) tagsHtml += `<span class="tag tag-cartridge">\u{1F4BF} En cartucho</span>`;
   if (g.genres && g.genres.length) {
     g.genres.forEach(x => { tagsHtml += `<span class="tag tag-genre">${esc(x)}</span>`; });
   }

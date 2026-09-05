@@ -50,7 +50,8 @@ export function renderGog() {
 // row template Steam's own buildRow (render/steam.js) uses.
 function buildRow(g) {
   const img = g.icon_url ? `<img src="${esc(g.icon_url)}" loading="lazy">` : "";
-  const tagsHtml = (g.genres || []).map(x => `<span class="tag tag-genre">${esc(x)}</span>`).join("");
+  let tagsHtml = (g.genres || []).map(x => `<span class="tag tag-genre">${esc(x)}</span>`).join("");
+  if (state.cartridgeCache.has(`gog:${g.id}`)) tagsHtml += `<span class="tag tag-cartridge">\u{1F4BF} En cartucho</span>`;
   const year = g.release_date ? g.release_date.slice(0, 4) : "—";
   return buildGameRow({
     id: g.id,
