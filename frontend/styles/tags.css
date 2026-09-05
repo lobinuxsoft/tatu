@@ -6,6 +6,7 @@
 .tag-genre { background: var(--bg-3); color: var(--fg-dim); border: 1px solid var(--border); }
 .tag-ach { background: var(--success-bg); color: var(--success); border: 1px solid var(--success-border); }
 .tag-cards { background: var(--warning-bg); color: var(--warning); border: 1px solid var(--warning-border); }
+.tag-cartridge { background: var(--accent-bg); color: var(--accent); border: 1px solid var(--accent-strong); }
 .tag-size { background: var(--info-bg); color: var(--info); border: 1px solid var(--info-border); }
 .tag-size-estimate { background: var(--bg-2); color: var(--fg-dim); border: 1px dashed var(--border-muted); }
 .tag-drm-free { background: var(--success-bg); color: var(--success); border: 1px solid var(--success-border); }

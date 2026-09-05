@@ -53,6 +53,29 @@ export async function doScanSizes() {
   }
 }
 
+// Reads whatever cartridge(s) are plugged in right now (#270) — no
+// standing registry of cartridges Tatu has seen before, so this only ever
+// reflects what's connected at click time, same as "Escanear tamaño"
+// above only reflects installs on disk right now.
+export async function doScanCartridges() {
+  const btn = document.getElementById("cartScanBtn");
+  const info = document.getElementById("syncInfo");
+  btn.disabled = true; btn.textContent = "Buscando...";
+  try {
+    const apps = await invoke("list_all_cartridge_apps");
+    state.cartridgeCache = new Set(apps.map(a => `${a.source}:${a.app_id}`));
+    info.textContent = state.cartridgeCache.size
+      ? `${state.cartridgeCache.size} juego(s) encontrados en cartuchos conectados.`
+      : "Ningún cartucho conectado, o ninguno con juegos.";
+    renderSteam();
+    renderGog();
+  } catch (e) {
+    info.textContent = "Error al buscar cartuchos: " + e;
+  } finally {
+    btn.disabled = false; btn.textContent = "Buscar en cartuchos";
+  }
+}
+
 export async function doFetchAllDrm() {
   const btn = document.getElementById("drmBtn");
   const info = document.getElementById("syncInfo");

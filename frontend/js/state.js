@@ -17,6 +17,9 @@ export const state = {
   hltbCache: {},
   drmCache: {},
   sizeCache: {},
+  // Set of "source:app_id" keys already installed on some currently-plugged
+  // cartridge (#270) — populated on demand, not persisted across sessions.
+  cartridgeCache: new Set(),
   sortMode: "alpha",
   pf: "all",
   panelOpen: false,
