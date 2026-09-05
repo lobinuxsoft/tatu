@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.11.0](https://github.com/lobinuxsoft/tatu/compare/v0.10.0...v0.11.0) (2026-09-05)
+
+
+### Features
+
+* **cartridge:** resolve the standalone entry point from Steam's own appinfo.vdf ([a20de04](https://github.com/lobinuxsoft/tatu/commit/a20de04e68662ce410efc844dc059069c9c0725f))
+
+
+### Bug Fixes
+
+* **cartridge:** resolve standalone entry point from Steam's own appinfo.vdf ([fae54b3](https://github.com/lobinuxsoft/tatu/commit/fae54b325e327d1e1fb6b2d2af094f04668a2569))
+* **cartridge:** surface per-app injection errors in the UI ([2a9aa8a](https://github.com/lobinuxsoft/tatu/commit/2a9aa8abd171a218cc1c7598e69f9ad606777e94))
+
 ## [0.10.0](https://github.com/lobinuxsoft/tatu/compare/v0.9.0...v0.10.0) (2026-09-04)
 
 
