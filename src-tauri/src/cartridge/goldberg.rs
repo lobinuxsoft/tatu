@@ -353,7 +353,11 @@ mod tests {
         // SteamStub unwrap) — needs an exe to resolve first, or this would
         // fail on "no .exe files" instead of exercising the DLL check this
         // test is actually about.
-        let install_dir = dir.path().join("steamapps").join("common").join("Empty Game");
+        let install_dir = dir
+            .path()
+            .join("steamapps")
+            .join("common")
+            .join("Empty Game");
         fs::write(install_dir.join("Game.exe"), vec![0u8; 1024]).unwrap();
 
         let err = inject_goldberg(dir.path(), 1, Preservability::Easy, &x86, &x64, "").unwrap_err();

@@ -315,7 +315,10 @@ mod appinfo_tests {
     #[test]
     #[ignore]
     fn appinfo_matches_live_verified_games() {
-        assert_eq!(exe_from_appinfo(377840).as_deref(), Some("FF9_Launcher.exe"));
+        assert_eq!(
+            exe_from_appinfo(377840).as_deref(),
+            Some("FF9_Launcher.exe")
+        );
         assert_eq!(
             exe_from_appinfo(292120).as_deref(),
             Some("FFXiiiLauncher.exe")
