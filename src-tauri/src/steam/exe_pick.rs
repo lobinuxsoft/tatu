@@ -8,6 +8,10 @@
 
 use std::path::{Path, PathBuf};
 
+use steam_vdf_parser::{Obj, parse_appinfo};
+
+use super::install::steam_install_dir;
+
 const NON_GAME_NEEDLES: &[&str] = &[
     "unitycrash",
     "easyanti",
@@ -32,7 +36,25 @@ const NON_GAME_NEEDLES: &[&str] = &[
 /// launch it. Reused by cartridge Goldberg injection (#206/#207), which
 /// already has the cartridge's own install dir, and by `steam::exe`'s
 /// `detect_game_exe` for the cheat-table feature's own install dir.
-pub(crate) fn pick_main_exe_in(install_dir: &Path) -> Result<String, String> {
+///
+/// Checks Steam's own `appcache/appinfo.vdf` first — the exact data behind
+/// the "Play" button, so no guessing "is this Launcher.exe skippable" or
+/// "which of two bundled games did the user mean" the way the size/name
+/// heuristic below has to. `app_id` is 0 for callers with no meaningful
+/// Steam appid (e.g. a GOG install), which this just never matches, falling
+/// straight through to the heuristic. Falls through too whenever Steam
+/// isn't installed on the preparing machine, this app was never cached
+/// locally, or its recorded executable doesn't actually exist under
+/// `install_dir` (a stale/relocated depot) — the heuristic is the fallback
+/// of last resort, not `appinfo.vdf`.
+pub(crate) fn pick_main_exe_in(install_dir: &Path, app_id: u64) -> Result<String, String> {
+    if app_id != 0
+        && let Some(relative) = exe_from_appinfo(app_id)
+        && install_dir.join(&relative).is_file()
+    {
+        return Ok(relative);
+    }
+
     // UE games bury the shipping exe at <Game>/Binaries/Win64/<Game>-Win64-Shipping.exe
     // (depth 3 from install root). Depth 5 leaves margin for engines that nest deeper.
     let exes = enumerate_exes(install_dir, 5);
@@ -45,6 +67,48 @@ pub(crate) fn pick_main_exe_in(install_dir: &Path) -> Result<String, String> {
             install_dir.display()
         )
     })
+}
+
+/// Reads `<steam_install_dir>/appcache/appinfo.vdf` and returns the
+/// `executable` Steam itself would launch for `app_id`, Windows-eligible
+/// launch entries only. Live-verified against several titles whose real
+/// entry point is a branded launcher, not the biggest/deepest engine exe
+/// (issue #273) — `appinfo.vdf`'s answer matched every one of them exactly.
+fn exe_from_appinfo(app_id: u64) -> Option<String> {
+    let steam_dir = steam_install_dir()?;
+    let path = steam_dir.join("appcache").join("appinfo.vdf");
+    let bytes = std::fs::read(path).ok()?;
+    let vdf = parse_appinfo(&bytes).ok()?;
+    let root = vdf.as_obj()?;
+    let app = root.get(&app_id.to_string())?.as_obj()?;
+    let launch = app
+        .get("appinfo")?
+        .as_obj()?
+        .get("config")?
+        .as_obj()?
+        .get("launch")?
+        .as_obj()?;
+
+    launch
+        .iter()
+        .filter_map(|(_, entry)| entry.as_obj())
+        .find(|entry| launch_entry_is_windows(entry))
+        .and_then(|entry| entry.get("executable"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.replace('\\', "/"))
+}
+
+/// Same absent-oslist-means-neutral convention `disk.rs`'s
+/// `depot_matches_platform` already uses for depots — a launch entry with
+/// no `config.oslist` at all applies to every platform.
+fn launch_entry_is_windows(entry: &Obj) -> bool {
+    let Some(cfg) = entry.get("config").and_then(|v| v.as_obj()) else {
+        return true;
+    };
+    let Some(oslist) = cfg.get("oslist").and_then(|v| v.as_str()) else {
+        return true;
+    };
+    oslist.trim().is_empty() || oslist.to_lowercase().contains("windows")
 }
 
 fn enumerate_exes(root: &Path, max_depth: usize) -> Vec<(PathBuf, u64)> {
@@ -202,7 +266,66 @@ mod tests {
     #[test]
     fn pick_main_exe_in_errors_when_no_exe_exists() {
         let tmp = TempDir::new().unwrap();
-        let err = pick_main_exe_in(tmp.path()).unwrap_err();
+        let err = pick_main_exe_in(tmp.path(), 0).unwrap_err();
         assert!(err.contains("no .exe files"));
+    }
+}
+
+#[cfg(test)]
+mod appinfo_tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[test]
+    fn app_id_zero_never_consults_appinfo() {
+        // A GOG install (app_id 0 by convention) must go straight to the
+        // heuristic — asserting this without touching the filesystem or
+        // Steam at all is what keeps this test hermetic.
+        let tmp = TempDir::new().unwrap();
+        fs::write(tmp.path().join("Game.exe"), vec![0u8; 1024]).unwrap();
+        assert_eq!(pick_main_exe_in(tmp.path(), 0).unwrap(), "Game.exe");
+    }
+
+    #[test]
+    fn is_windows_treats_absent_oslist_as_universal() {
+        use steam_vdf_parser::parse_text;
+        // The root key here just plays the role of a launch entry's own
+        // numeric index ("0", "1", ...) — its object body is what
+        // `launch_entry_is_windows` actually inspects.
+        let vdf = parse_text(r#""0" { "config" { } }"#).unwrap();
+        let entry = vdf.as_obj().unwrap();
+        assert!(launch_entry_is_windows(entry));
+    }
+
+    #[test]
+    fn is_windows_rejects_macos_only_entries() {
+        use steam_vdf_parser::parse_text;
+        let vdf = parse_text(r#""0" { "config" { "oslist" "macos" } }"#).unwrap();
+        let entry = vdf.as_obj().unwrap();
+        assert!(!launch_entry_is_windows(entry));
+    }
+
+    // Real Steam + real appinfo.vdf on whichever machine runs this — not
+    // part of the normal suite (no Steam install in CI). Run by hand with
+    // `cargo test -- --ignored appinfo_matches_live_verified_games` after
+    // touching this file's appinfo navigation logic. The expected values
+    // are the same ones issue #273 confirmed by hand, one game at a time,
+    // before this replaced that manual table entirely.
+    #[test]
+    #[ignore]
+    fn appinfo_matches_live_verified_games() {
+        assert_eq!(
+            exe_from_appinfo(377840).as_deref(),
+            Some("FF9_Launcher.exe")
+        );
+        assert_eq!(
+            exe_from_appinfo(292120).as_deref(),
+            Some("FFXiiiLauncher.exe")
+        );
+        assert_eq!(
+            exe_from_appinfo(3837340).as_deref(),
+            Some("FFVII_LAUNCHER.exe")
+        );
     }
 }

@@ -140,7 +140,6 @@ pub fn inject_goldberg(
             BaseDirectory::Resource,
         )
         .map_err(|e| e.to_string())?;
-
     cartridge::inject_goldberg(
         Path::new(&mount_point),
         app_id,
@@ -174,7 +173,6 @@ pub fn refresh_cartridge_drm(
             BaseDirectory::Resource,
         )
         .map_err(|e| e.to_string())?;
-
     let (pcgw_agent, steam_id) = {
         let s = state.lock().map_err(|e| e.to_string())?;
         (

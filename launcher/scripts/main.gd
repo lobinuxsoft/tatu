@@ -805,7 +805,7 @@ func _on_launch_requested() -> void:
 	if OS.get_name() != "Linux":
 		push_warning("Standalone launch on %s not wired yet (#207)" % OS.get_name())
 		return
-	await _launch_via_proton(app_id, app_name, exe_path)
+	await _launch_via_proton(app_id, app_name, exe_path, String(app.get("source", "steam")))
 
 ## Shows the action-status overlay with `text` for `seconds`, then hides it —
 ## shared by the launch flow below and by Add Cartridge, so every action a
@@ -828,7 +828,7 @@ func _sh_quote(s: String) -> String:
 ## container so the game behaves the same as it would through Steam,
 ## without needing Steam installed. See runtime.rs on the Tatu side for why
 ## this specific tool and the exact files it bundles onto the cartridge.
-func _launch_via_proton(app_id: int, app_name: String, exe_path: String) -> void:
+func _launch_via_proton(app_id: int, app_name: String, exe_path: String, source: String = "steam") -> void:
 	_action_status.text = "Lanzando %s..." % app_name
 	_action_overlay.visible = true
 	# The first launch on a cartridge extracts ~700MB synchronously below —
@@ -860,8 +860,14 @@ func _launch_via_proton(app_id: int, app_name: String, exe_path: String) -> void
 		wineprefix = _tatu_local_dir().path_join("wineprefix").path_join(str(app_id))
 	DirAccess.make_dir_recursive_absolute(wineprefix)
 
-	OS.set_environment("GAMEID", "umu-default")
-	OS.set_environment("STORE", "none")
+	# A real appid + store (not "umu-default"/"none") is what lets umu's own
+	# protonfixes apply a per-game fix automatically — the exact same fixes
+	# a real Steam-launched Proton run gets for free. Silently skipped
+	# before this: confirmed a fix genuinely exists for FINAL FANTASY IX
+	# (appid 377840, protonfixes/gamefixes-steam/377840.py) that a
+	# standalone launch never picked up.
+	OS.set_environment("GAMEID", str(app_id))
+	OS.set_environment("STORE", source)
 	OS.set_environment("PROTONPATH", _umu_compat_dir().path_join(PROTON_DIRNAME))
 	OS.set_environment("WINEPREFIX", wineprefix)
 	# The whole point of bundling the runtime on the cartridge is that the
