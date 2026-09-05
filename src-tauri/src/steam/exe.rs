@@ -28,7 +28,7 @@ pub fn detect_game_exe(app_id: &str) -> Result<String, String> {
         return Ok(exe);
     }
     let install_path = find_install_path(app_id)?;
-    let chosen = pick_main_exe_in(&install_path)?;
+    let chosen = pick_main_exe_in(&install_path, app_id.parse().unwrap_or(0))?;
     let _ = cache_detection(app_id, &chosen);
     Ok(chosen)
 }

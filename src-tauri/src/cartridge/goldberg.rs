@@ -35,14 +35,30 @@ pub fn inject_goldberg(
     let mut files = Vec::new();
     walk(&install_dir, &mut files);
 
-    if files
-        .iter()
-        .filter(|p| has_extension(p, "exe"))
-        .any(|exe| exe_has_steam_stub(exe))
-    {
+    // Resolved early (before the DLL swap below) so this only ever checks
+    // the exe that's ACTUALLY going to be launched, not every SteamStub
+    // section found anywhere in the tree. A stub-wrapped install commonly
+    // buries the real engine binary several folders deep, behind a clean,
+    // unwrapped branded launcher that Steam's own appinfo.vdf already
+    // records as the real entry point (`pick_main_exe_in` reads it) — that
+    // launcher only needs Goldberg's DLL swap below, nothing else, even
+    // though the engine binary it spawns as a child still carries a
+    // SteamStub wrapper of its own. Steamless (tried here for a while, see
+    // #271/#273) turned out to be solving a problem that didn't need
+    // solving: live-verified across every game tonight that a
+    // SteamStub-wrapped child launched BY an already-Goldberg'd launcher
+    // runs fine on its own — the stub check is satisfied some other way
+    // once the parent process is already talking to Goldberg, not by
+    // unwrapping the child's own PE. A wrapped ENTRY POINT (no separate
+    // launcher to go through instead) is the one case this still can't
+    // help with — refused outright, same as before Steamless ever entered
+    // the picture.
+    let exe_name = pick_main_exe_in(&install_dir, app_id)?;
+    let exe_full_path = install_dir.join(&exe_name);
+    if exe_has_steam_stub(&exe_full_path) {
         return Err(format!(
-            "App {app_id} is wrapped in a SteamStub packer — Goldberg injection alone \
-             cannot make it standalone"
+            "App {app_id}'s entry point ({exe_name}) is wrapped in a SteamStub packer \
+             with no unwrapped launcher to use instead — cannot make it standalone"
         ));
     }
 
@@ -109,12 +125,6 @@ pub fn inject_goldberg(
 
     fs::write(install_dir.join("steam_appid.txt"), app_id.to_string())
         .map_err(|e| format!("Cannot write steam_appid.txt: {e}"))?;
-
-    // The launcher (#204/#206/#207) has no Steam client to ask which .exe to
-    // run — resolve it once here, the same heuristic already used for the
-    // cheat-runtime feature, and record it on the marker.
-    let exe_name = pick_main_exe_in(&install_dir)?;
-    let exe_full_path = install_dir.join(&exe_name);
 
     // Valve's own convention has SteamAPI_Init fall back to a
     // `steam_appid.txt` in the PROCESS'S OWN CURRENT DIRECTORY when no real
@@ -204,12 +214,6 @@ fn walk(dir: &Path, files: &mut Vec<PathBuf>) {
             files.push(path);
         }
     }
-}
-
-fn has_extension(path: &Path, ext: &str) -> bool {
-    path.extension()
-        .and_then(|e| e.to_str())
-        .is_some_and(|e| e.eq_ignore_ascii_case(ext))
 }
 
 fn named<'a>(files: &'a [PathBuf], filename: &str) -> Vec<&'a PathBuf> {
@@ -344,6 +348,13 @@ mod tests {
     fn missing_dll_is_an_error() {
         let dir = tempfile::tempdir().unwrap();
         let (x86, x64) = setup_cartridge_with_app(dir.path(), 1, "Empty Game");
+        // pick_main_exe_in now runs before the DLL check (#273 fix: it has
+        // to know the real entry point before deciding what needs a
+        // SteamStub unwrap) — needs an exe to resolve first, or this would
+        // fail on "no .exe files" instead of exercising the DLL check this
+        // test is actually about.
+        let install_dir = dir.path().join("steamapps").join("common").join("Empty Game");
+        fs::write(install_dir.join("Game.exe"), vec![0u8; 1024]).unwrap();
 
         let err = inject_goldberg(dir.path(), 1, Preservability::Easy, &x86, &x64, "").unwrap_err();
         assert!(err.contains("No steam_api"));
