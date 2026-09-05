@@ -30,6 +30,30 @@ pub fn list_cartridge_apps(mount_point: String) -> Result<Vec<cartridge::Cartrid
     cartridge::list_apps(path)
 }
 
+/// Every app recorded on any removable drive that's currently a valid
+/// cartridge (#270) — feeds a badge in the main Steam/GOG library tabs so
+/// browsing them shows what's already been copied over, without a trip to
+/// the Cartucho tab. Scoped to drives plugged in right now: Tatu has no
+/// standing registry of cartridges it's seen before, and remembering across
+/// sessions would need one — deferred until a real need for it shows up.
+#[tauri::command]
+pub async fn list_all_cartridge_apps() -> Vec<cartridge::CartridgeApp> {
+    let drives = cartridge::list_removable_drives().await.unwrap_or_default();
+    let mut apps = Vec::new();
+    for drive in drives {
+        let Some(mount_point) = drive.mount_point else {
+            continue;
+        };
+        let path = Path::new(&mount_point);
+        if cartridge::has_cartridge_structure(path)
+            && let Ok(mut found) = cartridge::list_apps(path)
+        {
+            apps.append(&mut found);
+        }
+    }
+    apps
+}
+
 /// Persist a new display order for the cartridge's app list (#272) — the
 /// launcher just iterates `apps` as-is, so this is the whole feature; `order`
 /// is the full list of app_ids in the order the Cartucho tab wants them

@@ -5,7 +5,7 @@ import { renderNonSteam } from "./js/render/nonsteam.js";
 import { renderGog } from "./js/render/gog.js";
 import { installExternalLinks } from "./js/links.js";
 import { openImportModal, closeImportModal } from "./js/modals/import.js";
-import { doSync, doSyncNonSteam, doScanSizes, doFetchAllDrm, doFetchAllDetails, doFetchGogLibrary } from "./js/actions.js";
+import { doSync, doSyncNonSteam, doScanSizes, doFetchAllDrm, doFetchAllDetails, doFetchGogLibrary, doScanCartridges } from "./js/actions.js";
 import { loadSettingsUI, checkConfigWarning, installSettingsHandlers } from "./js/settings.js";
 import { initTheme, installThemeSwitcher } from "./js/themes.js";
 import { openCartridgeManagePanel } from "./js/panel/cartridge_manage.js";
@@ -116,6 +116,7 @@ document.getElementById("gogTabSyncBtn").addEventListener("click", doFetchGogLib
 document.getElementById("drmBtn").addEventListener("click", doFetchAllDrm);
 document.getElementById("detailsBtn").addEventListener("click", doFetchAllDetails);
 document.getElementById("sizeBtn").addEventListener("click", doScanSizes);
+document.getElementById("cartScanBtn").addEventListener("click", doScanCartridges);
 document.getElementById("importBtn").addEventListener("click", openImportModal);
 document.getElementById("importClose").addEventListener("click", closeImportModal);
 document.getElementById("importOverlay").addEventListener("click", e => {
