@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::drm::Preservability;
-use crate::steam::pick_main_exe_in;
+use crate::steam::{pick_main_exe_in, steam_install_dir};
 
 use super::install::{acf_field, appmanifest_path};
 use super::marker::set_standalone;
@@ -99,9 +99,34 @@ pub fn inject_goldberg(
         // Remake's "Documents/My Games/.../Steam/<steamid>/"). Without this,
         // every standalone launch writes to a fresh, different folder that
         // never lines up with the save Steam Cloud already knows about.
+        //
+        // That covers games that build their OWN save path off the SteamID.
+        // Games that instead go through ISteamRemoteStorage (Steam Cloud
+        // API) never touch the real userdata folder at all under Goldberg —
+        // gbe_fork emulates the Cloud API by writing to its own private
+        // `GSE Saves/<appid>/remote/` tree inside this same wineprefix,
+        // invisible to the real Steam client and to a save made through it
+        // (live-confirmed missing for FF13, 2026-09-05, whose save-file
+        // list under real Steam is `userdata/<accountid>/292120/remote/`,
+        // untouched by any standalone run). gbe_fork's own
+        // `[user::saves] local_save_path` setting (confirmed against its
+        // `settings_parser.cpp`/`local_storage.cpp` source) needs no DLL
+        // change for this: it replaces Goldberg's private save root
+        // wholesale, and the emu appends `<appid>/remote/` to whatever it's
+        // given exactly like it does today — pointing it at the real
+        // `userdata/<accountid>` directory (the same one `list_steam_
+        // collections` already resolves for the same account) lands
+        // Goldberg's cloud writes in the literal folder the real Steam
+        // client reads.
         let mut config = "[user::general]\nlanguage=spanish\n".to_string();
         if !steam_id.is_empty() {
             config.push_str(&format!("account_steamid={steam_id}\n"));
+            if let Some(userdata_dir) = real_userdata_dir(steam_id) {
+                config.push_str(&format!(
+                    "\n[user::saves]\nlocal_save_path={}\n",
+                    to_wine_path(&userdata_dir)
+                ));
+            }
         }
         fs::write(settings_dir.join("configs.user.ini"), config).map_err(|e| {
             format!(
@@ -176,6 +201,26 @@ pub(super) fn is_still_injected(
         && matches_template(&named(&files, "steam_api.dll"), template_x86)
 }
 
+/// The real Steam client's own per-account save root
+/// (`<steam>/userdata/<account_id>`) — same account-id formula
+/// `list_steam_collections` already uses for the same purpose.
+fn real_userdata_dir(steam_id: &str) -> Option<PathBuf> {
+    let id64: u64 = steam_id.parse().ok()?;
+    let account_id = id64.checked_sub(76561197960265728)?;
+    Some(
+        steam_install_dir()?
+            .join("userdata")
+            .join(account_id.to_string()),
+    )
+}
+
+/// Every new Wine prefix auto-maps the Unix root to `Z:\` — this is what
+/// lets a Windows-side config value (`local_save_path`) reach a real path
+/// on the host filesystem from inside Proton.
+fn to_wine_path(path: &Path) -> String {
+    format!("Z:{}", path.display()).replace('/', "\\")
+}
+
 /// `steamapps/common/<installdir>`, where `installdir` comes from the same
 /// manifest #195 already polls for `StateFlags`.
 fn install_dir(mount_point: &Path, app_id: u64) -> Result<PathBuf, String> {
@@ -244,7 +289,7 @@ fn swap_dll(original: &Path, template: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cartridge::marker::{AppSource, CartridgeApp, add_app, read_marker, write_marker};
+    use crate::cartridge::marker::{add_app, read_marker, write_marker, AppSource, CartridgeApp};
 
     #[test]
     fn non_easy_preservability_is_refused() {
@@ -401,6 +446,19 @@ mod tests {
             fs::read_to_string(install_dir.join("steam_settings").join("steam_appid.txt")).unwrap(),
             "379720"
         );
+    }
+
+    #[test]
+    fn wine_path_maps_unix_root_to_z_drive() {
+        assert_eq!(
+            to_wine_path(Path::new("/home/user/.local/share/Steam/userdata/1")),
+            "Z:\\home\\user\\.local\\share\\Steam\\userdata\\1"
+        );
+    }
+
+    #[test]
+    fn userdata_dir_is_none_for_a_garbage_steamid() {
+        assert!(real_userdata_dir("not-a-steamid").is_none());
     }
 
     #[test]
