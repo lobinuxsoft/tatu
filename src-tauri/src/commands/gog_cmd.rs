@@ -373,7 +373,10 @@ fn run_gog_download(
     // that same existing limitation) assumes the exe sits directly in the
     // install root — true for most of the small/indie/visual-novel titles
     // GOG's catalog skews toward, but not guaranteed for every engine.
-    let exe_name = crate::steam::pick_main_exe_in(&dest_root)?;
+    // 0: GOG product ids aren't Steam appids, so `KNOWN_EXE_OVERRIDES`
+    // (keyed by Steam appid) never matches here — falls straight through
+    // to the heuristic, same as before this parameter existed.
+    let exe_name = crate::steam::pick_main_exe_in(&dest_root, 0)?;
     let exe_path = dest_root
         .join(&exe_name)
         .strip_prefix(PathBuf::from(mount_point))

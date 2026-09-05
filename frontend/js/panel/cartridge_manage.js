@@ -257,9 +257,16 @@ async function prepareLauncher(drive, apps, includeTrailers) {
         }
       }
       const injected = drmResults.filter(r => r.goldberg_injected).map(r => r.name);
+      const failed = drmResults.filter(r => r.error);
+      let notices = "";
       if (injected.length) {
-        drmNotice = `<div class="import-result import-result-ok">Goldberg agregado a: ${injected.map(esc).join(", ")}.</div>`;
+        notices += `<div class="import-result import-result-ok">Goldberg agregado a: ${injected.map(esc).join(", ")}.</div>`;
       }
+      if (failed.length) {
+        const items = failed.map(r => `<li>${esc(r.name)}: ${esc(r.error)}</li>`).join("");
+        notices += `<div class="cartridge-warn">No se pudo preparar standalone para:<ul>${items}</ul></div>`;
+      }
+      drmNotice = notices;
     } catch (e) {
       drmNotice = `<div class="cartridge-warn">No se pudo re-analizar el DRM del cartucho: ${esc(String(e))}</div>`;
     }
