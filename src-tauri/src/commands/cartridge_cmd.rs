@@ -30,6 +30,15 @@ pub fn list_cartridge_apps(mount_point: String) -> Result<Vec<cartridge::Cartrid
     cartridge::list_apps(path)
 }
 
+/// Persist a new display order for the cartridge's app list (#272) — the
+/// launcher just iterates `apps` as-is, so this is the whole feature; `order`
+/// is the full list of app_ids in the order the Cartucho tab wants them
+/// shown from now on.
+#[tauri::command]
+pub fn reorder_cartridge_apps(mount_point: String, order: Vec<u64>) -> Result<(), String> {
+    cartridge::reorder_apps(Path::new(&mount_point), &order)
+}
+
 #[tauri::command]
 pub fn is_registered_library(mount_point: String) -> bool {
     cartridge::is_registered_library(Path::new(&mount_point))

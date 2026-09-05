@@ -37,7 +37,9 @@ pub use install::{
     sync_marker_with_installed_apps, uninstall_from_cartridge,
 };
 pub use launcher::install_launcher_binaries;
-pub use marker::{AppSource, CartridgeApp, add_app, has_cartridge_structure, list_apps};
+pub use marker::{
+    AppSource, CartridgeApp, add_app, has_cartridge_structure, list_apps, reorder_apps,
+};
 pub use prepare::{PrepareDrmResult, refresh_drm_and_inject};
 pub use runtime::bundle_linux_runtime;
 #[cfg(unix)]

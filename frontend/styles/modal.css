@@ -23,6 +23,10 @@
 .cartridge-btn-secondary:hover:not(:disabled) { color: var(--fg); border-color: var(--accent); }
 .cartridge-btn-secondary:disabled { opacity: 0.5; cursor: not-allowed; }
 .cartridge-actions { display: flex; gap: 0.5rem; margin-top: 0.8rem; }
+.cartridge-reorder-btns { display: flex; gap: 0.2rem; margin-left: 0.5rem; }
+.cartridge-btn-icon { background: transparent; color: var(--fg-dim); border: 1px solid var(--border); border-radius: var(--r-sm); width: 1.6rem; height: 1.6rem; font-size: 0.7rem; line-height: 1; cursor: pointer; transition: color var(--t-fast), border-color var(--t-fast); }
+.cartridge-btn-icon:hover:not(:disabled) { color: var(--fg); border-color: var(--accent); }
+.cartridge-btn-icon:disabled { opacity: 0.35; cursor: not-allowed; }
 .cartridge-warn { background: var(--danger-bg); color: var(--danger); border: 1px solid var(--danger-border); border-radius: var(--r-sm); padding: 0.6rem 0.8rem; font-size: 0.82rem; margin-bottom: 0.6rem; }
 .cartridge-guide { background: var(--bg-panel); color: var(--fg); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 0.6rem 0.8rem; font-size: 0.82rem; margin-bottom: 0.6rem; line-height: 1.5; }
 .cartridge-usage { margin-bottom: 0.8rem; }
