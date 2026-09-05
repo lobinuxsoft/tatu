@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.12.0](https://github.com/lobinuxsoft/tatu/compare/v0.11.0...v0.12.0) (2026-09-05)
+
+
+### Features
+
+* **cartridge:** let the user reorder games in the launcher ([a346268](https://github.com/lobinuxsoft/tatu/commit/a3462683422ddc9074125bc4eeff5394fec7eb86))
+* **cartridge:** let the user reorder games in the launcher ([479faee](https://github.com/lobinuxsoft/tatu/commit/479faeeb04fbc3c40f985f7ff9c98db487f4757a))
+* **library:** mark Steam/GOG games as installed on a cartridge ([1b28c1b](https://github.com/lobinuxsoft/tatu/commit/1b28c1b3718b335fbb1bc5a66812a8ea3fedeb46))
+* **library:** mark Steam/GOG games as installed on a cartridge ([aac7952](https://github.com/lobinuxsoft/tatu/commit/aac795215a0653a4efa27fa65ba3b42faba5e693))
+
+
+### Bug Fixes
+
+* **cartridge:** don't refuse Goldberg injection for a SteamStub-wrapped entry point ([4c90536](https://github.com/lobinuxsoft/tatu/commit/4c90536956e9c40393f6d6b99a967bbe6286f6fd))
+* **cartridge:** don't refuse Goldberg injection for a SteamStub-wrapped entry point ([00dba4c](https://github.com/lobinuxsoft/tatu/commit/00dba4c69cfe843d3bc5e7da32796abd75fa1cc0))
+* **cartridge:** every game's saves point at its real Steam location ([9ac4d7b](https://github.com/lobinuxsoft/tatu/commit/9ac4d7b1848274b1515bea4ce3fb86b0beed13b3))
+* **cartridge:** point Goldberg's local_save_path at real Steam userdata ([a068bd7](https://github.com/lobinuxsoft/tatu/commit/a068bd7ce851838104bebb3b7b27134f2d72084b))
+* **launcher:** reuse a game's real compatdata prefix across libraries ([5a15bf7](https://github.com/lobinuxsoft/tatu/commit/5a15bf7adf98c6375982d01aae071f9507882d9d))
+
 ## [0.11.0](https://github.com/lobinuxsoft/tatu/compare/v0.10.0...v0.11.0) (2026-09-05)
 
 
