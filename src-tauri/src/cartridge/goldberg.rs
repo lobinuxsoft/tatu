@@ -289,7 +289,7 @@ fn swap_dll(original: &Path, template: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cartridge::marker::{add_app, read_marker, write_marker, AppSource, CartridgeApp};
+    use crate::cartridge::marker::{AppSource, CartridgeApp, add_app, read_marker, write_marker};
 
     #[test]
     fn non_easy_preservability_is_refused() {
