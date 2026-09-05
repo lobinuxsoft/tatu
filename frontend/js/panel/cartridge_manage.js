@@ -150,26 +150,38 @@ function renderUsage(usage) {
   );
 }
 
+// Row order IS the launcher's display order (#272) — `main.gd::_load_apps`
+// just iterates the marker's `apps` array as-is, so up/down here plus a
+// persist call is the entire feature, no new marker field involved.
+function renderAppRows(apps) {
+  if (!apps.length) {
+    return `<div class="cartridge-warn">Este cartucho todavía no tiene juegos instalados.</div>`;
+  }
+  return apps
+    .map((app, i) => {
+      const pres = PRES_LABEL[app.preservability && app.preservability.kind] || PRES_LABEL.unknown;
+      const standalone = app.standalone ? " · standalone" : "";
+      return (
+        `<div class="collection-row" data-app-id="${app.app_id}">` +
+        `<span class="collection-name">${esc(app.name)}</span>` +
+        `<span class="collection-count">${pres}${standalone}</span>` +
+        `<span class="cartridge-reorder-btns">` +
+        `<button class="cartridge-btn-icon" data-reorder="up" ${i === 0 ? "disabled" : ""} title="Subir">▲</button>` +
+        `<button class="cartridge-btn-icon" data-reorder="down" ${i === apps.length - 1 ? "disabled" : ""} title="Bajar">▼</button>` +
+        `</span></div>`
+      );
+    })
+    .join("");
+}
+
 function renderCartridge(drive, apps, usage) {
   const el = body();
-  const rows = apps.length
-    ? apps
-        .map(app => {
-          const pres = PRES_LABEL[app.preservability && app.preservability.kind] || PRES_LABEL.unknown;
-          const standalone = app.standalone ? " · standalone" : "";
-          return (
-            `<div class="collection-row"><span class="collection-name">${esc(app.name)}</span>` +
-            `<span class="collection-count">${pres}${standalone}</span></div>`
-          );
-        })
-        .join("")
-    : `<div class="cartridge-warn">Este cartucho todavía no tiene juegos instalados.</div>`;
 
   el.innerHTML =
     `<div class="cartridge-guide">Cartucho: <b>${esc(drive.label || drive.id)}</b> ` +
     `(${formatBytes(drive.total_bytes)}) — ${apps.length} juego(s)</div>` +
     renderUsage(usage) +
-    rows +
+    `<div id="cartAppRows">${renderAppRows(apps)}</div>` +
     // Opt-in (#212): a trailer runs 10-100+ MB and takes real time to
     // transcode, unlike art/description below which are always-on and
     // basically free — never checked by default.
@@ -189,6 +201,35 @@ function renderCartridge(drive, apps, usage) {
   document.getElementById("cartReformatBtn").onclick = () => showFormatConfirm(drive);
   document.getElementById("cartPrepareBtn").onclick = () =>
     prepareLauncher(drive, apps, document.getElementById("cartIncludeTrailers").checked);
+
+  const rowsEl = document.getElementById("cartAppRows");
+  rowsEl.onclick = async e => {
+    const btn = e.target.closest("[data-reorder]");
+    if (!btn || btn.disabled) return;
+    const row = btn.closest(".collection-row");
+    const appId = Number(row.dataset.appId);
+    const idx = apps.findIndex(a => a.app_id === appId);
+    const swapWith = btn.dataset.reorder === "up" ? idx - 1 : idx + 1;
+    if (swapWith < 0 || swapWith >= apps.length) return;
+    [apps[idx], apps[swapWith]] = [apps[swapWith], apps[idx]];
+    rowsEl.innerHTML = renderAppRows(apps);
+    try {
+      await invoke("reorder_cartridge_apps", {
+        mountPoint: drive.mount_point,
+        order: apps.map(a => a.app_id),
+      });
+    } catch (err) {
+      // Revert the visual swap — the marker on disk didn't change, so the
+      // in-memory `apps` order must not either.
+      [apps[idx], apps[swapWith]] = [apps[swapWith], apps[idx]];
+      rowsEl.innerHTML = renderAppRows(apps);
+      document.getElementById("cartReorderWarn")?.remove();
+      rowsEl.insertAdjacentHTML(
+        "afterend",
+        `<div class="cartridge-warn" id="cartReorderWarn">No se pudo guardar el nuevo orden: ${esc(String(err))}</div>`
+      );
+    }
+  };
 }
 
 // Everything that's shared by the WHOLE cartridge rather than tied to one
