@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.13.2](https://github.com/lobinuxsoft/tatu/compare/v0.13.1...v0.13.2) (2026-09-06)
+
+
+### Bug Fixes
+
+* **cartridge:** recover from an orphaned steam_api backup ([feae4c4](https://github.com/lobinuxsoft/tatu/commit/feae4c4573036a031c5b70ea9f60686fd79ca575))
+* **cartridge:** recover from an orphaned steam_api backup ([00471a4](https://github.com/lobinuxsoft/tatu/commit/00471a475edf860c81c977f28da35ed08d467df8))
+
 ## [0.13.1](https://github.com/lobinuxsoft/tatu/compare/v0.13.0...v0.13.1) (2026-09-06)
 
 
