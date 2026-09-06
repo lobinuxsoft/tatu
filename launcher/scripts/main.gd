@@ -1506,33 +1506,39 @@ func _umu_compat_dir() -> String:
 ## Copies umu-run + extracts the bundled Proton and Steam Linux Runtime from
 ## the cartridge (#206's Tatu-side, runtime.rs) onto this machine's local
 ## disk — Proton needs a real filesystem location, not everything works
-## run-in-place from removable media. A no-op past the first call on a given
-## machine: the marker file means every subsequent launch just reuses what's
-## already deployed, cartridge or no cartridge plugged in.
+## run-in-place from removable media. The marker records which Proton build
+## is deployed: a match skips everything (umu-run + runtime don't change
+## between Proton bumps), a mismatch re-extracts only Proton so a version
+## bump (e.g. #303) doesn't leave PROTONPATH pointing at a deleted folder.
 func _ensure_linux_runtime_deployed() -> bool:
 	var local := _tatu_local_dir()
 	var deployed_marker := local.path_join(".runtime-deployed")
+	var deployed_proton := ""
 	if FileAccess.file_exists(deployed_marker):
+		deployed_proton = FileAccess.get_file_as_string(deployed_marker)
+	if deployed_proton == PROTON_DIRNAME:
 		return true
 
 	var cartridge_runtime := _cartridge_root().path_join(CARTRIDGE_RUNTIME_SUBDIR)
-	var umu_run_src := cartridge_runtime.path_join("umu-run")
-	if not FileAccess.file_exists(umu_run_src):
-		push_warning("No Linux runtime bundled on this cartridge (#206)")
-		return false
 
-	DirAccess.make_dir_recursive_absolute(local)
-	var umu_run_dst := local.path_join("umu-run")
-	DirAccess.copy_absolute(umu_run_src, umu_run_dst)
-	OS.execute("chmod", ["+x", umu_run_dst])
+	if deployed_proton.is_empty():
+		var umu_run_src := cartridge_runtime.path_join("umu-run")
+		if not FileAccess.file_exists(umu_run_src):
+			push_warning("No Linux runtime bundled on this cartridge (#206)")
+			return false
 
-	var umu_local := _umu_local_dir()
-	DirAccess.make_dir_recursive_absolute(umu_local)
-	# --strip-components=1: the archive's own top-level SteamLinuxRuntime_4/
-	# folder becomes $HOME/.local/share/umu's CONTENTS directly, matching
-	# what umu-run itself expects (and what its own installer does).
-	if not _extract_tar(cartridge_runtime.path_join(RUNTIME_ARCHIVE), umu_local, true):
-		return false
+		DirAccess.make_dir_recursive_absolute(local)
+		var umu_run_dst := local.path_join("umu-run")
+		DirAccess.copy_absolute(umu_run_src, umu_run_dst)
+		OS.execute("chmod", ["+x", umu_run_dst])
+
+		var umu_local := _umu_local_dir()
+		DirAccess.make_dir_recursive_absolute(umu_local)
+		# --strip-components=1: the archive's own top-level SteamLinuxRuntime_4/
+		# folder becomes $HOME/.local/share/umu's CONTENTS directly, matching
+		# what umu-run itself expects (and what its own installer does).
+		if not _extract_tar(cartridge_runtime.path_join(RUNTIME_ARCHIVE), umu_local, true):
+			return false
 
 	var compat_dir := _umu_compat_dir()
 	DirAccess.make_dir_recursive_absolute(compat_dir)
