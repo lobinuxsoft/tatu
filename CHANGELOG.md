@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.13.4](https://github.com/lobinuxsoft/tatu/compare/v0.13.3...v0.13.4) (2026-09-06)
+
+
+### Bug Fixes
+
+* invalidar marker de runtime si cambió la versión de Proton ([504b04d](https://github.com/lobinuxsoft/tatu/commit/504b04d2d19d034c375df28befa9ce63319839b3))
+* invalidar marker de runtime si cambió la versión de Proton ([6fde2cc](https://github.com/lobinuxsoft/tatu/commit/6fde2ccf1764353992c0c6b0fe1e5a176a3c8b44)), closes [#319](https://github.com/lobinuxsoft/tatu/issues/319)
+
 ## [0.13.3](https://github.com/lobinuxsoft/tatu/compare/v0.13.2...v0.13.3) (2026-09-06)
 
 
