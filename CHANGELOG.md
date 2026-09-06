@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.13.1](https://github.com/lobinuxsoft/tatu/compare/v0.13.0...v0.13.1) (2026-09-06)
+
+
+### Bug Fixes
+
+* **cartridge:** force IPv4 for runtime downloads ([13510dc](https://github.com/lobinuxsoft/tatu/commit/13510dc89a54072da9a777c1f0c95940cde92d32))
+* **cartridge:** force IPv4 for runtime downloads ([d1c5f39](https://github.com/lobinuxsoft/tatu/commit/d1c5f3955ac74bfb7e61af3e8dc94b6b90d9943d))
+
 ## [0.13.0](https://github.com/lobinuxsoft/tatu/compare/v0.12.2...v0.13.0) (2026-09-06)
 
 
