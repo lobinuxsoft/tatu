@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.12.1](https://github.com/lobinuxsoft/tatu/compare/v0.12.0...v0.12.1) (2026-09-06)
+
+
+### Bug Fixes
+
+* **ci:** copy export templates into the container's real $HOME ([554109e](https://github.com/lobinuxsoft/tatu/commit/554109e7f4230238f668bdd95a829becd80c2f27))
+* **ci:** copy export templates into the container's real $HOME ([b800951](https://github.com/lobinuxsoft/tatu/commit/b8009518e855f182a0b191754640c2ca1debc469))
+* **ci:** set the executable bit on launcher/export.sh ([bd2d243](https://github.com/lobinuxsoft/tatu/commit/bd2d2438da24cf9d7fe6125a695fad703289461f))
+* **ci:** set the executable bit on launcher/export.sh ([a496271](https://github.com/lobinuxsoft/tatu/commit/a496271da4413f6a526240c7659a287a3c5935d8))
+* **ci:** ship Goldberg and the Godot launcher in real releases ([d6b286c](https://github.com/lobinuxsoft/tatu/commit/d6b286cfd27946d948144893b6261046ba128a47))
+* **ci:** ship Goldberg and the Godot launcher in real releases ([6957b2b](https://github.com/lobinuxsoft/tatu/commit/6957b2bb8879a7e9b984966f820d888974cc2990)), closes [#285](https://github.com/lobinuxsoft/tatu/issues/285)
+
 ## [0.12.0](https://github.com/lobinuxsoft/tatu/compare/v0.11.0...v0.12.0) (2026-09-05)
 
 
