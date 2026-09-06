@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/nicerapp/tauri/dev/core/tauri-config-schema/schema.json",
   "productName": "Tatu",
-  "version": "0.13.1",
+  "version": "0.13.2",
   "identifier": "com.lobinux.tatu-tracker",
   "build": {
     "frontendDist": "../frontend"
