@@ -34,6 +34,16 @@ jobs:
       - name: Allow git to touch the checkout
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
+      # GitHub Actions overrides $HOME to /github/home inside container
+      # jobs, regardless of what the image itself sets it to — but the
+      # export templates this image ships are baked in at /root (where
+      # Godot itself would look with the image's own $HOME). Without this,
+      # the editor reports "No export template found" and fails outright.
+      - name: Fix export template path for the container's real $HOME
+        run: |
+          mkdir -p "$HOME/.local/share/godot"
+          cp -r /root/.local/share/godot/export_templates "$HOME/.local/share/godot/"
+
       - name: Export launcher binaries
         run: launcher/export.sh godot
 
