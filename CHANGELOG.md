@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.13.0](https://github.com/lobinuxsoft/tatu/compare/v0.12.2...v0.13.0) (2026-09-06)
+
+
+### Features
+
+* **launcher:** copy the game to local disk before launching it ([07d0388](https://github.com/lobinuxsoft/tatu/commit/07d03887373ab9ea7e5867d6e6ba54c023f2c0a4))
+* **launcher:** copy the game to local disk before launching it ([2b06d46](https://github.com/lobinuxsoft/tatu/commit/2b06d46cf026e06712cfec7bd9bef11f0c9e69e1))
+
 ## [0.12.2](https://github.com/lobinuxsoft/tatu/compare/v0.12.1...v0.12.2) (2026-09-06)
 
 
