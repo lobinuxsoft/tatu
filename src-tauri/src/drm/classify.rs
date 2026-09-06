@@ -1,6 +1,8 @@
 use super::hints::preservability_hint;
 use super::types::{DrmInfo, DrmStatus, Preservability};
-use super::vendors::{add_vendors, detect_baked_in_vendors, detect_store_vendors};
+use super::vendors::{
+    add_vendors, detect_binary_vendors, detect_launcher_vendors, detect_store_vendors,
+};
 
 /// Raw data fetched from upstream sources before merging. Shared contract
 /// between `sources` (producer) and `classify` (consumer).
@@ -21,19 +23,42 @@ pub(super) struct RawDrm {
 pub(super) fn merge(raw: RawDrm, fetched_at: u64) -> DrmInfo {
     let mut notes_parts: Vec<String> = Vec::new();
 
-    // Step 1 — detect baked-in vendors from all sources.
-    // Baked-in DRM affects every release of the game, Steam included.
+    // Step 1 — detect vendors from all sources.
+    // Steam Store's own notices describe the Steam release specifically, so
+    // both binary and launcher vendors found there apply unconditionally.
     let mut baked_in: Vec<String> = Vec::new();
     if let Some(ref notice) = raw.steam_drm_notice {
-        add_vendors(&mut baked_in, &detect_baked_in_vendors(notice));
+        add_vendors(&mut baked_in, &detect_binary_vendors(notice));
+        add_vendors(&mut baked_in, &detect_launcher_vendors(notice));
         notes_parts.push(format!("Steam drm_notice: {notice}"));
     }
     if let Some(ref notice) = raw.steam_account_notice {
-        add_vendors(&mut baked_in, &detect_baked_in_vendors(notice));
+        add_vendors(&mut baked_in, &detect_binary_vendors(notice));
+        add_vendors(&mut baked_in, &detect_launcher_vendors(notice));
         notes_parts.push(format!("Cuenta externa requerida: {notice}"));
     }
+    // Binary-embedded protections (Denuvo, SecuROM, ...) are compiled into
+    // the executable and apply no matter which store's row mentions them.
     for token in raw.pcgw_uses.iter().chain(raw.pcgw_retail.iter()) {
-        add_vendors(&mut baked_in, &detect_baked_in_vendors(token));
+        add_vendors(&mut baked_in, &detect_binary_vendors(token));
+    }
+    // Launcher-gated vendors (EA App, Ubisoft Connect, ...) only affect the
+    // Steam copy if the STEAM row itself lists them — a delisted or
+    // other-store row (e.g. an "(unavailable)" EA app listing) requiring one
+    // of these says nothing about whether the Steam release does.
+    match raw.pcgw_stores.iter().position(|s| is_steam_store(s)) {
+        Some(pos) => {
+            if let Some(steam_token) = raw.pcgw_uses.get(pos) {
+                add_vendors(&mut baked_in, &detect_launcher_vendors(steam_token));
+            }
+        }
+        // No row alignment available at all — fall back to the old blanket
+        // scan rather than silently dropping a known launcher requirement.
+        None => {
+            for token in raw.pcgw_uses.iter().chain(raw.pcgw_retail.iter()) {
+                add_vendors(&mut baked_in, &detect_launcher_vendors(token));
+            }
+        }
     }
 
     if !raw.pcgw_stores.is_empty() {
@@ -127,10 +152,13 @@ fn classify_preservability(raw: &RawDrm, status: &DrmStatus) -> Preservability {
                 return Preservability::Alternative;
             }
 
-            // Any baked-in DRM officially removed post-launch?
+            // Any DRM (binary or launcher) officially removed post-launch?
             let mut removed_vendors: Vec<String> = Vec::new();
             for r in &raw.pcgw_removed {
-                for v in detect_baked_in_vendors(r) {
+                for v in detect_binary_vendors(r)
+                    .into_iter()
+                    .chain(detect_launcher_vendors(r))
+                {
                     if !removed_vendors.contains(&v) {
                         removed_vendors.push(v);
                     }
@@ -219,5 +247,52 @@ fn impact_explanation(status: &DrmStatus) -> String {
             Steam. PCGamingWiki no tiene datos o Steam no declaró DRM. Puede ser DRM-free, solo \
             Steam, o tener DRM no detectado."
             .to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn raw(stores: &[&str], uses: &[&str]) -> RawDrm {
+        RawDrm {
+            pcgw_stores: stores.iter().map(|s| s.to_string()).collect(),
+            pcgw_uses: uses.iter().map(|s| s.to_string()).collect(),
+            pcgw_ok: true,
+            pcgw_has_entry: true,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_delisted_launcher_row_does_not_poison_steam() {
+        // Resident Evil 6 shape: a delisted EA app row alongside a Steam
+        // row that only requires Steam DRM.
+        let d = merge(raw(&["Steam", "EA app"], &["Steam", "EA App"]), 0);
+        assert_eq!(d.status, DrmStatus::SteamOnly);
+    }
+
+    #[test]
+    fn the_steam_row_itself_requiring_ea_app_is_third_party() {
+        let d = merge(raw(&["Steam"], &["EA App"]), 0);
+        assert_eq!(
+            d.status,
+            DrmStatus::ThirdParty {
+                vendors: vec!["EA App".to_string()]
+            }
+        );
+    }
+
+    #[test]
+    fn denuvo_on_any_row_poisons_steam() {
+        // Binary-embedded protections apply regardless of which row
+        // mentions them, unlike launcher-gated vendors.
+        let d = merge(raw(&["Steam", "GOG"], &["Steam", "Denuvo"]), 0);
+        assert_eq!(
+            d.status,
+            DrmStatus::ThirdParty {
+                vendors: vec!["Denuvo".to_string()]
+            }
+        );
     }
 }
