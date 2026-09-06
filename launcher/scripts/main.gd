@@ -164,6 +164,12 @@ var _action_overlay: Control
 # launcher) can run while a copy is in flight and the cartridge must stay
 # connected.
 var _copying := false
+# S/X's own choice screen (#300) — "Add Cartridge"/"Add a Non-Steam" (the
+# pre-existing #208 flow) vs "Copiar a carpeta de Steam/GOG" (the new
+# per-game local copy), labeled per the selected card's source.
+var _source_menu: Control
+var _source_menu_options: Array[Label] = []
+var _source_menu_selected := 0
 var _scroll_tween: Tween
 var _panel_content_width := 0.0
 
@@ -301,6 +307,19 @@ func _unhandled_input(event: InputEvent) -> void:
 	# the cartridge has to stay connected and the PC has to stay up.
 	if _copying:
 		return
+	# S/X's choice screen (#300) is a modal too — same input-trapping shape
+	# as the viewer below, just with ui_up/down moving between 2 options
+	# instead of screenshots, Launch (card_launch) confirming, and Close
+	# (card_close_launcher) backing out without doing anything.
+	if _source_menu.visible:
+		if event.is_action_pressed("ui_up") or event.is_action_pressed("ui_down"):
+			_source_menu_selected = wrapi(_source_menu_selected + 1, 0, _source_menu_options.size())
+			_update_source_menu_highlight()
+		elif event.is_action_pressed("card_launch"):
+			_confirm_source_menu()
+		elif event.is_action_pressed("card_close_launcher"):
+			_source_menu.visible = false
+		return
 	# The enlarged viewer is a modal — while it's open, it owns input
 	# exclusively (no carousel navigation leaking through behind it). #214's
 	# bonus-content gallery reuses this exact same trap. ui_up/ui_down still
@@ -402,7 +421,7 @@ func _build_layout() -> void:
 	# reads more like a real game's button-prompt bar, and leaves the
 	# gallery its full height to work with.
 	_action_launch = _action_hint(ICON_LAUNCH, "Launch")
-	_action_add_to_steam = _action_hint(ICON_ADD_TO_STEAM, "Add Cartridge")
+	_action_add_to_steam = _action_hint(ICON_ADD_TO_STEAM, "Cartucho")
 	_action_gallery = _action_hint(ICON_GALLERY, "Gallery")
 	_action_close = _action_hint(ICON_CLOSE, "Close")
 	_action_bar = HBoxContainer.new()
@@ -496,6 +515,27 @@ func _build_layout() -> void:
 		overlay_box.add_child(child)
 	_action_overlay.add_child(overlay_box)
 	add_child(_action_overlay)
+
+	# S/X's choice screen (#300) — built empty here, labels filled in per
+	# selected card by _open_source_menu().
+	_source_menu = ColorRect.new()
+	_source_menu.color = Color(0, 0, 0, 0.85)
+	_source_menu.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_source_menu.visible = false
+	var menu_box := VBoxContainer.new()
+	menu_box.alignment = BoxContainer.ALIGNMENT_CENTER
+	menu_box.add_theme_constant_override("separation", 12)
+	menu_box.set_anchors_preset(Control.PRESET_CENTER)
+	for i in 2:
+		var option := Label.new()
+		option.add_theme_font_override("font", load(FONT_BODY))
+		option.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		option.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		_body_labels.append(option)
+		_source_menu_options.append(option)
+		menu_box.add_child(option)
+	_source_menu.add_child(menu_box)
+	add_child(_source_menu)
 
 	# Shown while _update_background's read is still going — a slow USB/NTFS
 	# drive made switching selection feel frozen with no feedback at all
@@ -848,8 +888,29 @@ func _on_launch_requested() -> void:
 		push_warning("Standalone launch on %s not wired yet (#207)" % OS.get_name())
 		return
 
-	var exe_path := await _ensure_local_copy(exe_relative, app_name)
-	await _launch_via_proton(app_id, app_name, exe_path, String(app.get("source", "steam")))
+	var source := String(app.get("source", "steam"))
+	await _launch_via_proton(app_id, app_name, _resolved_exe_path(exe_relative, source), source)
+
+## Launch never copies anything itself (#300 moved that to the S/X menu,
+## see _open_source_menu below) — it only ever picks whichever copy of the
+## game already exists. A Steam-sourced game copied to the real Steam
+## library ("Copiar a carpeta de Steam") runs from there; a GOG-sourced game
+## copied to Tatu's own local cache ("Copiar a carpeta de GOG") runs from
+## there; anything never copied runs straight off the cartridge, same as
+## before this existed.
+func _resolved_exe_path(exe_relative: String, source: String) -> String:
+	var install_rel := _install_root_relative(exe_relative)
+	if source == "gog":
+		var local_root := _tatu_local_dir().path_join(install_rel)
+		if FileAccess.file_exists(local_root.path_join(LOCAL_COPY_DONE_FILENAME)):
+			return _tatu_local_dir().path_join(exe_relative)
+	else:
+		var steam_dir := _steam_install_dir()
+		if not steam_dir.is_empty():
+			var real_root := steam_dir.path_join(install_rel)
+			if FileAccess.file_exists(real_root.path_join(LOCAL_COPY_DONE_FILENAME)):
+				return steam_dir.path_join(exe_relative)
+	return _cartridge_root().path_join(exe_relative)
 
 ## Shows the action-status overlay with `text` for `seconds`, then hides it —
 ## shared by the launch flow below and by Add Cartridge, so every action a
@@ -897,17 +958,18 @@ func _free_bytes_at(path: String) -> int:
 	var token := lines[1].strip_edges()
 	return int(token) if token.is_valid_int() else -1
 
-## Copies a game's whole install root from the cartridge to local disk
-## before launching, if it isn't already there — the cartridge itself may be
-## a slow USB/SD card, and running the game with it as the live storage
-## device can stutter (#300). Mirrors the same `steamapps/common/<name>`
-## relative layout under Tatu's own local dir, so nothing downstream
-## (install_dir/CWD, Goldberg's steam_appid.txt lookup) needs to know the
-## exe moved. Blocks all input for the whole duration (`_copying`) — a copy
-## interrupted by closing the launcher, unplugging the cartridge, or
-## suspending the PC leaves a truncated install behind. Falls back to the
-## cartridge's own copy — slower, but still playable — if there isn't
-## enough local disk space or the copy itself fails.
+## Copies a GOG-sourced game's whole install root from the cartridge onto
+## Tatu's own local cache (#300, "Copiar a carpeta de GOG" in the source
+## menu below) — GOG has no library/manifest concept to satisfy, so a plain
+## file copy is the whole feature; running it off a slow USB/SD cartridge as
+## the live storage device can otherwise stutter mid-game. Mirrors the same
+## `steamapps/common/<name>` relative layout under Tatu's own local dir, so
+## nothing downstream (install_dir/CWD, Goldberg's steam_appid.txt lookup)
+## needs to know the exe moved. Blocks all input for the whole duration
+## (`_copying`) — a copy interrupted by closing the launcher, unplugging the
+## cartridge, or suspending the PC leaves a truncated install behind. Falls
+## back to the cartridge's own copy — slower, but still playable — if there
+## isn't enough local disk space or the copy itself fails.
 func _ensure_local_copy(exe_relative: String, app_name: String) -> String:
 	var cartridge_exe := _cartridge_root().path_join(exe_relative)
 	var install_rel := _install_root_relative(exe_relative)
@@ -992,6 +1054,106 @@ func _ensure_local_copy(exe_relative: String, app_name: String) -> String:
 	var marker := FileAccess.open(done_marker, FileAccess.WRITE)
 	marker.close()
 	return local_exe
+
+## Copies a Steam-sourced game's install root, AND its real
+## `appmanifest_<app_id>.acf` (#300, "Copiar a carpeta de Steam" in the
+## source menu below), into this machine's default Steam library — never
+## fabricated: Steam itself already wrote that exact .acf (real depot IDs,
+## buildid, SizeOnDisk) the moment this game was installed onto the
+## cartridge, so copying it byte-for-byte alongside the files is what makes
+## the real Steam client recognize the copy as already installed and
+## verified, no re-download or "verify integrity" needed. A no-op appmanifest
+## invented from scratch instead would risk Steam flagging it corrupt and
+## overwriting/deleting these very files. Restarts Steam at the end so it
+## actually notices the new local install — same restart `_launch_via_steam`
+## already does for the same reason. Same input-blocking/progress-bar
+## mechanics as `_ensure_local_copy` above.
+func _copy_to_real_steam_library(app_id: int, app_name: String, exe_relative: String) -> void:
+	var steam_dir := _steam_install_dir()
+	if steam_dir.is_empty():
+		await _show_status("No se encontró una instalación de Steam en esta máquina", 2.5)
+		return
+
+	var install_rel := _install_root_relative(exe_relative)
+	var source_dir := _cartridge_root().path_join(install_rel)
+	var dest_dir := steam_dir.path_join(install_rel)
+	var manifest_name := "appmanifest_%d.acf" % app_id
+	var manifest_src := _cartridge_root().path_join("steamapps").path_join(manifest_name)
+	var manifest_dst := steam_dir.path_join("steamapps").path_join(manifest_name)
+	var done_marker := dest_dir.path_join(LOCAL_COPY_DONE_FILENAME)
+
+	if not FileAccess.file_exists(manifest_src):
+		await _show_status(
+			"Este juego no tiene un appmanifest real en el cartucho — no se puede copiar como instalación de Steam",
+			3.0
+		)
+		return
+	if FileAccess.file_exists(done_marker):
+		await _show_status("%s ya está copiado en tu library de Steam" % app_name, 2.0)
+		return
+
+	_copying = true
+	_action_status.text = "Preparando copia de %s a tu library de Steam..." % app_name
+	_action_progress.value = 0
+	_action_progress.visible = true
+	_action_warning.text = "No desconectes el cartucho ni apagues o suspendas la PC hasta que termine la copia."
+	_action_warning.visible = true
+	_action_overlay.visible = true
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	if DirAccess.dir_exists_absolute(dest_dir):
+		OS.execute("rm", ["-rf", dest_dir])
+
+	var total_bytes := _dir_size_bytes(source_dir)
+	var free_bytes := _free_bytes_at(steam_dir)
+	if total_bytes > 0 and free_bytes >= 0 and free_bytes < total_bytes:
+		_copying = false
+		_action_progress.visible = false
+		_action_warning.visible = false
+		await _show_status(
+			"No hay espacio suficiente en tu library de Steam para copiar %s" % app_name, 3.0
+		)
+		return
+
+	DirAccess.make_dir_recursive_absolute(dest_dir)
+
+	var pid := OS.create_process("cp", ["-a", source_dir + "/.", dest_dir])
+	if pid <= 0:
+		_copying = false
+		_action_progress.visible = false
+		_action_warning.visible = false
+		await _show_status("No se pudo copiar %s" % app_name, 2.5)
+		return
+
+	while OS.is_process_running(pid):
+		if total_bytes > 0:
+			var done := _dir_size_bytes(dest_dir)
+			var pct := clampi(int(100.0 * float(done) / float(total_bytes)), 0, 99)
+			_action_progress.value = pct
+			_action_status.text = "Copiando %s a tu library de Steam (%d%%)..." % [app_name, pct]
+		await get_tree().create_timer(LOCAL_COPY_POLL_INTERVAL_SEC).timeout
+
+	_copying = false
+	_action_progress.visible = false
+	_action_warning.visible = false
+
+	if OS.get_process_exit_code(pid) != 0:
+		push_warning("Copy of %s to the real Steam library failed" % app_name)
+		OS.execute("rm", ["-rf", dest_dir])
+		await _show_status("No se pudo copiar %s" % app_name, 2.5)
+		return
+
+	DirAccess.copy_absolute(manifest_src, manifest_dst)
+	var marker2 := FileAccess.open(done_marker, FileAccess.WRITE)
+	marker2.close()
+
+	_action_status.text = "Reiniciando Steam para que reconozca la copia..."
+	_action_overlay.visible = true
+	await get_tree().process_frame
+	await _stop_steam()
+	_start_steam(steam_dir)
+	await _show_status("%s copiado — Steam debería reconocerlo como instalado" % app_name, 3.0)
 
 ## Runs a Goldberg-patched exe through umu-run (#206) — adopted rather than
 ## hand-rolling a Proton invocation: it replicates Steam's own runtime
@@ -1391,8 +1553,48 @@ func _extract_tar(archive_path: String, dest_dir: String, strip_top_level: bool)
 		push_warning("Failed to extract %s: %s" % [archive_path, output])
 	return code == 0
 
-## Registers the whole cartridge (not just the selected card) as a Steam
-## library — deliberately independent of `_selected_index`, see
-## `_launch_via_steam`'s own header.
+## S/X opens the choice screen (#300) instead of registering the cartridge
+## directly — "Add Cartridge"/"Add a Non-Steam" (option 0) still calls the
+## exact same `_launch_via_steam()` as before (it already handles both
+## cases internally, whole-cartridge, independent of `_selected_index`, see
+## that function's own header); "Copiar a carpeta de Steam/GOG" (option 1)
+## is the new per-selected-game local copy.
 func _on_add_to_steam_requested() -> void:
-	await _launch_via_steam()
+	_open_source_menu()
+
+func _open_source_menu() -> void:
+	var app: Dictionary = _apps[_selected_index]
+	if String(app.get("source", "steam")) == "gog":
+		_source_menu_options[0].text = "Agregar como Non-Steam"
+		_source_menu_options[1].text = "Copiar a carpeta de GOG"
+	else:
+		_source_menu_options[0].text = "Add Cartridge"
+		_source_menu_options[1].text = "Copiar a carpeta de Steam"
+	_source_menu_selected = 0
+	_update_source_menu_highlight()
+	_source_menu.visible = true
+
+func _update_source_menu_highlight() -> void:
+	for i in _source_menu_options.size():
+		_source_menu_options[i].modulate = Color.WHITE if i == _source_menu_selected else Color(1, 1, 1, 0.5)
+
+func _confirm_source_menu() -> void:
+	_source_menu.visible = false
+	var app: Dictionary = _apps[_selected_index]
+	var source := String(app.get("source", "steam"))
+	var app_name := String(app.get("name", "el juego"))
+
+	if _source_menu_selected == 0:
+		await _launch_via_steam()
+		return
+
+	var exe_relative := String(app.get("exe_path", ""))
+	if exe_relative.is_empty():
+		await _show_status("%s no tiene Goldberg inyectado todavía" % app_name, 2.5)
+		return
+
+	if source == "gog":
+		await _ensure_local_copy(exe_relative, app_name)
+		await _show_status("%s copiado a disco local" % app_name, 2.5)
+	else:
+		await _copy_to_real_steam_library(int(app.get("app_id", 0)), app_name, exe_relative)
