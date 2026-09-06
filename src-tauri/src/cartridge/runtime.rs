@@ -110,9 +110,19 @@ fn ensure_cached() -> Result<PathBuf, String> {
         .join(RUNTIME_SUBDIR);
     fs::create_dir_all(&cache).map_err(|e| format!("Cannot create {}: {e}", cache.display()))?;
 
+    // Ipv4Only, not the default Any: confirmed live (2026-09-06) that
+    // ureq's own address-fallback loop (unversioned/transport/tcp.rs) only
+    // retries the next resolved address on ConnectionRefused/Timeout — any
+    // other error (HostUnreachable, ConnectionReset, ...) aborts immediately
+    // without trying the rest. A network with a broken/asymmetric IPv6 route
+    // to one of these hosts (repo.steampowered.com resolves dual-stack) then
+    // fails outright even though the IPv4 address right behind it would
+    // have worked. Every host this module downloads from has a real IPv4
+    // address; nothing here needs IPv6 specifically.
     let agent = ureq::Agent::new_with_config(
         ureq::config::Config::builder()
             .timeout_global(Some(Duration::from_secs(30)))
+            .ip_family(ureq::config::IpFamily::Ipv4Only)
             .build(),
     );
 
