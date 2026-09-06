@@ -17,8 +17,36 @@ permissions:
   contents: write
 
 jobs:
+  godot-launcher:
+    name: Godot Launcher Export
+    runs-on: ubuntu-latest
+    container:
+      image: barichello/godot-ci:4.7.2
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag_name }}
+
+      # GitHub's containerized job runners check out as a different UID than
+      # the container's own root, which git treats as a dubious-ownership
+      # repo and refuses to touch — export.sh shells out to `git` for
+      # build_info.txt, so this has to run before it does.
+      - name: Allow git to touch the checkout
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Export launcher binaries
+        run: launcher/export.sh godot
+
+      - name: Upload launcher binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: launcher-binaries
+          path: src-tauri/vendor/launcher
+          if-no-files-found: error
+
   build:
     name: Build (${{ matrix.target }})
+    needs: godot-launcher
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -37,16 +65,13 @@ jobs:
         with:
           ref: ${{ inputs.tag_name }}
 
-      # Same stand-in as ci.yml — see that file for why. TODO(#204 follow-up):
-      # replace this with a real Godot export step once the CI job that
-      # builds the launcher binaries exists, so a real release actually
-      # ships them instead of an empty file.
-      - name: Create placeholder launcher resources
-        shell: bash
-        run: |
-          mkdir -p src-tauri/vendor/launcher/linux src-tauri/vendor/launcher/windows
-          : > src-tauri/vendor/launcher/linux/tatu-launcher
-          : > src-tauri/vendor/launcher/windows/tatu-launcher.exe
+      # Real launcher binaries from the godot-launcher job — build.rs checks
+      # these exist before it lets cargo build/check/clippy/test proceed.
+      - name: Download launcher binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: launcher-binaries
+          path: src-tauri/vendor/launcher
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -75,7 +100,7 @@ jobs:
 
   appimage:
     name: AppImage
-    needs: build
+    needs: [build, godot-launcher]
     runs-on: ubuntu-latest
     env:
       APPIMAGE_EXTRACT_AND_RUN: "1"
@@ -92,6 +117,12 @@ jobs:
         with:
           name: binary-linux-amd64
           path: artifacts
+
+      - name: Download launcher binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: launcher-binaries
+          path: src-tauri/vendor/launcher
 
       - name: Install system dependencies
         run: |
@@ -123,6 +154,16 @@ jobs:
           Keywords=steam;games;progress;achievements;trading cards;
           Terminal=false
           DESKTOP
+
+      - name: Bundle vendor resources (Goldberg + launcher)
+        run: |
+          # Same usr/lib/<AppName>/vendor/... layout `cargo tauri build`
+          # itself produces (confirmed against a real local AppImage bundle)
+          # — resolve("vendor/...", BaseDirectory::Resource) at runtime
+          # depends on this exact path.
+          chmod +x src-tauri/vendor/launcher/linux/tatu-launcher
+          mkdir -p "appdir/usr/lib/$APP_NAME"
+          cp -r src-tauri/vendor "appdir/usr/lib/$APP_NAME/"
 
       - name: Bundle libraries
         run: |
@@ -371,7 +412,7 @@ jobs:
 
   upload-assets:
     name: Upload Release Assets
-    needs: [build, appimage]
+    needs: [build, appimage, godot-launcher]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -386,16 +427,23 @@ jobs:
       - name: Package release assets
         run: |
           mkdir -p release
+          chmod +x artifacts/launcher-binaries/linux/tatu-launcher
 
-          # Linux tar.gz
-          mkdir -p staging/linux
+          # Linux tar.gz — sibling vendor/ next to the raw binary, same
+          # layout resolve("vendor/...", BaseDirectory::Resource) expects
+          # when there's no AppImage wrapper around it.
+          mkdir -p staging/linux/vendor
           cp artifacts/binary-linux-amd64/tatu-tracker staging/linux/
           chmod +x staging/linux/*
+          cp -r src-tauri/vendor/goldberg staging/linux/vendor/
+          cp -r artifacts/launcher-binaries staging/linux/vendor/launcher
           tar -czf "release/tatu-tracker-linux-amd64.tar.gz" -C staging/linux .
 
-          # Windows zip
-          mkdir -p staging/windows
+          # Windows zip — same sibling vendor/ layout, next to the .exe.
+          mkdir -p staging/windows/vendor
           cp artifacts/binary-windows-amd64/tatu-tracker.exe staging/windows/
+          cp -r src-tauri/vendor/goldberg staging/windows/vendor/
+          cp -r artifacts/launcher-binaries staging/windows/vendor/launcher
           (cd staging/windows && zip -q -r "$GITHUB_WORKSPACE/release/tatu-tracker-windows-amd64.zip" .)
 
           # AppImage
