@@ -13,9 +13,9 @@ use serde::{Deserialize, Serialize};
 /// by hand would just be a worse, unmaintained copy of this.
 const UMU_RUN_URL: &str = "https://github.com/Open-Wine-Components/umu-launcher/releases/download/1.4.4/umu-launcher-1.4.4-zipapp.tar";
 
-const PROTON_VERSION: &str = "GE-Proton11-5";
-const PROTON_URL: &str = "https://github.com/GloriousEggroll/proton-ge-custom/releases/download/GE-Proton11-5/GE-Proton11-5-x86_64.tar.gz";
-const PROTON_SHA512_URL: &str = "https://github.com/GloriousEggroll/proton-ge-custom/releases/download/GE-Proton11-5/GE-Proton11-5-x86_64.sha512sum";
+const PROTON_VERSION: &str = "GE-Proton11-6";
+const PROTON_URL: &str = "https://github.com/GloriousEggroll/proton-ge-custom/releases/download/GE-Proton11-6/GE-Proton11-6-x86_64.tar.gz";
+const PROTON_SHA512_URL: &str = "https://github.com/GloriousEggroll/proton-ge-custom/releases/download/GE-Proton11-6/GE-Proton11-6-x86_64.sha512sum";
 
 /// The Steam Linux Runtime container this pinned Proton build requires —
 /// read out of its own `toolmanifest.vdf` (`require_tool_appid`), NOT
@@ -95,7 +95,7 @@ fn is_current(dest: &Path) -> bool {
 }
 
 fn proton_filename() -> &'static str {
-    "GE-Proton11-5-x86_64.tar.gz"
+    "GE-Proton11-6-x86_64.tar.gz"
 }
 
 /// Downloads umu-run + the pinned Proton + its required Steam Linux Runtime

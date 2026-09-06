@@ -108,14 +108,22 @@ const ICON_CLOSE: Array[String] = [
 # match those filenames/pins exactly, or the launcher extracts nothing.
 const CARTRIDGE_RUNTIME_SUBDIR := "runtime/linux"
 const RUNTIME_ARCHIVE := "SteamLinuxRuntime_4.tar.xz"
-const PROTON_ARCHIVE := "GE-Proton11-5-x86_64.tar.gz"
-const PROTON_DIRNAME := "GE-Proton11-5-x86_64"
+const PROTON_ARCHIVE := "GE-Proton11-6-x86_64.tar.gz"
+const PROTON_DIRNAME := "GE-Proton11-6-x86_64"
 
 # #209: GOG-shortcut side, applied via CDP once Steam is back up after
 # `_launch_via_steam`'s own restart below.
 const CEF_DEBUG_FILE := ".cef-enable-remote-debugging"
 const CEF_WAIT_TIMEOUT_SEC := 30.0
 const CEF_POLL_INTERVAL_SEC := 2.0
+
+# #300: a slow USB/SD cartridge can stutter mid-game if it stays the live
+# storage device — the whole install root gets copied to local disk first.
+# Sentinel written only once every file has landed, so a copy killed mid-way
+# (crash, cartridge pulled) is never mistaken for a finished one on the next
+# launch.
+const LOCAL_COPY_DONE_FILENAME := ".tatu-copy-complete"
+const LOCAL_COPY_POLL_INTERVAL_SEC := 1.0
 
 var _apps: Array = []
 var _selected_index: int = 0
@@ -148,7 +156,14 @@ var _gallery: ScreenshotGallery
 var _viewer: Control
 var _viewer_image: TextureRect
 var _action_status: Label
+var _action_progress: ProgressBar
+var _action_warning: Label
 var _action_overlay: Control
+# Set for the whole duration of a local-disk copy (#300) — checked first in
+# _unhandled_input so nothing (navigation, another launch, closing the
+# launcher) can run while a copy is in flight and the cartridge must stay
+# connected.
+var _copying := false
 var _scroll_tween: Tween
 var _panel_content_width := 0.0
 
@@ -281,6 +296,11 @@ func _ensure_action(action: StringName, key: int, joy_button: int) -> void:
 	InputMap.action_add_event(action, joy_event)
 
 func _unhandled_input(event: InputEvent) -> void:
+	# A local-disk copy (#300) in flight owns input exclusively — no
+	# navigation, no re-triggering the launch, no closing the launcher while
+	# the cartridge has to stay connected and the PC has to stay up.
+	if _copying:
+		return
 	# The enlarged viewer is a modal — while it's open, it owns input
 	# exclusively (no carousel navigation leaking through behind it). #214's
 	# bonus-content gallery reuses this exact same trap. ui_up/ui_down still
@@ -448,10 +468,33 @@ func _build_layout() -> void:
 	_action_status = Label.new()
 	_action_status.add_theme_font_override("font", load(FONT_DISPLAY))
 	_action_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_action_status.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	_action_status.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_title_labels.append(_action_status)
-	_action_overlay.add_child(_action_status)
+
+	# Only visible during a local-disk copy (#300) — every other use of this
+	# overlay (launching, registering the cartridge in Steam) is status text
+	# alone, same as before.
+	_action_progress = ProgressBar.new()
+	_action_progress.min_value = 0
+	_action_progress.max_value = 100
+	_action_progress.show_percentage = true
+	_action_progress.custom_minimum_size = Vector2(480, 28)
+	_action_progress.visible = false
+
+	_action_warning = Label.new()
+	_action_warning.add_theme_font_override("font", load(FONT_BODY))
+	_action_warning.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_action_warning.modulate = Color(1.0, 0.65, 0.4)
+	_action_warning.visible = false
+	_body_labels.append(_action_warning)
+
+	var overlay_box := VBoxContainer.new()
+	overlay_box.alignment = BoxContainer.ALIGNMENT_CENTER
+	overlay_box.add_theme_constant_override("separation", 16)
+	overlay_box.set_anchors_preset(Control.PRESET_CENTER)
+	for child in [_action_status, _action_progress, _action_warning]:
+		child.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		overlay_box.add_child(child)
+	_action_overlay.add_child(overlay_box)
 	add_child(_action_overlay)
 
 	# Shown while _update_background's read is still going — a slow USB/NTFS
@@ -800,11 +843,12 @@ func _on_launch_requested() -> void:
 	if exe_relative.is_empty():
 		push_warning("App %d has no exe_path on the marker — Goldberg injection (#199) never ran" % app_id)
 		return
-	var exe_path := _cartridge_root().path_join(exe_relative)
 
 	if OS.get_name() != "Linux":
 		push_warning("Standalone launch on %s not wired yet (#207)" % OS.get_name())
 		return
+
+	var exe_path := await _ensure_local_copy(exe_relative, app_name)
 	await _launch_via_proton(app_id, app_name, exe_path, String(app.get("source", "steam")))
 
 ## Shows the action-status overlay with `text` for `seconds`, then hides it —
@@ -822,6 +866,132 @@ func _show_status(text: String, seconds: float) -> void:
 ## but "Alabaster Dawn"-style spaces make quoting mandatory regardless.
 func _sh_quote(s: String) -> String:
 	return "'" + s.replace("'", "'\\''") + "'"
+
+## The install root under `steamapps/common/<name>/` a given exe belongs to —
+## NOT just the exe's own immediate folder, which can sit several levels
+## deeper for some games (Unreal Engine titles keep their real binary under
+## `<name>/End/Binaries/Win64/`) while sibling folders at the install root
+## (Content/, Engine/, ...) are just as required to run. Every exe_path on
+## the marker starts with `steamapps/common/<name>/...` (goldberg.rs), so the
+## first three path segments are always the install root.
+func _install_root_relative(exe_relative: String) -> String:
+	var parts := exe_relative.split("/")
+	if parts.size() < 3:
+		return exe_relative.get_base_dir()
+	return "/".join(parts.slice(0, 3))
+
+func _dir_size_bytes(path: String) -> int:
+	var output := []
+	if OS.execute("du", ["-sb", path], output) != 0 or output.is_empty():
+		return -1
+	var token := String(output[0]).split("\n")[0].split("\t")[0].strip_edges()
+	return int(token) if token.is_valid_int() else -1
+
+func _free_bytes_at(path: String) -> int:
+	var output := []
+	if OS.execute("df", ["--output=avail", "-B1", path], output) != 0 or output.is_empty():
+		return -1
+	var lines := String(output[0]).split("\n")
+	if lines.size() < 2:
+		return -1
+	var token := lines[1].strip_edges()
+	return int(token) if token.is_valid_int() else -1
+
+## Copies a game's whole install root from the cartridge to local disk
+## before launching, if it isn't already there — the cartridge itself may be
+## a slow USB/SD card, and running the game with it as the live storage
+## device can stutter (#300). Mirrors the same `steamapps/common/<name>`
+## relative layout under Tatu's own local dir, so nothing downstream
+## (install_dir/CWD, Goldberg's steam_appid.txt lookup) needs to know the
+## exe moved. Blocks all input for the whole duration (`_copying`) — a copy
+## interrupted by closing the launcher, unplugging the cartridge, or
+## suspending the PC leaves a truncated install behind. Falls back to the
+## cartridge's own copy — slower, but still playable — if there isn't
+## enough local disk space or the copy itself fails.
+func _ensure_local_copy(exe_relative: String, app_name: String) -> String:
+	var cartridge_exe := _cartridge_root().path_join(exe_relative)
+	var install_rel := _install_root_relative(exe_relative)
+	var source_dir := _cartridge_root().path_join(install_rel)
+	var dest_dir := _tatu_local_dir().path_join(install_rel)
+	var local_exe := _tatu_local_dir().path_join(exe_relative)
+	var done_marker := dest_dir.path_join(LOCAL_COPY_DONE_FILENAME)
+	if FileAccess.file_exists(done_marker):
+		return local_exe
+
+	_copying = true
+	_action_status.text = "Preparando copia de %s al disco local..." % app_name
+	_action_progress.value = 0
+	_action_progress.visible = true
+	_action_warning.text = "No desconectes el cartucho ni apagues o suspendas la PC hasta que termine la copia."
+	_action_warning.visible = true
+	_action_overlay.visible = true
+	# Two frames, not one — the overlay's own visibility change needs a full
+	# draw before the blocking `du`/`rm` calls right below freeze the thread,
+	# same reasoning _launch_via_proton's opening comment already documents.
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	# Leftover from a copy that never finished (crash, cartridge pulled
+	# mid-copy) has no sentinel — never resumed, always wiped and redone from
+	# scratch: a truncated file left half-written is worse than the extra
+	# time a full recopy costs.
+	if DirAccess.dir_exists_absolute(dest_dir):
+		OS.execute("rm", ["-rf", dest_dir])
+
+	var total_bytes := _dir_size_bytes(source_dir)
+	var free_bytes := _free_bytes_at(_tatu_local_dir())
+	if total_bytes > 0 and free_bytes >= 0 and free_bytes < total_bytes:
+		push_warning(
+			"Not enough local disk space to copy %s (%d needed, %d free) — playing from the cartridge instead" \
+			% [app_name, total_bytes, free_bytes]
+		)
+		_copying = false
+		_action_progress.visible = false
+		_action_warning.visible = false
+		await _show_status(
+			"No hay espacio suficiente en disco para copiar %s — se juega directo desde el cartucho" % app_name,
+			3.0
+		)
+		return cartridge_exe
+
+	DirAccess.make_dir_recursive_absolute(dest_dir)
+
+	# Runs as its own process rather than this launcher blocking, so the
+	# status/progress bar can keep polling real numbers while it works. A
+	# WorkerThreadPool task calling back into this same script instance
+	# already crashed once with heap corruption (#256) — never repeating
+	# that for something this much longer-running.
+	var pid := OS.create_process("cp", ["-a", source_dir + "/.", dest_dir])
+	if pid <= 0:
+		push_warning("Failed to start cp for %s — playing from the cartridge instead" % app_name)
+		_copying = false
+		_action_progress.visible = false
+		_action_warning.visible = false
+		return cartridge_exe
+
+	while OS.is_process_running(pid):
+		if total_bytes > 0:
+			var done := _dir_size_bytes(dest_dir)
+			var pct := clampi(int(100.0 * float(done) / float(total_bytes)), 0, 99)
+			_action_progress.value = pct
+			_action_status.text = "Copiando %s al disco local (%d%%)..." % [app_name, pct]
+		else:
+			_action_status.text = "Copiando %s al disco local..." % app_name
+		await get_tree().create_timer(LOCAL_COPY_POLL_INTERVAL_SEC).timeout
+
+	_copying = false
+	_action_progress.visible = false
+	_action_warning.visible = false
+
+	if OS.get_process_exit_code(pid) != 0:
+		push_warning("Copy of %s to local disk failed — playing from the cartridge instead" % app_name)
+		OS.execute("rm", ["-rf", dest_dir])
+		return cartridge_exe
+
+	_action_progress.value = 100
+	var marker := FileAccess.open(done_marker, FileAccess.WRITE)
+	marker.close()
+	return local_exe
 
 ## Runs a Goldberg-patched exe through umu-run (#206) — adopted rather than
 ## hand-rolling a Proton invocation: it replicates Steam's own runtime
