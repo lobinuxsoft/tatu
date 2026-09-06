@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.13.3](https://github.com/lobinuxsoft/tatu/compare/v0.13.2...v0.13.3) (2026-09-06)
+
+
+### Bug Fixes
+
+* **launcher:** move the local-copy feature off Launch, onto its own S/X menu ([32af7eb](https://github.com/lobinuxsoft/tatu/commit/32af7eb3b661496c89670f1be22bed851c50ad32))
+* **launcher:** move the local-copy feature off Launch, onto its own S/X menu ([cc4a8ad](https://github.com/lobinuxsoft/tatu/commit/cc4a8ade8db38daa4ac1a5880ab415b94b278593))
+
 ## [0.13.2](https://github.com/lobinuxsoft/tatu/compare/v0.13.1...v0.13.2) (2026-09-06)
 
 
