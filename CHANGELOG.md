@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.12.2](https://github.com/lobinuxsoft/tatu/compare/v0.12.1...v0.12.2) (2026-09-06)
+
+
+### Bug Fixes
+
+* **drm:** scope launcher-vendor DRM detection to the Steam row only ([bd14981](https://github.com/lobinuxsoft/tatu/commit/bd149811123eb769dc17be08b277f35399d9630a))
+* **drm:** scope launcher-vendor DRM detection to the Steam row only ([c9750e9](https://github.com/lobinuxsoft/tatu/commit/c9750e9f592b50650ced2caaa1e83bed1279a3d1))
+
 ## [0.12.1](https://github.com/lobinuxsoft/tatu/compare/v0.12.0...v0.12.1) (2026-09-06)
 
 
