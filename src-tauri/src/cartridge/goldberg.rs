@@ -50,8 +50,28 @@ pub fn inject_goldberg(
     let exe_name = pick_main_exe_in(&install_dir, app_id)?;
     let exe_full_path = install_dir.join(&exe_name);
 
-    let dll64 = named(&files, "steam_api64.dll");
-    let dll32 = named(&files, "steam_api.dll");
+    let mut dll64: Vec<PathBuf> = named(&files, "steam_api64.dll")
+        .into_iter()
+        .cloned()
+        .collect();
+    let mut dll32: Vec<PathBuf> = named(&files, "steam_api.dll")
+        .into_iter()
+        .cloned()
+        .collect();
+
+    // A previous injection can die between renaming the original to
+    // `_o.dll` and writing Goldberg's replacement (crash, disk full,
+    // cartridge pulled mid-write) — steam_api(64).dll then never exists on
+    // disk again, and every later "Preparar Launcher" run refused with a
+    // false "not found" even though the orphaned backup proves exactly
+    // which architecture this install needs (live-caught 2026-09-06:
+    // Resident Evil 0/HD REMASTER/2 all left with only `_o.dll` present).
+    // swap_dll already handles recreating the active file correctly once
+    // given the right path — its own backup-exists check just skips the
+    // rename step it would otherwise try to redo.
+    add_orphaned_targets(&files, "steam_api64_o.dll", "steam_api64.dll", &mut dll64);
+    add_orphaned_targets(&files, "steam_api_o.dll", "steam_api.dll", &mut dll32);
+
     if dll64.is_empty() && dll32.is_empty() {
         return Err(format!(
             "No steam_api(64).dll found under {}",
@@ -256,6 +276,27 @@ fn named<'a>(files: &'a [PathBuf], filename: &str) -> Vec<&'a PathBuf> {
         .collect()
 }
 
+/// For every `backup_filename` found (a swap's `_o.dll` half, always kept),
+/// whose sibling `active_filename` is missing, appends the derived active
+/// path to `out` — recovers an injection left in that half-done state
+/// instead of refusing every retry forever.
+fn add_orphaned_targets(
+    files: &[PathBuf],
+    backup_filename: &str,
+    active_filename: &str,
+    out: &mut Vec<PathBuf>,
+) {
+    for backup in named(files, backup_filename) {
+        let Some(parent) = backup.parent() else {
+            continue;
+        };
+        let active = parent.join(active_filename);
+        if !active.exists() && !out.contains(&active) {
+            out.push(active);
+        }
+    }
+}
+
 /// Renames the original DLL to `<stem>_o.<ext>` (never deleted — that's
 /// what lets the install still launch through Steam afterward) and drops
 /// the vendored Goldberg template in its place.
@@ -410,6 +451,28 @@ mod tests {
             fs::read(install_dir.join("steam_api64.dll")).unwrap(),
             b"newer goldberg x64 template"
         );
+    }
+
+    #[test]
+    fn an_orphaned_backup_recovers_instead_of_refusing() {
+        let dir = tempfile::tempdir().unwrap();
+        let (x86, x64) = setup_cartridge_with_app(dir.path(), 379720, "DOOM");
+        let install_dir = dir.path().join("steamapps").join("common").join("DOOM");
+        fs::write(install_dir.join("DOOM.exe"), vec![0u8; 1024]).unwrap();
+        // Simulates a swap_dll that renamed the original to `_o.dll` and
+        // then died before writing Goldberg's replacement (live-caught
+        // 2026-09-06: three Resident Evil installs left exactly like this
+        // after some earlier interrupted run) — steam_api64.dll itself
+        // never exists, only its backup.
+        fs::write(install_dir.join("steam_api64_o.dll"), b"real steam api").unwrap();
+
+        inject_goldberg(dir.path(), 379720, Preservability::Easy, &x86, &x64, "").unwrap();
+
+        assert_eq!(
+            fs::read(install_dir.join("steam_api64_o.dll")).unwrap(),
+            b"real steam api"
+        );
+        assert!(install_dir.join("steam_api64.dll").exists());
     }
 
     #[test]
