@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.12.2](https://github.com/lobinuxsoft/tatu/compare/v0.12.1...v0.12.2) (2026-09-06)
+
+
+### Bug Fixes
+
+* **ci:** set the executable bit on launcher/export.sh ([bd2d243](https://github.com/lobinuxsoft/tatu/commit/bd2d2438da24cf9d7fe6125a695fad703289461f))
+* **ci:** set the executable bit on launcher/export.sh ([a496271](https://github.com/lobinuxsoft/tatu/commit/a496271da4413f6a526240c7659a287a3c5935d8))
+
 ## [0.12.1](https://github.com/lobinuxsoft/tatu/compare/v0.12.0...v0.12.1) (2026-09-06)
 
 
