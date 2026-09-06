@@ -108,8 +108,8 @@ const ICON_CLOSE: Array[String] = [
 # match those filenames/pins exactly, or the launcher extracts nothing.
 const CARTRIDGE_RUNTIME_SUBDIR := "runtime/linux"
 const RUNTIME_ARCHIVE := "SteamLinuxRuntime_4.tar.xz"
-const PROTON_ARCHIVE := "GE-Proton11-5-x86_64.tar.gz"
-const PROTON_DIRNAME := "GE-Proton11-5-x86_64"
+const PROTON_ARCHIVE := "GE-Proton11-6-x86_64.tar.gz"
+const PROTON_DIRNAME := "GE-Proton11-6-x86_64"
 
 # #209: GOG-shortcut side, applied via CDP once Steam is back up after
 # `_launch_via_steam`'s own restart below.
