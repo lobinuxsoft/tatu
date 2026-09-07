@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.13.5](https://github.com/lobinuxsoft/tatu/compare/v0.13.4...v0.13.5) (2026-09-07)
+
+
+### Bug Fixes
+
+* setear STEAM_COMPAT_INSTALL_PATH/LIBRARY_PATHS en launcher standalone ([df9a73e](https://github.com/lobinuxsoft/tatu/commit/df9a73e5ee1debcde9b5866acedc1920d92f3356))
+* setear STEAM_COMPAT_INSTALL_PATH/LIBRARY_PATHS en launcher standalone ([6a4e5fe](https://github.com/lobinuxsoft/tatu/commit/6a4e5fe80c4c953e3e4132aaa4bda298e02194ef)), closes [#323](https://github.com/lobinuxsoft/tatu/issues/323)
+
 ## [0.13.4](https://github.com/lobinuxsoft/tatu/compare/v0.13.3...v0.13.4) (2026-09-06)
 
 
