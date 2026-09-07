@@ -941,6 +941,14 @@ func _install_root_relative(exe_relative: String) -> String:
 		return exe_relative.get_base_dir()
 	return "/".join(parts.slice(0, 3))
 
+## Every exe_path this launcher builds is `<library_root>/steamapps/common/
+## <name>/...`, whether `<library_root>` is the cartridge, a copied real
+## Steam library, or Tatu's own local GOG cache (`_resolved_exe_path`) — so
+## the library root is always whatever sits before the first `steamapps/`.
+func _steam_library_root(path: String) -> String:
+	var idx := path.find("/steamapps/")
+	return path.substr(0, idx) if idx != -1 else ""
+
 func _dir_size_bytes(path: String) -> int:
 	var output := []
 	if OS.execute("du", ["-sb", path], output) != 0 or output.is_empty():
@@ -1217,6 +1225,25 @@ func _launch_via_proton(app_id: int, app_name: String, exe_path: String, source:
 	OS.set_environment("STORE", source)
 	OS.set_environment("PROTONPATH", _umu_compat_dir().path_join(PROTON_DIRNAME))
 	OS.set_environment("WINEPREFIX", wineprefix)
+	# `create_process` has no working_directory parameter (Godot 4.7's OS
+	# class never grew one) — without this, umu-run and the game inherit
+	# this launcher's own CWD instead of the game's install folder. Steam
+	# itself always launches with CWD = install dir, and Goldberg's
+	# steam_appid.txt lookup falls back to exactly that path when it's not
+	# under steam_settings/, so a wrong CWD here silently breaks standalone
+	# Goldberg games without touching a single one of their files.
+	var install_dir := exe_path.get_base_dir()
+	# Real Steam always sets these two for every launch. Without them,
+	# pressure-vessel can't resolve the game's own library folder (proton's
+	# own log surfaces this as "unable to use parent for game drive") and
+	# falls back to a narrower container filesystem view — live-caught,
+	# 2026-09-06: that narrower view is missing the 32-bit gstreamer/ffmpeg
+	# libs FMV playback needs, so cutscenes silently stayed black while
+	# gameplay ran fine.
+	OS.set_environment("STEAM_COMPAT_INSTALL_PATH", install_dir)
+	var library_root := _steam_library_root(exe_path)
+	if not library_root.is_empty():
+		OS.set_environment("STEAM_COMPAT_LIBRARY_PATHS", library_root)
 	# The whole point of bundling the runtime on the cartridge is that the
 	# destination machine never needs network access — this stops umu-run
 	# from trying to check for a newer Steam Linux Runtime on its own.
@@ -1227,14 +1254,6 @@ func _launch_via_proton(app_id: int, app_name: String, exe_path: String, source:
 	# launcher has no business mixing its bundled runtime into it.
 	OS.set_environment("UMU_FOLDERS_PATH", _tatu_local_dir())
 
-	# `create_process` has no working_directory parameter (Godot 4.7's OS
-	# class never grew one) — without this, umu-run and the game inherit
-	# this launcher's own CWD instead of the game's install folder. Steam
-	# itself always launches with CWD = install dir, and Goldberg's
-	# steam_appid.txt lookup falls back to exactly that path when it's not
-	# under steam_settings/, so a wrong CWD here silently breaks standalone
-	# Goldberg games without touching a single one of their files.
-	var install_dir := exe_path.get_base_dir()
 	var umu_run := _tatu_local_dir().path_join("umu-run")
 	var cmd := "cd %s && exec %s %s" % [_sh_quote(install_dir), _sh_quote(umu_run), _sh_quote(exe_path)]
 	var pid := OS.create_process("/bin/sh", ["-c", cmd])
