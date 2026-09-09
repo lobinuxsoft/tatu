@@ -979,6 +979,20 @@ func _free_bytes_at(path: String) -> int:
 	var token := lines[1].strip_edges()
 	return int(token) if token.is_valid_int() else -1
 
+## `cp -a` preserves the SOURCE's permission bits — fine for a real Linux
+## filesystem, but the cartridge is NTFS: ntfs-3g has no real per-file Unix
+## permissions to preserve, so it synthesizes a single blanket mode for
+## every file from the mount's own fmask/dmask, not from anything the game
+## actually needs. Live-reported: a game copied this way ran fine straight
+## off the cartridge (the FUSE layer ignores its own synthesized bits for
+## actual access control) but failed with a permissions error once copied
+## onto a real filesystem, where those bits are enforced for real. `+X`
+## (capital) only touches directories and anything already executable by
+## someone — it can't accidentally strip an existing exec bit, just adds
+## back what plain files/traversable dirs always need.
+func _fix_copied_permissions(dest_dir: String) -> void:
+	OS.execute("chmod", ["-R", "u+rwX,go+rX", dest_dir])
+
 ## Copies a GOG- or non-Steam-sourced game's whole install root from the
 ## cartridge onto Tatu's own local cache (#300/#236, "Copiar a carpeta local"
 ## in the source menu below) — neither has a real Steam appmanifest to
@@ -1072,6 +1086,7 @@ func _ensure_local_copy(exe_relative: String, app_name: String) -> String:
 		OS.execute("rm", ["-rf", dest_dir])
 		return cartridge_exe
 
+	_fix_copied_permissions(dest_dir)
 	_action_progress.value = 100
 	var marker := FileAccess.open(done_marker, FileAccess.WRITE)
 	marker.close()
@@ -1166,6 +1181,7 @@ func _copy_to_real_steam_library(app_id: int, app_name: String, exe_relative: St
 		await _show_status("No se pudo copiar %s" % app_name, 2.5)
 		return
 
+	_fix_copied_permissions(dest_dir)
 	DirAccess.copy_absolute(manifest_src, manifest_dst)
 	var marker2 := FileAccess.open(done_marker, FileAccess.WRITE)
 	marker2.close()
