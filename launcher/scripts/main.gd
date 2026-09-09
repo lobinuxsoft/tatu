@@ -979,19 +979,27 @@ func _free_bytes_at(path: String) -> int:
 	var token := lines[1].strip_edges()
 	return int(token) if token.is_valid_int() else -1
 
-## `cp -a` preserves the SOURCE's permission bits — fine for a real Linux
-## filesystem, but the cartridge is NTFS: ntfs-3g has no real per-file Unix
-## permissions to preserve, so it synthesizes a single blanket mode for
-## every file from the mount's own fmask/dmask, not from anything the game
-## actually needs. Live-reported: a game copied this way ran fine straight
-## off the cartridge (the FUSE layer ignores its own synthesized bits for
-## actual access control) but failed with a permissions error once copied
-## onto a real filesystem, where those bits are enforced for real. `+X`
-## (capital) only touches directories and anything already executable by
-## someone — it can't accidentally strip an existing exec bit, just adds
-## back what plain files/traversable dirs always need.
+## `cp -a` preserves the SOURCE's permission bits AND security context —
+## fine for a real Linux filesystem, but the cartridge is NTFS: ntfs-3g has
+## no real per-file Unix permissions to preserve, so it synthesizes a
+## single blanket mode from the mount's own fmask/dmask, unrelated to what
+## the game actually needs. `+X` (capital) only touches directories and
+## anything already executable by someone — can't accidentally strip an
+## existing exec bit, just adds back what traversal always needs.
+##
+## The bigger one, live-confirmed on SELinux-enforcing Anatase: every file
+## copied off the cartridge kept the SOURCE's `fusefs_t` SELinux type
+## (`ls -Z`), instead of the `data_home_t` a real file under `~/.local/
+## share/` should have — a game copied this way ran fine straight off the
+## cartridge (the FUSE mount's own labeling is irrelevant to policy there)
+## but got denied for real once copied, completely independent of the
+## rwx bits above (confirmed both separately: chmod alone didn't fix the
+## actual repro, `restorecon` did). `restorecon` isn't installed outside
+## SELinux distros — best-effort, no error if missing.
 func _fix_copied_permissions(dest_dir: String) -> void:
 	OS.execute("chmod", ["-R", "u+rwX,go+rX", dest_dir])
+	if OS.get_name() != "Windows":
+		OS.execute("restorecon", ["-R", dest_dir])
 
 ## Copies a GOG- or non-Steam-sourced game's whole install root from the
 ## cartridge onto Tatu's own local cache (#300/#236, "Copiar a carpeta local"

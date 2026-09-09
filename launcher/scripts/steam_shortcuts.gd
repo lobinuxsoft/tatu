@@ -111,6 +111,14 @@ static func apply_shortcuts(
 			push_warning("Steam shortcut failed for \"%s\": AddShortcut returned 0" % app_name)
 			continue
 		if exe_path.get_extension().to_lower() == "exe":
+			# Confirmed live: calling SpecifyCompatTool immediately after the
+			# AddShortcut that just created THIS app_id left no compat tool
+			# mapping at all (config.vdf's own CompatToolMapping never got
+			# the entry, despite the CDP call itself reporting success, no
+			# exception) — the exact same call against an app_id that had
+			# already existed for a while worked instantly. Same race class
+			# already assumed for set_custom_artwork's own Clear→sleep→Set.
+			await (Engine.get_main_loop() as SceneTree).create_timer(1.0).timeout
 			await client.specify_compat_tool(steam_app_id, "proton_experimental")
 		await _apply_art(client, cartridge_root, app_id, steam_app_id)
 
