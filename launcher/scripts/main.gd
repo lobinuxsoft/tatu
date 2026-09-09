@@ -906,13 +906,14 @@ func _on_launch_requested() -> void:
 ## Launch never copies anything itself (#300 moved that to the S/X menu,
 ## see _open_source_menu below) — it only ever picks whichever copy of the
 ## game already exists. A Steam-sourced game copied to the real Steam
-## library ("Copiar a carpeta de Steam") runs from there; a GOG-sourced game
-## copied to Tatu's own local cache ("Copiar a carpeta de GOG") runs from
-## there; anything never copied runs straight off the cartridge, same as
-## before this existed.
+## library ("Copiar a carpeta de Steam") runs from there; a GOG or non-Steam
+## game copied to Tatu's own local cache ("Copiar a carpeta local") runs from
+## there — neither has a Steam appmanifest to satisfy, so they share the same
+## local-cache destination; anything never copied runs straight off the
+## cartridge, same as before this existed.
 func _resolved_exe_path(exe_relative: String, source: String) -> String:
 	var install_rel := _install_root_relative(exe_relative)
-	if source == "gog":
+	if source in SteamShortcuts.SHORTCUT_SOURCES:
 		var local_root := _tatu_local_dir().path_join(install_rel)
 		if FileAccess.file_exists(local_root.path_join(LOCAL_COPY_DONE_FILENAME)):
 			return _tatu_local_dir().path_join(exe_relative)
@@ -978,11 +979,12 @@ func _free_bytes_at(path: String) -> int:
 	var token := lines[1].strip_edges()
 	return int(token) if token.is_valid_int() else -1
 
-## Copies a GOG-sourced game's whole install root from the cartridge onto
-## Tatu's own local cache (#300, "Copiar a carpeta de GOG" in the source
-## menu below) — GOG has no library/manifest concept to satisfy, so a plain
-## file copy is the whole feature; running it off a slow USB/SD cartridge as
-## the live storage device can otherwise stutter mid-game. Mirrors the same
+## Copies a GOG- or non-Steam-sourced game's whole install root from the
+## cartridge onto Tatu's own local cache (#300/#236, "Copiar a carpeta local"
+## in the source menu below) — neither has a real Steam appmanifest to
+## satisfy, so a plain file copy is the whole feature; running it off a slow
+## USB/SD cartridge as the live storage device can otherwise stutter
+## mid-game. Mirrors the same
 ## `steamapps/common/<name>` relative layout under Tatu's own local dir, so
 ## nothing downstream (install_dir/CWD, Goldberg's steam_appid.txt lookup)
 ## needs to know the exe moved. Blocks all input for the whole duration
@@ -1380,7 +1382,7 @@ func _apply_steam_shortcuts() -> void:
 	await get_tree().create_timer(5.0).timeout
 	var pending := _apps.filter(func(a): return String(a.get("source", "steam")) in SteamShortcuts.SHORTCUT_SOURCES)
 	print("Steam CEF ready, applying shortcuts for: %s" % [pending.map(func(a): return a.get("name"))])
-	await SteamShortcuts.apply_shortcuts(SteamCefClient.new(), _cartridge_root(), _apps)
+	await SteamShortcuts.apply_shortcuts(SteamCefClient.new(), _cartridge_root(), _apps, _resolved_exe_path)
 
 ## Mirrors CapyDeploy's controller.rs::ensure_cef_debug_file — an empty
 ## sentinel Steam checks for at startup before opening its CDP debug port.
@@ -1611,9 +1613,9 @@ func _on_add_to_steam_requested() -> void:
 
 func _open_source_menu() -> void:
 	var app: Dictionary = _apps[_selected_index]
-	if String(app.get("source", "steam")) == "gog":
+	if String(app.get("source", "steam")) in SteamShortcuts.SHORTCUT_SOURCES:
 		_source_menu_options[0].text = "Agregar como Non-Steam"
-		_source_menu_options[1].text = "Copiar a carpeta de GOG"
+		_source_menu_options[1].text = "Copiar a carpeta local"
 	else:
 		_source_menu_options[0].text = "Add Cartridge"
 		_source_menu_options[1].text = "Copiar a carpeta de Steam"
@@ -1640,7 +1642,7 @@ func _confirm_source_menu() -> void:
 		await _show_status("%s no tiene Goldberg inyectado todavía" % app_name, 2.5)
 		return
 
-	if source == "gog":
+	if source in SteamShortcuts.SHORTCUT_SOURCES:
 		await _ensure_local_copy(exe_relative, app_name)
 		await _show_status("%s copiado a disco local" % app_name, 2.5)
 	else:
