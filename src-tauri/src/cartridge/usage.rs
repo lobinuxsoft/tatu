@@ -39,7 +39,11 @@ pub struct CartridgeUsage {
 /// (`runtime/`, `steamapps/common/<installdir>`, ...). A missing path (a
 /// game with no trailer downloaded, no compatdata yet) is just 0, not an
 /// error — most of these categories are optional by design.
-fn size_of(path: &Path) -> u64 {
+///
+/// `pub(crate)`, not private: also the progress-bar denominator for #236's
+/// non-Steam cartridge copy (`non_steam::install_size`) — same "how big is
+/// this directory" question, no reason to duplicate it.
+pub(crate) fn size_of(path: &Path) -> u64 {
     let Ok(meta) = fs::symlink_metadata(path) else {
         return 0;
     };
@@ -117,6 +121,13 @@ pub fn usage(mount_point: &Path) -> Result<CartridgeUsage, String> {
             AppSource::Gog => {
                 if let Some(install_dir) = app.exe_path.split('/').nth(1) {
                     bytes += size_of(&mount_point.join("GOG").join(install_dir));
+                }
+            }
+            // Same "exe_path" shape as GOG above (`NON-STEAM/<install_dir>/...`),
+            // just a different top-level folder — see `non_steam::add_non_steam_app`.
+            AppSource::NonSteam => {
+                if let Some(install_dir) = app.exe_path.split('/').nth(1) {
+                    bytes += size_of(&mount_point.join("NON-STEAM").join(install_dir));
                 }
             }
         }

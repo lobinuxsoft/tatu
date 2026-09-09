@@ -25,6 +25,7 @@ pub struct DetailTargetValue {
 pub enum DetailSource {
     Steam,
     Gog,
+    NonSteam,
 }
 
 /// Passed through managed state instead of a URL query string so that

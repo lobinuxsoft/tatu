@@ -86,6 +86,22 @@ macro_rules! tracker_handler {
             commands::cartridge_cmd::fetch_cartridge_trailer,
             commands::cartridge_cmd::bundle_linux_runtime,
             commands::cartridge_cmd::uninstall_from_cartridge,
+            commands::cartridge_cmd::install_non_steam_to_cartridge,
+            commands::cartridge_cmd::fetch_non_steam_cartridge_art,
+            commands::cartridge_cmd::fetch_non_steam_cartridge_description,
+            commands::cartridge_cmd::fetch_non_steam_cartridge_screenshots,
+            commands::cartridge_cmd::fetch_non_steam_cartridge_trailer,
+            commands::non_steam_cmd::set_non_steam_appid,
+            commands::non_steam_cmd::get_non_steam_preview,
+            commands::non_steam_cmd::set_non_steam_install_root,
+            commands::non_steam_cmd::pick_non_steam_folder,
+            commands::artwork_cmd::get_artwork,
+            commands::artwork_cmd::set_artwork,
+            commands::artwork_cmd::steamgriddb_search,
+            commands::artwork_cmd::steamgriddb_grids,
+            commands::artwork_cmd::steamgriddb_heroes,
+            commands::artwork_cmd::steamgriddb_logos,
+            commands::artwork_cmd::steamgriddb_icons,
             commands::cartridge_cmd::list_cartridge_apps,
             commands::cartridge_cmd::list_all_cartridge_apps,
             commands::cartridge_cmd::reorder_cartridge_apps,
@@ -106,6 +122,7 @@ pub fn run() {
 
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(Mutex::new(app_state))
         .manage(commands::window_cmd::DetailTarget::default())
         .manage(commands::gog_cmd::GogDownloadCancel::default());

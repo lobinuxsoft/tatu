@@ -49,6 +49,13 @@ pub enum AppSource {
     #[default]
     Steam,
     Gog,
+    /// A `shortcuts.vdf` entry with no Steam listing at all (#236) —
+    /// `app_id` here is Steam's own shortcut-id algorithm output
+    /// (`CRC32(exe+name) | 0x80000000 | 0x02000000`, always ≥ 2^31), same
+    /// collision reasoning as `Gog` above: distinct enough from both real
+    /// Steam appids and observed GOG product ids in practice, not formally
+    /// guaranteed unique.
+    NonSteam,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

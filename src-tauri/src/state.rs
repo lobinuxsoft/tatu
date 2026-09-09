@@ -10,7 +10,7 @@ use crate::drm::DrmInfo;
 use crate::gog_account::GogTokens;
 use crate::hltb::HltbResult;
 use crate::inventory::GameCards;
-use crate::shortcuts::NonSteamGame;
+use crate::shortcuts::{ArtworkSelection, NonSteamGame};
 use crate::steam::Game;
 
 /// How many numbered backups of state.json to keep (state.json.1 .. state.json.N).
@@ -69,6 +69,16 @@ pub struct AppState {
     pub pcgw_username: String,
     #[serde(default)]
     pub pcgw_bot_password: String,
+    /// Manual SteamGridDB art override (#328), keyed by whatever id the
+    /// source itself uses — Steam appid, GOG product id, or a Non-Steam
+    /// shortcut id (same low-collision-risk reasoning `CartridgeApp::source`
+    /// already documents). Deliberately its own map, not a field on
+    /// `Game`/`GogOwnedGame`/`NonSteamGame`: those three get wholesale
+    /// replaced on every sync, which would mean re-deriving the same
+    /// preserve-by-id merge `sync_nonsteam` needs for `steam_app_id` three
+    /// separate times over.
+    #[serde(default)]
+    pub artwork: HashMap<u64, ArtworkSelection>,
 }
 
 impl AppState {
