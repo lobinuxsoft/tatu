@@ -906,13 +906,15 @@ func _on_launch_requested() -> void:
 ## Launch never copies anything itself (#300 moved that to the S/X menu,
 ## see _open_source_menu below) — it only ever picks whichever copy of the
 ## game already exists. A Steam-sourced game copied to the real Steam
-## library ("Copiar a carpeta de Steam") runs from there; a GOG-sourced game
-## copied to Tatu's own local cache ("Copiar a carpeta de GOG") runs from
-## there; anything never copied runs straight off the cartridge, same as
-## before this existed.
+## library ("Copiar a carpeta de Steam") runs from there; a GOG or non-Steam
+## game copied to Tatu's own local cache ("Copiar a carpeta local") runs from
+## there — neither has a Steam appmanifest to satisfy, so they share the same
+## local-cache destination; anything never copied runs straight off the
+## cartridge, same as before this existed.
 func _resolved_exe_path(exe_relative: String, source: String) -> String:
-	var install_rel := _install_root_relative(exe_relative)
-	if source == "gog":
+	var root_segments := 2 if source in SteamShortcuts.SHORTCUT_SOURCES else 3
+	var install_rel := _install_root_relative(exe_relative, root_segments)
+	if source in SteamShortcuts.SHORTCUT_SOURCES:
 		var local_root := _tatu_local_dir().path_join(install_rel)
 		if FileAccess.file_exists(local_root.path_join(LOCAL_COPY_DONE_FILENAME)):
 			return _tatu_local_dir().path_join(exe_relative)
@@ -940,18 +942,29 @@ func _show_status(text: String, seconds: float) -> void:
 func _sh_quote(s: String) -> String:
 	return "'" + s.replace("'", "'\\''") + "'"
 
-## The install root under `steamapps/common/<name>/` a given exe belongs to —
-## NOT just the exe's own immediate folder, which can sit several levels
-## deeper for some games (Unreal Engine titles keep their real binary under
+## The install root a given exe belongs to — NOT just the exe's own
+## immediate folder, which can sit several levels deeper for some games
+## (Unreal Engine titles keep their real binary under
 ## `<name>/End/Binaries/Win64/`) while sibling folders at the install root
-## (Content/, Engine/, ...) are just as required to run. Every exe_path on
-## the marker starts with `steamapps/common/<name>/...` (goldberg.rs), so the
-## first three path segments are always the install root.
-func _install_root_relative(exe_relative: String) -> String:
+## (Content/, Engine/, ...) are just as required to run, but never appear
+## in `exe_relative` at all since they hold no executable of their own.
+##
+## `root_segments` is how many leading path segments make up that root —
+## it differs by source, since each one lays out the cartridge differently:
+## a real Steam app is `steamapps/common/<name>/...` (goldberg.rs), 3
+## segments; GOG (`GOG/<repo.install_directory>/...`, gog_download.rs) and
+## non-Steam (`NON-STEAM/<install_dir>/...`, non_steam.rs) are both just 2.
+## Live-reported: this function defaulted to 3 unconditionally, so a
+## non-Steam/GOG local copy silently cut one level too deep — copying only
+## the subfolder the exe happened to sit in, dropping whatever else the
+## real install root had alongside it (redistributables, extra data), a
+## missing-files bug invisible until someone actually diffed the two
+## folders, which is exactly how this got caught.
+func _install_root_relative(exe_relative: String, root_segments: int) -> String:
 	var parts := exe_relative.split("/")
-	if parts.size() < 3:
+	if parts.size() <= root_segments:
 		return exe_relative.get_base_dir()
-	return "/".join(parts.slice(0, 3))
+	return "/".join(parts.slice(0, root_segments))
 
 ## Every exe_path this launcher builds is `<library_root>/steamapps/common/
 ## <name>/...`, whether `<library_root>` is the cartridge, a copied real
@@ -978,11 +991,34 @@ func _free_bytes_at(path: String) -> int:
 	var token := lines[1].strip_edges()
 	return int(token) if token.is_valid_int() else -1
 
-## Copies a GOG-sourced game's whole install root from the cartridge onto
-## Tatu's own local cache (#300, "Copiar a carpeta de GOG" in the source
-## menu below) — GOG has no library/manifest concept to satisfy, so a plain
-## file copy is the whole feature; running it off a slow USB/SD cartridge as
-## the live storage device can otherwise stutter mid-game. Mirrors the same
+## `cp -a` preserves the SOURCE's permission bits AND security context —
+## fine for a real Linux filesystem, but the cartridge is NTFS: ntfs-3g has
+## no real per-file Unix permissions to preserve, so it synthesizes a
+## single blanket mode from the mount's own fmask/dmask, unrelated to what
+## the game actually needs. `+X` (capital) only touches directories and
+## anything already executable by someone — can't accidentally strip an
+## existing exec bit, just adds back what traversal always needs.
+##
+## The bigger one, live-confirmed on SELinux-enforcing Anatase: every file
+## copied off the cartridge kept the SOURCE's `fusefs_t` SELinux type
+## (`ls -Z`), instead of the `data_home_t` a real file under `~/.local/
+## share/` should have — a game copied this way ran fine straight off the
+## cartridge (the FUSE mount's own labeling is irrelevant to policy there)
+## but got denied for real once copied, completely independent of the
+## rwx bits above (confirmed both separately: chmod alone didn't fix the
+## actual repro, `restorecon` did). `restorecon` isn't installed outside
+## SELinux distros — best-effort, no error if missing.
+func _fix_copied_permissions(dest_dir: String) -> void:
+	OS.execute("chmod", ["-R", "u+rwX,go+rX", dest_dir])
+	if OS.get_name() != "Windows":
+		OS.execute("restorecon", ["-R", dest_dir])
+
+## Copies a GOG- or non-Steam-sourced game's whole install root from the
+## cartridge onto Tatu's own local cache (#300/#236, "Copiar a carpeta local"
+## in the source menu below) — neither has a real Steam appmanifest to
+## satisfy, so a plain file copy is the whole feature; running it off a slow
+## USB/SD cartridge as the live storage device can otherwise stutter
+## mid-game. Mirrors the same
 ## `steamapps/common/<name>` relative layout under Tatu's own local dir, so
 ## nothing downstream (install_dir/CWD, Goldberg's steam_appid.txt lookup)
 ## needs to know the exe moved. Blocks all input for the whole duration
@@ -992,7 +1028,9 @@ func _free_bytes_at(path: String) -> int:
 ## isn't enough local disk space or the copy itself fails.
 func _ensure_local_copy(exe_relative: String, app_name: String) -> String:
 	var cartridge_exe := _cartridge_root().path_join(exe_relative)
-	var install_rel := _install_root_relative(exe_relative)
+	# Only ever called for GOG/non-Steam (see _confirm_source_menu below) —
+	# both lay out as `<GOG|NON-STEAM>/<name>/...`, always 2 root segments.
+	var install_rel := _install_root_relative(exe_relative, 2)
 	var source_dir := _cartridge_root().path_join(install_rel)
 	var dest_dir := _tatu_local_dir().path_join(install_rel)
 	var local_exe := _tatu_local_dir().path_join(exe_relative)
@@ -1070,6 +1108,7 @@ func _ensure_local_copy(exe_relative: String, app_name: String) -> String:
 		OS.execute("rm", ["-rf", dest_dir])
 		return cartridge_exe
 
+	_fix_copied_permissions(dest_dir)
 	_action_progress.value = 100
 	var marker := FileAccess.open(done_marker, FileAccess.WRITE)
 	marker.close()
@@ -1094,7 +1133,9 @@ func _copy_to_real_steam_library(app_id: int, app_name: String, exe_relative: St
 		await _show_status("No se encontró una instalación de Steam en esta máquina", 2.5)
 		return
 
-	var install_rel := _install_root_relative(exe_relative)
+	# Only ever called for real Steam apps (see _confirm_source_menu below) —
+	# `steamapps/common/<name>/...`, always 3 root segments.
+	var install_rel := _install_root_relative(exe_relative, 3)
 	var source_dir := _cartridge_root().path_join(install_rel)
 	var dest_dir := steam_dir.path_join(install_rel)
 	var manifest_name := "appmanifest_%d.acf" % app_id
@@ -1164,6 +1205,7 @@ func _copy_to_real_steam_library(app_id: int, app_name: String, exe_relative: St
 		await _show_status("No se pudo copiar %s" % app_name, 2.5)
 		return
 
+	_fix_copied_permissions(dest_dir)
 	DirAccess.copy_absolute(manifest_src, manifest_dst)
 	var marker2 := FileAccess.open(done_marker, FileAccess.WRITE)
 	marker2.close()
@@ -1171,7 +1213,7 @@ func _copy_to_real_steam_library(app_id: int, app_name: String, exe_relative: St
 	_action_status.text = "Reiniciando Steam para que reconozca la copia..."
 	_action_overlay.visible = true
 	await get_tree().process_frame
-	await _stop_steam()
+	await _stop_steam(steam_dir)
 	_start_steam(steam_dir)
 	await _show_status("%s copiado — Steam debería reconocerlo como instalado" % app_name, 3.0)
 
@@ -1324,7 +1366,7 @@ func _launch_via_steam() -> void:
 	await get_tree().process_frame
 	await get_tree().process_frame
 
-	await _stop_steam()
+	await _stop_steam(steam_dir)
 
 	# A PC that never ran Tatu still auto-mounts this cartridge through
 	# udisks2, so the fix can't live only in Tatu's UI — it has to travel
@@ -1380,7 +1422,7 @@ func _apply_steam_shortcuts() -> void:
 	await get_tree().create_timer(5.0).timeout
 	var pending := _apps.filter(func(a): return String(a.get("source", "steam")) in SteamShortcuts.SHORTCUT_SOURCES)
 	print("Steam CEF ready, applying shortcuts for: %s" % [pending.map(func(a): return a.get("name"))])
-	await SteamShortcuts.apply_shortcuts(SteamCefClient.new(), _cartridge_root(), _apps)
+	await SteamShortcuts.apply_shortcuts(SteamCefClient.new(), _cartridge_root(), _apps, _resolved_exe_path)
 
 ## Mirrors CapyDeploy's controller.rs::ensure_cef_debug_file — an empty
 ## sentinel Steam checks for at startup before opening its CDP debug port.
@@ -1515,13 +1557,25 @@ func _is_steam_running() -> bool:
 ## exit — verified live (#217) that this machine's disk/process state
 ## doesn't always update instantly, same reasoning applies to a whole
 ## client shutting down its background services.
-func _stop_steam() -> void:
+## `steam -shutdown` (or the CDP-injected equivalent for a state change that
+## only ever exists in the running client, like `AddShortcut`) is Valve's
+## own documented graceful exit — it flushes pending client state
+## (`shortcuts.vdf` among it) before the process tree actually dies. An
+## earlier version of this sent a bare `pkill -x steam` (SIGTERM to the top
+## process only) instead — confirmed live: a shortcut created via CDP
+## survived only in Steam's in-memory client state; the NEXT "Add
+## Cartridge"'s own `_stop_steam` killed that process before it ever wrote
+## `shortcuts.vdf`, silently losing the shortcut for good (this launcher's
+## own idempotency map still said "done", so it never got retried either).
+## Same reasoning Tatu's Rust side already applies before editing Steam's
+## own config files directly (`stop_steam_for_config_edit`).
+func _stop_steam(steam_dir: String) -> void:
 	if not _is_steam_running():
 		return
 	if OS.get_name() == "Windows":
-		OS.execute("taskkill", ["/IM", "steam.exe"])
+		OS.execute(steam_dir.path_join("steam.exe"), ["-shutdown"])
 	else:
-		OS.execute("pkill", ["-x", "steam"])
+		OS.execute(steam_dir.path_join("steam.sh"), ["-shutdown"])
 	var attempts := 0
 	while _is_steam_running() and attempts < 20:
 		await get_tree().create_timer(0.5).timeout
@@ -1611,9 +1665,9 @@ func _on_add_to_steam_requested() -> void:
 
 func _open_source_menu() -> void:
 	var app: Dictionary = _apps[_selected_index]
-	if String(app.get("source", "steam")) == "gog":
+	if String(app.get("source", "steam")) in SteamShortcuts.SHORTCUT_SOURCES:
 		_source_menu_options[0].text = "Agregar como Non-Steam"
-		_source_menu_options[1].text = "Copiar a carpeta de GOG"
+		_source_menu_options[1].text = "Copiar a carpeta local"
 	else:
 		_source_menu_options[0].text = "Add Cartridge"
 		_source_menu_options[1].text = "Copiar a carpeta de Steam"
@@ -1640,7 +1694,7 @@ func _confirm_source_menu() -> void:
 		await _show_status("%s no tiene Goldberg inyectado todavía" % app_name, 2.5)
 		return
 
-	if source == "gog":
+	if source in SteamShortcuts.SHORTCUT_SOURCES:
 		await _ensure_local_copy(exe_relative, app_name)
 		await _show_status("%s copiado a disco local" % app_name, 2.5)
 	else:

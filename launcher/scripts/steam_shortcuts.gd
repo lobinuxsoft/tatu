@@ -14,10 +14,16 @@ extends RefCounted
 ## for ownership exists in either reference project (CapyDeploy's own
 ## crates/steam/src/cef.rs or decky-capydeploy's eventPoller.tsx).
 
-## Sibling to the checksummed cartridge marker, never inside it — see
-## marker.rs's own #209 warning about invalidating markers already in the
-## wild by hashing a field that didn't exist when they were written.
-const MAP_FILENAME := ".tatu-steam-shortcuts.json"
+## Lives under Godot's own per-machine `user://` data dir, NEVER on the
+## cartridge — a Steam shortcut (`shortcuts.vdf`) is inherently local to
+## whichever machine's Steam install created it, but the cartridge itself
+## travels between machines. Confirmed live: a shortcut created on one PC
+## left this map showing the app as "already done," then the SAME cartridge
+## on a second machine (with no shortcut of its own — `shortcuts.vdf` never
+## existed there) skipped it entirely on "Add Cartridge", silently creating
+## nothing. Keying only by `app_id` (not also by cartridge/machine) is fine:
+## each machine now has its own file, so there's nothing left to collide.
+const MAP_FILENAME := "user://steam_shortcuts.json"
 
 ## Sources that need a Steam shortcut created for them — a real Steam app
 ## already gets a library entry for free from `_launch_via_steam`'s own
@@ -50,25 +56,34 @@ const ART_TYPES := {
 }
 const IMAGE_EXTENSIONS := ["png", "jpg", "jpeg", "webp"]
 
-## app_id -> already-created Steam shortcut appid, read-only from Tatu's
-## side, written only by this launcher.
-static func load_map(cartridge_root: String) -> Dictionary:
-	var path := cartridge_root.path_join(MAP_FILENAME)
-	if not FileAccess.file_exists(path):
+## app_id -> already-created Steam shortcut appid on THIS machine, read-only
+## from Tatu's side, written only by this launcher.
+static func load_map() -> Dictionary:
+	if not FileAccess.file_exists(MAP_FILENAME):
 		return {}
-	var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(path))
+	var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(MAP_FILENAME))
 	return parsed if typeof(parsed) == TYPE_DICTIONARY else {}
 
-static func save_map(cartridge_root: String, map: Dictionary) -> void:
-	var f := FileAccess.open(cartridge_root.path_join(MAP_FILENAME), FileAccess.WRITE)
+static func save_map(map: Dictionary) -> void:
+	var f := FileAccess.open(MAP_FILENAME, FileAccess.WRITE)
 	f.store_string(JSON.stringify(map))
 
 ## Applies shortcut + art for every GOG/non-Steam app on the cartridge not
 ## already tracked in the mapping file — idempotent across repeated "Add
 ## Cartridge" presses. One bad app (missing exe, failed AddShortcut) is
 ## skipped, never blocks the rest.
-static func apply_shortcuts(client: SteamCefClient, cartridge_root: String, apps: Array) -> void:
-	var map := load_map(cartridge_root)
+##
+## `resolve_exe` is `main.gd::_resolved_exe_path` bound as a Callable
+## `(exe_relative, source) -> String` — same lookup "Launch" already uses to
+## prefer a local disk copy over the cartridge one, so a shortcut created
+## AFTER "Copiar a carpeta local" finished points at that fast local copy
+## instead of the cartridge (live-reported: the copy finished but Steam had
+## no shortcut for it at all yet — the fix is this call reusing the exact
+## same resolution "Launch" always did, not a second copy step).
+static func apply_shortcuts(
+	client: SteamCefClient, cartridge_root: String, apps: Array, resolve_exe: Callable
+) -> void:
+	var map := load_map()
 	var changed := false
 	for app in apps:
 		var app_dict: Dictionary = app
@@ -83,7 +98,8 @@ static func apply_shortcuts(client: SteamCefClient, cartridge_root: String, apps
 			push_warning("Steam shortcut skipped for \"%s\": no exe_path on the marker" % app_name)
 			continue
 
-		var exe_path := cartridge_root.path_join(exe_relative)
+		var source := String(app_dict.get("source", "steam"))
+		var exe_path: String = resolve_exe.call(exe_relative, source)
 		var steam_app_id := await client.add_shortcut(
 			app_name, exe_path, exe_path.get_base_dir()
 		)
@@ -95,13 +111,21 @@ static func apply_shortcuts(client: SteamCefClient, cartridge_root: String, apps
 			push_warning("Steam shortcut failed for \"%s\": AddShortcut returned 0" % app_name)
 			continue
 		if exe_path.get_extension().to_lower() == "exe":
+			# Confirmed live: calling SpecifyCompatTool immediately after the
+			# AddShortcut that just created THIS app_id left no compat tool
+			# mapping at all (config.vdf's own CompatToolMapping never got
+			# the entry, despite the CDP call itself reporting success, no
+			# exception) — the exact same call against an app_id that had
+			# already existed for a while worked instantly. Same race class
+			# already assumed for set_custom_artwork's own Clear→sleep→Set.
+			await (Engine.get_main_loop() as SceneTree).create_timer(1.0).timeout
 			await client.specify_compat_tool(steam_app_id, "proton_experimental")
 		await _apply_art(client, cartridge_root, app_id, steam_app_id)
 
 		map[str(app_id)] = steam_app_id
 		changed = true
 	if changed:
-		save_map(cartridge_root, map)
+		save_map(map)
 
 static func _apply_art(
 	client: SteamCefClient, cartridge_root: String, app_id: int, steam_app_id: int
