@@ -1189,7 +1189,7 @@ func _copy_to_real_steam_library(app_id: int, app_name: String, exe_relative: St
 	_action_status.text = "Reiniciando Steam para que reconozca la copia..."
 	_action_overlay.visible = true
 	await get_tree().process_frame
-	await _stop_steam()
+	await _stop_steam(steam_dir)
 	_start_steam(steam_dir)
 	await _show_status("%s copiado — Steam debería reconocerlo como instalado" % app_name, 3.0)
 
@@ -1342,7 +1342,7 @@ func _launch_via_steam() -> void:
 	await get_tree().process_frame
 	await get_tree().process_frame
 
-	await _stop_steam()
+	await _stop_steam(steam_dir)
 
 	# A PC that never ran Tatu still auto-mounts this cartridge through
 	# udisks2, so the fix can't live only in Tatu's UI — it has to travel
@@ -1533,13 +1533,25 @@ func _is_steam_running() -> bool:
 ## exit — verified live (#217) that this machine's disk/process state
 ## doesn't always update instantly, same reasoning applies to a whole
 ## client shutting down its background services.
-func _stop_steam() -> void:
+## `steam -shutdown` (or the CDP-injected equivalent for a state change that
+## only ever exists in the running client, like `AddShortcut`) is Valve's
+## own documented graceful exit — it flushes pending client state
+## (`shortcuts.vdf` among it) before the process tree actually dies. An
+## earlier version of this sent a bare `pkill -x steam` (SIGTERM to the top
+## process only) instead — confirmed live: a shortcut created via CDP
+## survived only in Steam's in-memory client state; the NEXT "Add
+## Cartridge"'s own `_stop_steam` killed that process before it ever wrote
+## `shortcuts.vdf`, silently losing the shortcut for good (this launcher's
+## own idempotency map still said "done", so it never got retried either).
+## Same reasoning Tatu's Rust side already applies before editing Steam's
+## own config files directly (`stop_steam_for_config_edit`).
+func _stop_steam(steam_dir: String) -> void:
 	if not _is_steam_running():
 		return
 	if OS.get_name() == "Windows":
-		OS.execute("taskkill", ["/IM", "steam.exe"])
+		OS.execute(steam_dir.path_join("steam.exe"), ["-shutdown"])
 	else:
-		OS.execute("pkill", ["-x", "steam"])
+		OS.execute(steam_dir.path_join("steam.sh"), ["-shutdown"])
 	var attempts := 0
 	while _is_steam_running() and attempts < 20:
 		await get_tree().create_timer(0.5).timeout
