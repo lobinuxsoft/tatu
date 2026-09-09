@@ -912,7 +912,8 @@ func _on_launch_requested() -> void:
 ## local-cache destination; anything never copied runs straight off the
 ## cartridge, same as before this existed.
 func _resolved_exe_path(exe_relative: String, source: String) -> String:
-	var install_rel := _install_root_relative(exe_relative)
+	var root_segments := 2 if source in SteamShortcuts.SHORTCUT_SOURCES else 3
+	var install_rel := _install_root_relative(exe_relative, root_segments)
 	if source in SteamShortcuts.SHORTCUT_SOURCES:
 		var local_root := _tatu_local_dir().path_join(install_rel)
 		if FileAccess.file_exists(local_root.path_join(LOCAL_COPY_DONE_FILENAME)):
@@ -941,18 +942,29 @@ func _show_status(text: String, seconds: float) -> void:
 func _sh_quote(s: String) -> String:
 	return "'" + s.replace("'", "'\\''") + "'"
 
-## The install root under `steamapps/common/<name>/` a given exe belongs to —
-## NOT just the exe's own immediate folder, which can sit several levels
-## deeper for some games (Unreal Engine titles keep their real binary under
+## The install root a given exe belongs to — NOT just the exe's own
+## immediate folder, which can sit several levels deeper for some games
+## (Unreal Engine titles keep their real binary under
 ## `<name>/End/Binaries/Win64/`) while sibling folders at the install root
-## (Content/, Engine/, ...) are just as required to run. Every exe_path on
-## the marker starts with `steamapps/common/<name>/...` (goldberg.rs), so the
-## first three path segments are always the install root.
-func _install_root_relative(exe_relative: String) -> String:
+## (Content/, Engine/, ...) are just as required to run, but never appear
+## in `exe_relative` at all since they hold no executable of their own.
+##
+## `root_segments` is how many leading path segments make up that root —
+## it differs by source, since each one lays out the cartridge differently:
+## a real Steam app is `steamapps/common/<name>/...` (goldberg.rs), 3
+## segments; GOG (`GOG/<repo.install_directory>/...`, gog_download.rs) and
+## non-Steam (`NON-STEAM/<install_dir>/...`, non_steam.rs) are both just 2.
+## Live-reported: this function defaulted to 3 unconditionally, so a
+## non-Steam/GOG local copy silently cut one level too deep — copying only
+## the subfolder the exe happened to sit in, dropping whatever else the
+## real install root had alongside it (redistributables, extra data), a
+## missing-files bug invisible until someone actually diffed the two
+## folders, which is exactly how this got caught.
+func _install_root_relative(exe_relative: String, root_segments: int) -> String:
 	var parts := exe_relative.split("/")
-	if parts.size() < 3:
+	if parts.size() <= root_segments:
 		return exe_relative.get_base_dir()
-	return "/".join(parts.slice(0, 3))
+	return "/".join(parts.slice(0, root_segments))
 
 ## Every exe_path this launcher builds is `<library_root>/steamapps/common/
 ## <name>/...`, whether `<library_root>` is the cartridge, a copied real
@@ -1016,7 +1028,9 @@ func _fix_copied_permissions(dest_dir: String) -> void:
 ## isn't enough local disk space or the copy itself fails.
 func _ensure_local_copy(exe_relative: String, app_name: String) -> String:
 	var cartridge_exe := _cartridge_root().path_join(exe_relative)
-	var install_rel := _install_root_relative(exe_relative)
+	# Only ever called for GOG/non-Steam (see _confirm_source_menu below) —
+	# both lay out as `<GOG|NON-STEAM>/<name>/...`, always 2 root segments.
+	var install_rel := _install_root_relative(exe_relative, 2)
 	var source_dir := _cartridge_root().path_join(install_rel)
 	var dest_dir := _tatu_local_dir().path_join(install_rel)
 	var local_exe := _tatu_local_dir().path_join(exe_relative)
@@ -1119,7 +1133,9 @@ func _copy_to_real_steam_library(app_id: int, app_name: String, exe_relative: St
 		await _show_status("No se encontró una instalación de Steam en esta máquina", 2.5)
 		return
 
-	var install_rel := _install_root_relative(exe_relative)
+	# Only ever called for real Steam apps (see _confirm_source_menu below) —
+	# `steamapps/common/<name>/...`, always 3 root segments.
+	var install_rel := _install_root_relative(exe_relative, 3)
 	var source_dir := _cartridge_root().path_join(install_rel)
 	var dest_dir := steam_dir.path_join(install_rel)
 	var manifest_name := "appmanifest_%d.acf" % app_id
@@ -1572,7 +1588,7 @@ func _start_steam(steam_dir: String) -> void:
 		OS.create_process(steam_dir.path_join("steam.sh"), [])
 
 func _tatu_local_dir() -> String:
-	return OS.get_environment("HOME").path_join("tatu")
+	return OS.get_environment("HOME").path_join(".local/share/tatu")
 
 ## Matches umu-run's own resolution of UMU_LOCAL when UMU_FOLDERS_PATH is
 ## set (umu/umu_consts.py): `<UMU_FOLDERS_PATH>/umu`.
