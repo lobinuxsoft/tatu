@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use regex::Regex;
 
 use crate::drm::Preservability;
+use crate::steam::exe_pick::app_common_type;
 use crate::steam::library_paths;
 
 use super::drives::list_removable_drives;
@@ -83,9 +84,24 @@ pub fn sync_marker_with_installed_apps(mount_point: &Path) -> Result<(), String>
         return Ok(());
     };
 
-    let known: std::collections::HashSet<u64> = list_apps(mount_point)
-        .map(|apps| apps.iter().map(|a| a.app_id).collect())
-        .unwrap_or_default();
+    let existing_apps = list_apps(mount_point).unwrap_or_default();
+    let known: std::collections::HashSet<u64> = existing_apps.iter().map(|a| a.app_id).collect();
+
+    // Same Valve-compat-tool exclusion as the new-entry check below, for
+    // whatever an OLDER "Preparar launcher" run already recorded before it
+    // knew to skip these (live-reported: Proton Experimental/Steam Linux
+    // Runtime already sitting in the list). Metadata-only — the files stay,
+    // Steam still needs them for whatever game on this cartridge pulled
+    // them in.
+    let stale_tool_ids: Vec<u64> = existing_apps
+        .iter()
+        .filter(|a| a.source == AppSource::Steam)
+        .filter(|a| app_common_type(a.app_id).is_some_and(|t| !t.eq_ignore_ascii_case("game")))
+        .map(|a| a.app_id)
+        .collect();
+    if !stale_tool_ids.is_empty() {
+        super::marker::remove_apps(mount_point, &stale_tool_ids)?;
+    }
 
     for entry in entries.flatten() {
         let path = entry.path();
@@ -99,6 +115,19 @@ pub fn sync_marker_with_installed_apps(mount_point: &Path) -> Result<(), String>
             continue;
         };
         if known.contains(&app_id) {
+            continue;
+        }
+        // Valve's own compat tools (Proton, Steam Linux Runtime) install
+        // via the exact same `appmanifest_<id>.acf` mechanism as a real
+        // game — whichever game on this cartridge needed one pulled it in
+        // as an ordinary `steamapps/common/` entry, with no DRM to
+        // classify and no exe of its own (live-reported: "Proton
+        // Experimental" showing up as a game with "Desconocido" DRM).
+        // `appinfo.vdf`'s own `common/type` is `"Tool"` for these — a
+        // lookup miss (app not cached there yet) falls back to the old
+        // behavior (assume it's a game) rather than risk dropping a real
+        // one Steam just hasn't cached info for.
+        if app_common_type(app_id).is_some_and(|t| !t.eq_ignore_ascii_case("game")) {
             continue;
         }
 

@@ -204,6 +204,31 @@ pub fn add_app(mount_point: &Path, app: CartridgeApp) -> Result<(), String> {
         .map_err(|e| format!("Cannot write {MARKER_FILENAME}: {e}"))
 }
 
+/// Drops `ids` from the marker's app list, if present, and rewrites it —
+/// metadata-only, never touches the files those ids' entries pointed at.
+/// For cleaning up entries that should never have been recorded at all
+/// (#236 follow-up: a Valve compat tool swept in by an older
+/// `sync_marker_with_installed_apps` before it knew to skip non-Game
+/// appids), not for a player-initiated uninstall (`uninstall_from_cartridge`
+/// deletes the real files too, a very different operation).
+pub fn remove_apps(mount_point: &Path, ids: &[u64]) -> Result<(), String> {
+    let Some(marker) = read_marker(mount_point) else {
+        return Ok(());
+    };
+    if !marker.apps.iter().any(|a| ids.contains(&a.app_id)) {
+        return Ok(());
+    }
+    let kept: Vec<CartridgeApp> = marker
+        .apps
+        .into_iter()
+        .filter(|a| !ids.contains(&a.app_id))
+        .collect();
+    let rebuilt = CartridgeMarker::new(kept, marker.created_at);
+    let json = serde_json::to_string_pretty(&rebuilt).map_err(|e| e.to_string())?;
+    fs::write(mount_point.join(MARKER_FILENAME), json)
+        .map_err(|e| format!("Cannot write {MARKER_FILENAME}: {e}"))
+}
+
 /// Flip `standalone` on an already-recorded app, record its resolved main
 /// `.exe` path, and rewrite the marker. Called once #199's Goldberg
 /// injection finishes for that app; errors if the app was never recorded by
