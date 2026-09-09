@@ -970,23 +970,30 @@ func _pick_folder(current_dir: String) -> String:
 		_folder_dialog.current_dir = current_dir
 	_folder_dialog.popup_centered()
 
-	var chosen := ""
-	var done := false
+	# A plain local bool/String reassigned INSIDE these lambdas would never
+	# be visible out here — GDScript lambdas capture outer locals by value,
+	# not by reference, confirmed live (the lambda's own `print` showed the
+	# right path every time, but the loop below span forever regardless,
+	# since ITS OWN copy of `done` never changed). A Dictionary sidesteps
+	# this: the capture is still by value, but the value is a reference to
+	# the SAME underlying Dictionary object, so mutating a key through it
+	# is visible on both sides.
+	var state := {"chosen": "", "done": false}
 	var on_dir := func(path: String) -> void:
-		chosen = path
-		done = true
+		state.chosen = path
+		state.done = true
 	var on_cancel := func() -> void:
-		done = true
+		state.done = true
 	_folder_dialog.dir_selected.connect(on_dir, CONNECT_ONE_SHOT)
 	_folder_dialog.canceled.connect(on_cancel, CONNECT_ONE_SHOT)
 	_folder_dialog.close_requested.connect(on_cancel, CONNECT_ONE_SHOT)
-	while not done:
+	while not state.done:
 		await get_tree().process_frame
 
 	for pair in [[_folder_dialog.dir_selected, on_dir], [_folder_dialog.canceled, on_cancel], [_folder_dialog.close_requested, on_cancel]]:
 		if pair[0].is_connected(pair[1]):
 			pair[0].disconnect(pair[1])
-	return chosen
+	return String(state.chosen)
 
 ## Single-quotes `s` for `/bin/sh -c`, escaping any embedded single quote —
 ## paths here come from the marker/cartridge layout, not untrusted input,
