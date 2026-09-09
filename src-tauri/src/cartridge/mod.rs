@@ -2,12 +2,14 @@
 // standard Steam library so Steam's own client handles the download. New
 // as of #193 — `disk.rs` is Steam library *size estimation*, unrelated
 // despite the similar name.
+mod artwork_search;
 mod assets;
 mod drives;
 mod goldberg;
 mod install;
 mod launcher;
 mod marker;
+mod non_steam;
 mod prepare;
 mod runtime;
 mod usage;
@@ -23,10 +25,16 @@ mod format;
 #[cfg(unix)]
 mod symlinks;
 
+pub use artwork_search::{
+    ArtFilters, ArtImage, ArtSearchResult, fetch_grids, fetch_heroes, fetch_icons, fetch_logos,
+    save_selected_artwork, search_games,
+};
 pub use assets::{
-    fetch_cartridge_art, fetch_cartridge_description, fetch_cartridge_screenshots,
-    fetch_cartridge_trailer, fetch_gog_cartridge_art, fetch_gog_cartridge_description,
-    fetch_gog_cartridge_screenshots, fetch_gog_cartridge_trailer,
+    LiveSteamPreview, fetch_cartridge_art, fetch_cartridge_description,
+    fetch_cartridge_screenshots, fetch_cartridge_trailer, fetch_gog_cartridge_art,
+    fetch_gog_cartridge_description, fetch_gog_cartridge_screenshots, fetch_gog_cartridge_trailer,
+    fetch_live_steam_preview, fetch_non_steam_cartridge_description,
+    fetch_non_steam_cartridge_screenshots, fetch_non_steam_cartridge_trailer,
 };
 pub use drives::{RemovableDrive, list_removable_drives};
 #[cfg(unix)]
@@ -40,6 +48,7 @@ pub use launcher::install_launcher_binaries;
 pub use marker::{
     AppSource, CartridgeApp, add_app, has_cartridge_structure, list_apps, reorder_apps,
 };
+pub use non_steam::{add_non_steam_app, install_size};
 pub use prepare::{PrepareDrmResult, refresh_drm_and_inject};
 pub use runtime::bundle_linux_runtime;
 #[cfg(unix)]

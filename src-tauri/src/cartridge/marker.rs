@@ -49,6 +49,13 @@ pub enum AppSource {
     #[default]
     Steam,
     Gog,
+    /// A `shortcuts.vdf` entry with no Steam listing at all (#236) —
+    /// `app_id` here is Steam's own shortcut-id algorithm output
+    /// (`CRC32(exe+name) | 0x80000000 | 0x02000000`, always ≥ 2^31), same
+    /// collision reasoning as `Gog` above: distinct enough from both real
+    /// Steam appids and observed GOG product ids in practice, not formally
+    /// guaranteed unique.
+    NonSteam,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -199,6 +206,31 @@ pub fn add_app(mount_point: &Path, app: CartridgeApp) -> Result<(), String> {
     marker.apps.push(app);
 
     let rebuilt = CartridgeMarker::new(marker.apps, marker.created_at);
+    let json = serde_json::to_string_pretty(&rebuilt).map_err(|e| e.to_string())?;
+    fs::write(mount_point.join(MARKER_FILENAME), json)
+        .map_err(|e| format!("Cannot write {MARKER_FILENAME}: {e}"))
+}
+
+/// Drops `ids` from the marker's app list, if present, and rewrites it —
+/// metadata-only, never touches the files those ids' entries pointed at.
+/// For cleaning up entries that should never have been recorded at all
+/// (#236 follow-up: a Valve compat tool swept in by an older
+/// `sync_marker_with_installed_apps` before it knew to skip non-Game
+/// appids), not for a player-initiated uninstall (`uninstall_from_cartridge`
+/// deletes the real files too, a very different operation).
+pub fn remove_apps(mount_point: &Path, ids: &[u64]) -> Result<(), String> {
+    let Some(marker) = read_marker(mount_point) else {
+        return Ok(());
+    };
+    if !marker.apps.iter().any(|a| ids.contains(&a.app_id)) {
+        return Ok(());
+    }
+    let kept: Vec<CartridgeApp> = marker
+        .apps
+        .into_iter()
+        .filter(|a| !ids.contains(&a.app_id))
+        .collect();
+    let rebuilt = CartridgeMarker::new(kept, marker.created_at);
     let json = serde_json::to_string_pretty(&rebuilt).map_err(|e| e.to_string())?;
     fs::write(mount_point.join(MARKER_FILENAME), json)
         .map_err(|e| format!("Cannot write {MARKER_FILENAME}: {e}"))

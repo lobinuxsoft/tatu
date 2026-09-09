@@ -11,6 +11,12 @@ ureq = { version = "3", features = ["json", "cookies"] }
 tokio = { version = "1", features = ["rt"] }
 dirs = "6"
 tauri-plugin-opener = "2"
+# Native folder picker for correcting a non-Steam game's install root
+# (#236): `shortcuts.vdf`'s own "Start In" is often just the exe's
+# immediate folder (e.g. Unreal Engine's `<Root>/<Game>/Binaries/Win64/`),
+# not the whole game folder Tatu needs to copy — no reason to hand-roll a
+# folder browser in HTML when the OS already has one.
+tauri-plugin-dialog = "2"
 regex = "1"
 steam-vdf-parser = "0.1.1"
 thiserror = "2"

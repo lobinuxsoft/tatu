@@ -2,12 +2,14 @@ import { invoke, listen } from "./js/tauri.js";
 import { state } from "./js/state.js";
 import { renderDetail } from "./js/panel/detail.js";
 import { renderGogDetail } from "./js/panel/gog_detail.js";
+import { renderNonSteamDetail } from "./js/panel/non_steam_detail.js";
 import { installExternalLinks } from "./js/links.js";
 import { installLightbox } from "./js/panel/lightbox.js";
 import { installCardTilt } from "./js/panel/card_tilt.js";
 import { initTheme } from "./js/themes.js";
 import { closeCartridgeModal } from "./js/modals/cartridge.js";
 import { closeGogCartridgeModal } from "./js/modals/gog_cartridge.js";
+import { closeNonSteamCartridgeModal } from "./js/modals/non_steam_cartridge.js";
 
 initTheme();
 installExternalLinks();
@@ -62,6 +64,18 @@ async function show(target) {
     }
     state.GOG = [game];
     renderGogDetail(game);
+    return;
+  }
+  if (target.source === "non_steam") {
+    activeCartridgeClose = closeNonSteamCartridgeModal;
+    const ctx = await invoke("get_game_context", { appId: target.app_id });
+    if (!ctx.non_steam_game) {
+      document.getElementById("detailContent").innerHTML =
+        `<div class="loading">No encontré ese juego en tu lista Non-Steam.</div>`;
+      return;
+    }
+    state.NS = [ctx.non_steam_game];
+    renderNonSteamDetail(ctx.non_steam_game);
     return;
   }
   activeCartridgeClose = closeCartridgeModal;

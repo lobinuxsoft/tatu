@@ -332,8 +332,14 @@ async function prepareLauncher(drive, apps, includeTrailers) {
     // non-Steam source wired here at all, so those two are just empty
     // without a match. Live-reported (#243 follow-up): a downloaded GOG
     // game showed a blank launcher card next to Steam entries with real art.
-    const steamApps = apps.filter(a => a.source !== "gog");
+    const steamApps = apps.filter(a => a.source !== "gog" && a.source !== "non_steam");
     const gogApps = apps.filter(a => a.source === "gog");
+    // Non-Steam shortcuts have their own id space (the Steam shortcut id,
+    // not a real Steam appid) — routing them through `fetch_cartridge_art`/
+    // `fetch_cartridge_description` like a Steam app queried SteamGridDB/the
+    // store with that shortcut id as if it were one. `fetch_non_steam_
+    // cartridge_*` keys off `state.non_steam`/`state.artwork` instead (#236).
+    const nonSteamApps = apps.filter(a => a.source === "non_steam");
     for (let i = 0; i < steamApps.length; i++) {
       const app = steamApps[i];
       setStatus(`Bajando arte, descripción y capturas (${i + 1}/${steamApps.length}): ${app.name}`);
@@ -352,6 +358,15 @@ async function prepareLauncher(drive, apps, includeTrailers) {
         invoke("fetch_gog_cartridge_screenshots", { appId: app.app_id, title: app.name, mountPoint }).catch(() => {}),
       ]);
     }
+    for (let i = 0; i < nonSteamApps.length; i++) {
+      const app = nonSteamApps[i];
+      setStatus(`Bajando arte, descripción y capturas (${i + 1}/${nonSteamApps.length}): ${app.name}`);
+      await Promise.all([
+        invoke("fetch_non_steam_cartridge_art", { nonSteamId: app.app_id, mountPoint }).catch(() => {}),
+        invoke("fetch_non_steam_cartridge_description", { nonSteamId: app.app_id, mountPoint }).catch(() => {}),
+        invoke("fetch_non_steam_cartridge_screenshots", { nonSteamId: app.app_id, mountPoint }).catch(() => {}),
+      ]);
+    }
 
     // Separate loop, after art/description: transcoding a trailer takes
     // real wall-clock time (ffmpeg, not just an HTTP GET), worth its own
@@ -366,6 +381,11 @@ async function prepareLauncher(drive, apps, includeTrailers) {
         const app = gogApps[i];
         setStatus(`Bajando trailer (GOG) (${i + 1}/${gogApps.length}): ${app.name}...`);
         await invoke("fetch_gog_cartridge_trailer", { appId: app.app_id, title: app.name, mountPoint }).catch(() => {});
+      }
+      for (let i = 0; i < nonSteamApps.length; i++) {
+        const app = nonSteamApps[i];
+        setStatus(`Bajando trailer (${i + 1}/${nonSteamApps.length}): ${app.name}...`);
+        await invoke("fetch_non_steam_cartridge_trailer", { nonSteamId: app.app_id, mountPoint }).catch(() => {});
       }
     }
 

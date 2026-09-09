@@ -719,8 +719,20 @@ func _on_card_clicked(index: int) -> void:
 	_selected_index = index
 	_update_selection(true)
 
+## `card.<ext>` is the launcher-safe copy Tatu writes next to a manual
+## SteamGridDB pick (Preparar launcher, #328/#236) whenever that pick is
+## animated — this decoder can't play video/animated WebP, unlike Steam's
+## own client, which is why the raw pick itself (`grid.<ext>`, kept for
+## #329's still-unbuilt Steam shortcut registration) is never read here
+## directly. Checked first; `grid.<ext>` is the only file that exists at
+## all for a Steam/GOG app's own auto-picked cover, which is already a
+## single static image with nothing to substitute.
 func _grid_art_path(app_id: int) -> String:
 	var dir := _cartridge_root().path_join("assets").path_join(str(app_id))
+	for ext in IMAGE_EXTENSIONS:
+		var candidate := dir.path_join("card.%s" % ext)
+		if FileAccess.file_exists(candidate):
+			return candidate
 	for ext in IMAGE_EXTENSIONS:
 		var candidate := dir.path_join("grid.%s" % ext)
 		if FileAccess.file_exists(candidate):
@@ -1334,7 +1346,7 @@ func _launch_via_steam() -> void:
 		f.close()
 
 	_start_steam(steam_dir)
-	await _apply_gog_steam_shortcuts()
+	await _apply_steam_shortcuts()
 	# Live-tested (2026-08-28): Steam's own shader-cache download+commit for a
 	# freshly-launched app on a USB cartridge took ~10 minutes and stalled the
 	# client's main thread the whole time — looks exactly like a hang. Only
@@ -1345,20 +1357,30 @@ func _launch_via_steam() -> void:
 	await get_tree().create_timer(4.0).timeout
 	get_tree().quit()
 
-## #209: GOG games never show up in a real Steam library no matter how many
-## folders get scanned — Steam only recognizes ITS OWN manifests there. A
-## Non-Steam shortcut is the only way in, applied via CDP against the same
-## Steam instance `_launch_via_steam` just restarted above. A no-op when
-## the cartridge has no GOG apps at all.
-func _apply_gog_steam_shortcuts() -> void:
-	if not _apps.any(func(a): return String(a.get("source", "steam")) == "gog"):
+## #209/#236: GOG games and non-Steam shortcuts never show up in a real
+## Steam library no matter how many folders get scanned — Steam only
+## recognizes ITS OWN manifests there. A Non-Steam shortcut is the only way
+## in for either, applied via CDP against the same Steam instance
+## `_launch_via_steam` just restarted above. A no-op when the cartridge has
+## no GOG or non-Steam apps at all.
+func _apply_steam_shortcuts() -> void:
+	if not _apps.any(func(a): return String(a.get("source", "steam")) in SteamShortcuts.SHORTCUT_SOURCES):
 		return
 	_ensure_cef_debug_file()
-	_action_status.text = "Configurando accesos directos de GOG en Steam..."
+	_action_status.text = "Configurando accesos directos en Steam..."
 	if not await _wait_for_cef():
-		push_warning("Steam CEF debug port never came up — GOG shortcuts skipped (#209)")
+		push_warning("Steam CEF debug port never came up — shortcuts skipped (#209/#236)")
 		return
-	await SteamShortcuts.apply_gog_apps(SteamCefClient.new(), _cartridge_root(), _apps)
+	# The debug port answering TCP connections is not the same as Steam's own
+	# JS runtime having loaded `SteamClient.Apps` yet — a fresh restart can
+	# have the port open well before that (confirmed live: shortcuts silently
+	# never applied, with the port already listening). A flat grace period
+	# after the port comes up is the cheapest fix without a real readiness
+	# probe for the JS context itself.
+	await get_tree().create_timer(5.0).timeout
+	var pending := _apps.filter(func(a): return String(a.get("source", "steam")) in SteamShortcuts.SHORTCUT_SOURCES)
+	print("Steam CEF ready, applying shortcuts for: %s" % [pending.map(func(a): return a.get("name"))])
+	await SteamShortcuts.apply_shortcuts(SteamCefClient.new(), _cartridge_root(), _apps)
 
 ## Mirrors CapyDeploy's controller.rs::ensure_cef_debug_file — an empty
 ## sentinel Steam checks for at startup before opening its CDP debug port.

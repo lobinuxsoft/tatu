@@ -1,6 +1,7 @@
 import { invoke, getCurrentWindow } from "../tauri.js";
 import { esc, formatBytes } from "../utils.js";
 import { openGogCartridgeModal } from "../modals/gog_cartridge.js";
+import { artworkTabHtml, installArtworkTabHandlers } from "./artwork_tab.js";
 import {
   detailHeaderShell,
   headerImg,
@@ -46,9 +47,13 @@ export function renderGogDetail(game) {
 
   document.getElementById("detailContent").innerHTML =
     detailHeaderShell(game.title, `<span>GOG${year ? " · " + esc(year) : ""}</span>`, headerImg(game.background_url)) +
-    detailTabsShell([{ key: "info", label: "Info", initialHtml: infoHtml }]);
+    detailTabsShell([
+      { key: "info", label: "Info", initialHtml: infoHtml },
+      { key: "arte", label: "Arte", initialHtml: artworkTabHtml() },
+    ]);
   installDetailTabSwitcher();
   document.getElementById("gogCartridgeBtn").onclick = () => openGogCartridgeModal(game.id);
+  installArtworkTabHandlers(game.id, game.title);
 
   getCurrentWindow().setTitle(game.title + " — Tatu").catch(() => {});
 

@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize)]
 struct GridsResponse {
@@ -38,6 +38,11 @@ struct AppDetailsEntry {
 
 #[derive(Debug, Deserialize)]
 struct AppDetailsData {
+    /// Only read by the live preview (#328) — confirming the store's own
+    /// title for the id the user just typed is the fastest way to catch a
+    /// wrong AppID, before description/art even load.
+    #[serde(default)]
+    name: String,
     #[serde(default)]
     short_description: String,
     #[serde(default)]
@@ -264,6 +269,76 @@ fn fetch_appdetails(
         .and_then(|entry| entry.success.then_some(entry.data).flatten()))
 }
 
+/// What the detail window shows for a non-Steam entry once the user
+/// assigns it a `steam_app_id` (#328) — a live look at what that id
+/// actually resolves to, before it's ever baked into a cartridge. Not the
+/// same job as `fetch_cartridge_description`/`fetch_cartridge_art` above:
+/// those cache bytes to disk for the launcher to read later; this returns
+/// data straight to the UI so a wrong id shows the wrong game immediately
+/// instead of only surfacing once a cartridge is prepared.
+#[derive(Debug, Clone, Serialize)]
+pub struct LiveSteamPreview {
+    pub name: Option<String>,
+    pub description: String,
+    pub screenshot_urls: Vec<String>,
+    pub grid_url: Option<String>,
+}
+
+/// `steamgriddb_api_key` empty just means `grid_url` comes back `None` —
+/// unlike `fetch_cartridge_art_sync`'s hard refusal, a missing key here
+/// shouldn't block the description/screenshots half of the same panel.
+pub async fn fetch_live_steam_preview(
+    steamgriddb_api_key: String,
+    steam_app_id: u64,
+) -> Result<LiveSteamPreview, String> {
+    tokio::task::spawn_blocking(move || {
+        let agent = new_steamgriddb_agent();
+        let details = fetch_appdetails(&agent, steam_app_id)?;
+        let grid_url = if steamgriddb_api_key.is_empty() {
+            None
+        } else {
+            fetch_grid_url_sync(&agent, &steamgriddb_api_key, steam_app_id)
+        };
+        Ok(LiveSteamPreview {
+            name: details
+                .as_ref()
+                .map(|d| d.name.clone())
+                .filter(|n| !n.is_empty()),
+            description: details
+                .as_ref()
+                .map(|d| d.short_description.clone())
+                .unwrap_or_default(),
+            screenshot_urls: details
+                .map(|d| d.screenshots.into_iter().map(|s| s.path_full).collect())
+                .unwrap_or_default(),
+            grid_url,
+        })
+    })
+    .await
+    .map_err(|e| format!("Task error: {e}"))?
+}
+
+/// Same `/grids/steam/{id}` lookup `fetch_cartridge_art_sync` uses, minus
+/// the download+disk-write — just the URL, for immediate display. No match
+/// (or a request failure) is `None`, not an error: the description half of
+/// the preview is still worth showing on its own.
+fn fetch_grid_url_sync(agent: &ureq::Agent, api_key: &str, steam_app_id: u64) -> Option<String> {
+    let grids: GridsResponse = agent
+        .get(format!(
+            "https://www.steamgriddb.com/api/v2/grids/steam/{steam_app_id}"
+        ))
+        .header("Authorization", &format!("Bearer {api_key}"))
+        .call()
+        .ok()?
+        .into_body()
+        .read_json()
+        .ok()?;
+    if !grids.success {
+        return None;
+    }
+    grids.data.into_iter().next().map(|g| g.url)
+}
+
 /// Resolves `title` to a Steam appid via Steam's own (public,
 /// unauthenticated) store search — lets a GOG title that also happens to be
 /// sold on Steam (live case, 2026-08-30: "Leap of Love") reuse the much
@@ -334,7 +409,24 @@ pub async fn fetch_gog_cartridge_description(
     .map_err(|e| format!("Task error: {e}"))?
 }
 
-fn fetch_cartridge_description_sync(
+/// Same as `fetch_cartridge_description`, for a non-Steam shortcut (#236) —
+/// unlike the GOG variant above, the Steam appid is already known (the user
+/// assigned it directly, #327) so there's no title search: `asset_app_id`
+/// (the shortcut id) only picks the cache folder, `steam_app_id` drives the
+/// lookup.
+pub async fn fetch_non_steam_cartridge_description(
+    mount_point: PathBuf,
+    asset_app_id: u64,
+    steam_app_id: u64,
+) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        fetch_cartridge_description_sync(&mount_point, asset_app_id, steam_app_id)
+    })
+    .await
+    .map_err(|e| format!("Task error: {e}"))?
+}
+
+pub(crate) fn fetch_cartridge_description_sync(
     mount_point: &Path,
     asset_app_id: u64,
     steam_app_id: u64,
@@ -388,7 +480,20 @@ pub async fn fetch_gog_cartridge_screenshots(
     .map_err(|e| format!("Task error: {e}"))?
 }
 
-fn fetch_cartridge_screenshots_sync(
+/// Same as `fetch_non_steam_cartridge_description`, for screenshots.
+pub async fn fetch_non_steam_cartridge_screenshots(
+    mount_point: PathBuf,
+    asset_app_id: u64,
+    steam_app_id: u64,
+) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        fetch_cartridge_screenshots_sync(&mount_point, asset_app_id, steam_app_id)
+    })
+    .await
+    .map_err(|e| format!("Task error: {e}"))?
+}
+
+pub(crate) fn fetch_cartridge_screenshots_sync(
     mount_point: &Path,
     asset_app_id: u64,
     steam_app_id: u64,
@@ -455,6 +560,20 @@ pub async fn fetch_gog_cartridge_trailer(
             return Ok(());
         };
         fetch_cartridge_trailer_sync(&mount_point, app_id, steam_app_id)
+    })
+    .await
+    .map_err(|e| format!("Task error: {e}"))?
+}
+
+/// Same as `fetch_non_steam_cartridge_description`, for the trailer — see
+/// that function's doc comment for the `asset_app_id`/`steam_app_id` split.
+pub async fn fetch_non_steam_cartridge_trailer(
+    mount_point: PathBuf,
+    asset_app_id: u64,
+    steam_app_id: u64,
+) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        fetch_cartridge_trailer_sync(&mount_point, asset_app_id, steam_app_id)
     })
     .await
     .map_err(|e| format!("Task error: {e}"))?

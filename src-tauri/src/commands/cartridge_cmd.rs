@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use tauri::path::BaseDirectory;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::SharedState;
@@ -241,10 +241,25 @@ pub async fn fetch_cartridge_art(
     app_id: u64,
     mount_point: String,
 ) -> Result<(), String> {
-    let api_key = {
+    let (api_key, manual) = {
         let s = state.lock().map_err(|e| e.to_string())?;
-        s.steamgriddb_api_key.clone()
+        (
+            s.steamgriddb_api_key.clone(),
+            s.artwork.get(&app_id).cloned(),
+        )
     };
+    // A manual pick (#328) wins over the single-grid auto-pick — the whole
+    // point of picking is that it actually lands on the cartridge, not just
+    // in the detail window's preview.
+    if let Some(artwork) = manual {
+        return cartridge::save_selected_artwork(
+            api_key,
+            PathBuf::from(mount_point),
+            app_id,
+            artwork,
+        )
+        .await;
+    }
     cartridge::fetch_cartridge_art(api_key, PathBuf::from(mount_point), app_id).await
 }
 
@@ -258,10 +273,22 @@ pub async fn fetch_gog_cartridge_art(
     title: String,
     mount_point: String,
 ) -> Result<(), String> {
-    let api_key = {
+    let (api_key, manual) = {
         let s = state.lock().map_err(|e| e.to_string())?;
-        s.steamgriddb_api_key.clone()
+        (
+            s.steamgriddb_api_key.clone(),
+            s.artwork.get(&app_id).cloned(),
+        )
     };
+    if let Some(artwork) = manual {
+        return cartridge::save_selected_artwork(
+            api_key,
+            PathBuf::from(mount_point),
+            app_id,
+            artwork,
+        )
+        .await;
+    }
     cartridge::fetch_gog_cartridge_art(api_key, PathBuf::from(mount_point), app_id, title).await
 }
 
@@ -422,4 +449,158 @@ pub fn force_proton_compat(app_id: u64) -> Result<(), String> {
 #[tauri::command]
 pub fn uninstall_from_cartridge(app_id: u64, mount_point: String) -> Result<(), String> {
     cartridge::uninstall_from_cartridge(Path::new(&mount_point), app_id)
+}
+
+/// Copies a non-Steam game's whole install folder onto the cartridge
+/// (#236) — `non_steam_id` is the shortcut id from `state.non_steam`
+/// (#186's `sync_nonsteam`), not a Steam appid. `spawn_blocking`d: a real
+/// game folder is plain synchronous file I/O, same reasoning as
+/// `get_cartridge_usage`'s own tree walk.
+/// Emits `non_steam_copy_progress` (`{current, total}`, bytes) as the copy
+/// runs — live feedback: a copy that finishes in under a second for a
+/// small game and one that's still running for a large one looked
+/// identical (a static spinner) with no way to tell a fast success from a
+/// stuck one. Throttled the same way `run_gog_download`'s own progress
+/// already is (5/s, always emits the very last update).
+#[tauri::command]
+pub async fn install_non_steam_to_cartridge(
+    app: AppHandle,
+    state: State<'_, SharedState>,
+    non_steam_id: u64,
+    mount_point: String,
+) -> Result<cartridge::CartridgeApp, String> {
+    let game = {
+        let s = state.lock().map_err(|e| e.to_string())?;
+        s.non_steam
+            .iter()
+            .find(|g| g.id == non_steam_id)
+            .cloned()
+            .ok_or_else(|| format!("Juego Non-Steam {non_steam_id} no encontrado"))?
+    };
+    tokio::task::spawn_blocking(move || {
+        let total = cartridge::install_size(&game);
+        let mut done = 0u64;
+        let mut last_emit = std::time::Instant::now() - std::time::Duration::from_secs(1);
+        cartridge::add_non_steam_app(Path::new(&mount_point), &game, |bytes| {
+            done += bytes;
+            let is_last = done >= total;
+            if is_last || last_emit.elapsed() >= std::time::Duration::from_millis(200) {
+                last_emit = std::time::Instant::now();
+                let _ = app.emit(
+                    "non_steam_copy_progress",
+                    serde_json::json!({ "current": done, "total": total }),
+                );
+            }
+        })
+    })
+    .await
+    .map_err(|e| format!("Task error: {e}"))?
+}
+
+/// Same job as `fetch_cartridge_art`, for a non-Steam shortcut (#236) —
+/// `non_steam_id` (not a real Steam appid) keys `state.artwork`/
+/// `state.non_steam`, same lookup `install_non_steam_to_cartridge` already
+/// does. Called from "Preparar launcher", not from the one-time copy step —
+/// see `add_non_steam_app`'s own doc comment for why the two were split.
+#[tauri::command]
+pub async fn fetch_non_steam_cartridge_art(
+    state: State<'_, SharedState>,
+    non_steam_id: u64,
+    mount_point: String,
+) -> Result<(), String> {
+    let (api_key, manual) = {
+        let s = state.lock().map_err(|e| e.to_string())?;
+        (
+            s.steamgriddb_api_key.clone(),
+            s.artwork.get(&non_steam_id).cloned(),
+        )
+    };
+    let Some(artwork) = manual else {
+        return Ok(());
+    };
+    cartridge::save_selected_artwork(api_key, PathBuf::from(mount_point), non_steam_id, artwork)
+        .await
+}
+
+/// Same as `fetch_cartridge_description`, for a non-Steam shortcut with a
+/// user-assigned real Steam appid (#236/#327) — `steam_app_id` is what
+/// actually drives the store lookup, `non_steam_id` only picks the folder
+/// this gets cached into (`assets/<non_steam_id>/`, same as `fetch_
+/// non_steam_cartridge_art`).
+#[tauri::command]
+pub async fn fetch_non_steam_cartridge_description(
+    state: State<'_, SharedState>,
+    non_steam_id: u64,
+    mount_point: String,
+) -> Result<(), String> {
+    let steam_app_id = {
+        let s = state.lock().map_err(|e| e.to_string())?;
+        s.non_steam
+            .iter()
+            .find(|g| g.id == non_steam_id)
+            .and_then(|g| g.steam_app_id)
+    };
+    let Some(steam_app_id) = steam_app_id else {
+        return Ok(());
+    };
+    cartridge::fetch_non_steam_cartridge_description(
+        PathBuf::from(mount_point),
+        non_steam_id,
+        steam_app_id,
+    )
+    .await
+}
+
+/// Same as `fetch_cartridge_screenshots`, for a non-Steam shortcut — see
+/// `fetch_non_steam_cartridge_description` for the id split.
+#[tauri::command]
+pub async fn fetch_non_steam_cartridge_screenshots(
+    state: State<'_, SharedState>,
+    non_steam_id: u64,
+    mount_point: String,
+) -> Result<(), String> {
+    let steam_app_id = {
+        let s = state.lock().map_err(|e| e.to_string())?;
+        s.non_steam
+            .iter()
+            .find(|g| g.id == non_steam_id)
+            .and_then(|g| g.steam_app_id)
+    };
+    let Some(steam_app_id) = steam_app_id else {
+        return Ok(());
+    };
+    cartridge::fetch_non_steam_cartridge_screenshots(
+        PathBuf::from(mount_point),
+        non_steam_id,
+        steam_app_id,
+    )
+    .await
+}
+
+/// Same as `fetch_cartridge_trailer`, for a non-Steam shortcut — see
+/// `fetch_non_steam_cartridge_description` for the id split. Opt-in, same
+/// as the Steam/GOG variants: only called when "Preparar launcher"'s
+/// trailer toggle is checked.
+#[tauri::command]
+pub async fn fetch_non_steam_cartridge_trailer(
+    state: State<'_, SharedState>,
+    non_steam_id: u64,
+    mount_point: String,
+) -> Result<(), String> {
+    let steam_app_id = {
+        let s = state.lock().map_err(|e| e.to_string())?;
+        s.non_steam
+            .iter()
+            .find(|g| g.id == non_steam_id)
+            .and_then(|g| g.steam_app_id)
+    };
+    let Some(steam_app_id) = steam_app_id else {
+        return Ok(());
+    };
+    cartridge::fetch_non_steam_cartridge_trailer(
+        PathBuf::from(mount_point),
+        non_steam_id,
+        steam_app_id,
+    )
+    .await
 }
