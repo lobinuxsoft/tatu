@@ -85,6 +85,14 @@ func remove_shortcut(app_id: int) -> bool:
 	var eval := await _evaluate("SteamClient.Apps.RemoveShortcut(%d)" % app_id)
 	return eval["ok"]
 
+## A `SetCustomArtworkForApp` call embeds a whole base64 image in `js_expr` —
+## confirmed live: a single failed/timed-out call logging that in full
+## ballooned a run's log to hundreds of MB. Warnings only ever need enough
+## of the expression to tell which call failed.
+func _truncate_for_log(js_expr: String) -> String:
+	const MAX_LEN := 200
+	return js_expr if js_expr.length() <= MAX_LEN else "%s… (%d chars)" % [js_expr.left(MAX_LEN), js_expr.length()]
+
 func _sleep(seconds: float) -> void:
 	await (Engine.get_main_loop() as SceneTree).create_timer(seconds).timeout
 
@@ -159,6 +167,15 @@ func _evaluate(js_expr: String) -> Dictionary:
 
 	var loop := Engine.get_main_loop() as SceneTree
 	var socket := WebSocketPeer.new()
+	# Godot's own default (65535 bytes) is a Runtime.evaluate call away from
+	# ever mattering for a plain shortcut/name/launch-options string, but
+	# set_custom_artwork's base64 payload for a manual, kept-animated pick
+	# (artwork_search.rs's own MAX_ART_BYTES = 100MB) blows straight through
+	# it — confirmed live: every animated grid/hero application silently
+	# failed with ERR_OUT_OF_MEMORY on send, then a 10s timeout, with zero
+	# indication in Steam itself that anything had gone wrong. Sized for the
+	# same 100MB ceiling, inflated ~1.37x for base64.
+	socket.outbound_buffer_size = 140 * 1024 * 1024
 	if socket.connect_to_url(ws_url) != OK:
 		return {"ok": false, "value": null}
 
@@ -188,7 +205,7 @@ func _evaluate(js_expr: String) -> Dictionary:
 			if result.has("exceptionDetails"):
 				push_warning(
 					"Steam CEF eval failed for `%s`: %s"
-					% [js_expr, JSON.stringify(result["exceptionDetails"])]
+					% [_truncate_for_log(js_expr), JSON.stringify(result["exceptionDetails"])]
 				)
 				return {"ok": false, "value": null}
 			return {"ok": true, "value": (result.get("result", {}) as Dictionary).get("value")}
@@ -197,5 +214,5 @@ func _evaluate(js_expr: String) -> Dictionary:
 		await loop.process_frame
 
 	socket.close()
-	push_warning("Steam CEF: evaluate timed out for `%s`" % js_expr)
+	push_warning("Steam CEF: evaluate timed out for `%s`" % _truncate_for_log(js_expr))
 	return {"ok": false, "value": null}

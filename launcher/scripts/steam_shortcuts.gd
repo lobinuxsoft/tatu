@@ -1,27 +1,52 @@
 class_name SteamShortcuts
 extends RefCounted
-## Builds and persists the GOG side of #209: a Steam Non-Steam shortcut per
-## GOG app on the cartridge, plus whatever SteamGridDB art Tatu's HUB side
-## already cached under assets/<app_id>/, applied via SteamCefClient. Kept
-## out of main.gd — same reasoning as #208's VDF edit having its own file
-## in steam_library.gd, one action flow per file.
+## Builds and persists a Steam Non-Steam shortcut for every GOG (#209) or
+## non-Steam (#236/#329) app on the cartridge — neither ever gets a real
+## Steam library entry from `_launch_via_steam`'s own `libraryfolders.vdf`
+## edit, since neither was ever a Steam-owned install to begin with. Plus
+## whatever SteamGridDB art Tatu's HUB side already cached under
+## assets/<app_id>/, applied via SteamCefClient. Kept out of main.gd — same
+## reasoning as #208's VDF edit having its own file in steam_library.gd,
+## one action flow per file.
 ##
 ## "Steam apps not owned by the destination account" (#209's other stated
 ## case) is deliberately NOT handled here: no verified SteamClient JS call
 ## for ownership exists in either reference project (CapyDeploy's own
-## crates/steam/src/cef.rs or decky-capydeploy's eventPoller.tsx) — this
-## is GOG-only until that's confirmed live.
+## crates/steam/src/cef.rs or decky-capydeploy's eventPoller.tsx).
 
 ## Sibling to the checksummed cartridge marker, never inside it — see
 ## marker.rs's own #209 warning about invalidating markers already in the
 ## wild by hashing a field that didn't exist when they were written.
 const MAP_FILENAME := ".tatu-steam-shortcuts.json"
 
+## Sources that need a Steam shortcut created for them — a real Steam app
+## already gets a library entry for free from `_launch_via_steam`'s own
+## `libraryfolders.vdf` edit, so it's deliberately absent here.
+const SHORTCUT_SOURCES := ["gog", "non_steam"]
+
+## `grid`/`grid_landscape` mirror `save_selected_artwork_sync`'s own Rust-side
+## slot names (artwork_search.rs) — `grid` is always the PORTRAIT pick
+## (`ArtworkSelection::grid_portrait`), `grid_landscape` the wide one. An
+## earlier version of this table mapped `grid` to `ASSET_GRID_LANDSCAPE`
+## and never read `grid_landscape` at all, silently swapping the two
+## orientations in Steam and dropping the landscape pick entirely.
+##
+## `icon`/`ASSET_ICON` is deliberately ABSENT — confirmed live with two
+## throwaway 1x1 PNGs sent back-to-back: `SetCustomArtworkForApp(id, data,
+## "png", ASSET_GRID_LANDSCAPE)` immediately followed by `(..., ASSET_ICON)`
+## left only the ICON one on disk, in the LANDSCAPE slot — Steam's own
+## artwork setter doesn't have a real 5th (icon) destination, asset type 4
+## just clobbers type 3's file. decky-capydeploy's own reference never
+## calls this for icon either — it writes the icon file directly into
+## `config/grid/<id>_icon.<ext>` and patches `shortcuts.vdf`'s icon field
+## by hand instead, a different mechanism entirely (#329 follow-up, not
+## implemented here). Sending it through this call is strictly worse than
+## not sending it — it doesn't set an icon AND it corrupts landscape.
 const ART_TYPES := {
-	"grid": SteamCefClient.ASSET_GRID_LANDSCAPE,
+	"grid": SteamCefClient.ASSET_GRID_PORTRAIT,
+	"grid_landscape": SteamCefClient.ASSET_GRID_LANDSCAPE,
 	"hero": SteamCefClient.ASSET_HERO,
 	"logo": SteamCefClient.ASSET_LOGO,
-	"icon": SteamCefClient.ASSET_ICON,
 }
 const IMAGE_EXTENSIONS := ["png", "jpg", "jpeg", "webp"]
 
@@ -38,29 +63,36 @@ static func save_map(cartridge_root: String, map: Dictionary) -> void:
 	var f := FileAccess.open(cartridge_root.path_join(MAP_FILENAME), FileAccess.WRITE)
 	f.store_string(JSON.stringify(map))
 
-## Applies shortcut + art for every GOG app on the cartridge not already
-## tracked in the mapping file — idempotent across repeated "Add Cartridge"
-## presses. One bad app (missing exe, failed AddShortcut) is skipped, never
-## blocks the rest.
-static func apply_gog_apps(client: SteamCefClient, cartridge_root: String, apps: Array) -> void:
+## Applies shortcut + art for every GOG/non-Steam app on the cartridge not
+## already tracked in the mapping file — idempotent across repeated "Add
+## Cartridge" presses. One bad app (missing exe, failed AddShortcut) is
+## skipped, never blocks the rest.
+static func apply_shortcuts(client: SteamCefClient, cartridge_root: String, apps: Array) -> void:
 	var map := load_map(cartridge_root)
 	var changed := false
 	for app in apps:
 		var app_dict: Dictionary = app
-		if String(app_dict.get("source", "steam")) != "gog":
+		if String(app_dict.get("source", "steam")) not in SHORTCUT_SOURCES:
 			continue
 		var app_id := int(app_dict.get("app_id", 0))
 		if map.has(str(app_id)):
 			continue
+		var app_name := String(app_dict.get("name", "?"))
 		var exe_relative := String(app_dict.get("exe_path", ""))
 		if exe_relative.is_empty():
+			push_warning("Steam shortcut skipped for \"%s\": no exe_path on the marker" % app_name)
 			continue
 
 		var exe_path := cartridge_root.path_join(exe_relative)
 		var steam_app_id := await client.add_shortcut(
-			String(app_dict.get("name", "?")), exe_path, exe_path.get_base_dir()
+			app_name, exe_path, exe_path.get_base_dir()
 		)
 		if steam_app_id == 0:
+			# `add_shortcut` already pushed the specific CDP failure (no debug
+			# tabs, exception, timeout) via `_evaluate` — this just marks
+			# which app that failure belonged to, since the loop otherwise
+			# swallows it with no way to tell which of several apps failed.
+			push_warning("Steam shortcut failed for \"%s\": AddShortcut returned 0" % app_name)
 			continue
 		if exe_path.get_extension().to_lower() == "exe":
 			await client.specify_compat_tool(steam_app_id, "proton_experimental")
@@ -83,10 +115,13 @@ static func _apply_art(
 			steam_app_id, Marshalls.raw_to_base64(bytes), ART_TYPES[art_type]
 		)
 
-## `assets/<app_id>/<type>.<ext>` — same layout main.gd's own
-## `_grid_art_path` already reads for `grid`; hero/logo/icon aren't fetched
-## by Tatu's HUB side yet (#209 follow-up), so those two just find nothing
-## and get skipped until that pipeline exists.
+## `assets/<app_id>/<type>.<ext>` — the RAW pick Tatu's HUB side cached
+## (artwork_search.rs's own `grid`/`grid_landscape`/`hero`/`logo` slots),
+## deliberately NOT `main.gd::_grid_art_path`'s `card.<ext>` — that one is a
+## static-only substitute for THIS launcher's own card, useless (and
+## sometimes even absent) for Steam's shortcut art, which can render an
+## animated pick natively. GOG's auto-pick only ever writes `grid`, so the
+## other three just find nothing and get skipped for those apps.
 static func _art_path(cartridge_root: String, app_id: int, art_type: String) -> String:
 	var dir := cartridge_root.path_join("assets").path_join(str(app_id))
 	for ext in IMAGE_EXTENSIONS:
