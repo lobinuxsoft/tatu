@@ -1572,7 +1572,7 @@ func _start_steam(steam_dir: String) -> void:
 		OS.create_process(steam_dir.path_join("steam.sh"), [])
 
 func _tatu_local_dir() -> String:
-	return OS.get_environment("HOME").path_join(".local/share/tatu")
+	return OS.get_environment("HOME").path_join("tatu")
 
 ## Matches umu-run's own resolution of UMU_LOCAL when UMU_FOLDERS_PATH is
 ## set (umu/umu_consts.py): `<UMU_FOLDERS_PATH>/umu`.
