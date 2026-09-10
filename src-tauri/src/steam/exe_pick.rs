@@ -98,6 +98,35 @@ fn exe_from_appinfo(app_id: u64) -> Option<String> {
         .map(|s| s.replace('\\', "/"))
 }
 
+/// `appinfo/common/type` — Valve's own classification for this app:
+/// `"Game"`, but also `"Tool"` (Proton, Steam Linux Runtime), `"Config"`,
+/// `"Application"`, `"DLC"`. Used to keep a compat tool Steam happened to
+/// install onto a cartridge (to run some OTHER game on it) out of the
+/// marker's own app list (#236 follow-up, live-reported: Proton Experimental
+/// and Steam Linux Runtime showing up as "juegos" with no DRM/exe to speak
+/// of). `None` (lookup failed, app not cached yet) is deliberately treated
+/// as "assume it's a game" by every caller — the marker already worked
+/// this way for every app before this existed, and a lookup miss shouldn't
+/// start silently dropping real games. Same self-contained load+parse as
+/// `exe_from_appinfo` above — `steam_vdf_parser::Value` borrows from its
+/// own local `bytes`, so the two can't share a helper that returns a
+/// navigated-into `Value` without fighting that borrow.
+pub(crate) fn app_common_type(app_id: u64) -> Option<String> {
+    let steam_dir = steam_install_dir()?;
+    let path = steam_dir.join("appcache").join("appinfo.vdf");
+    let bytes = std::fs::read(path).ok()?;
+    let vdf = parse_appinfo(&bytes).ok()?;
+    let root = vdf.as_obj()?;
+    let app = root.get(&app_id.to_string())?.as_obj()?;
+    app.get("appinfo")?
+        .as_obj()?
+        .get("common")?
+        .as_obj()?
+        .get("type")?
+        .as_str()
+        .map(str::to_string)
+}
+
 /// Same absent-oslist-means-neutral convention `disk.rs`'s
 /// `depot_matches_platform` already uses for depots — a launch entry with
 /// no `config.oslist` at all applies to every platform.

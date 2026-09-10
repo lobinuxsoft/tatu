@@ -213,6 +213,18 @@ document.getElementById("gogContent").addEventListener("click", e => {
     .catch(e => console.error("open_detail_window failed", e));
 });
 
+// Same detail-window mechanism as Steam/GOG above (#328) — the SteamAppID
+// field + cartridge-copy button live inside it now, not on the row.
+document.getElementById("nsContent").addEventListener("click", e => {
+  if (e.target.type === "checkbox") return;
+  const tr = e.target.closest("tr");
+  if (!tr) return;
+  const cb = tr.querySelector("input[data-id][data-list='nonsteam']");
+  if (!cb) return;
+  invoke("open_detail_window", { appId: parseInt(cb.dataset.id, 10), source: "non_steam" })
+    .catch(e => console.error("open_detail_window failed", e));
+});
+
 // The detail window fills the DRM / HowLongToBeat / achievement caches for
 // whichever game is open there. Re-read state so the list behind it reflects
 // what was just fetched instead of going stale until the next sync.

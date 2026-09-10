@@ -41,3 +41,49 @@
 .drive-tag { font-size: 0.68rem; padding: 0.1rem 0.4rem; border-radius: var(--r-sm); }
 .drive-tag-ready { background: var(--success-bg-soft); color: var(--success); }
 .drive-tag-blank { background: var(--bg-2); color: var(--fg-dim); }
+
+/* Art picker (#328, ported UX from capydeploy hub's ArtworkSelector) — its
+   own tab on the detail window, its own inner tab bar (Capsule/Wide/Hero/
+   Logo/Icon), kept apart from `.detail-tabs`/`.detail-tab` (the outer Info/
+   Logros switcher) so the two tab bars never share a selector and fight
+   each other. */
+.art-search-row { display: flex; gap: 0.5rem; margin-bottom: 0.7rem; }
+.art-search-row input { flex: 1; background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--r-sm); color: var(--fg); padding: 0.4rem 0.6rem; font-size: 0.85rem; }
+.art-search-results { max-height: 160px; overflow-y: auto; margin-bottom: 0.7rem; }
+.art-tabs-row { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border-subtle); margin-bottom: 0.7rem; }
+.art-tabs { display: flex; gap: 0.3rem; }
+.art-tab { padding: 0.4rem 0.8rem; font-size: 0.78rem; color: var(--fg-dim); cursor: pointer; border-bottom: 2px solid transparent; }
+.art-tab:hover { color: var(--fg); }
+.art-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+/* Filters panel (#328) — a "Filters" button opens this, edits are a draft
+   until Aplicar, same shape as capydeploy's own FiltersModal.svelte. */
+.art-filters-panel { border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--bg-panel); padding: 0.7rem 0.8rem; margin-bottom: 0.7rem; }
+.art-filters-panel.hidden { display: none; }
+.art-filters-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--fg-dim); margin-bottom: 0.4rem; }
+.art-filters-row { display: flex; gap: 1.2rem; }
+/* Pill switch, not a bare checkbox — matches capydeploy's Toggle look. */
+.art-toggle { display: flex; align-items: center; gap: 0.5rem; font-size: 0.82rem; color: var(--fg); cursor: pointer; }
+.art-toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
+.art-toggle-track { position: relative; width: 2rem; height: 1.1rem; border-radius: 999px; background: var(--bg-3); border: 1px solid var(--border); transition: background var(--t-fast); flex-shrink: 0; }
+.art-toggle-track::after { content: ""; position: absolute; top: 1px; left: 1px; width: 0.9rem; height: 0.9rem; border-radius: 50%; background: var(--fg-dim); transition: transform var(--t-fast), background var(--t-fast); }
+.art-toggle input:checked + .art-toggle-track { background: var(--accent); border-color: var(--accent); }
+.art-toggle input:checked + .art-toggle-track::after { transform: translateX(0.9rem); background: var(--bg-panel); }
+/* Scrolls on its own, fixed height — the picks row + Guardar/Limpiar above
+   this (see `artworkTabHtml()`) stay on-screen no matter how far down the
+   grid goes (DOOM alone returns 380 capsules across "Cargar más" pages). */
+.art-grid-scroll { max-height: 46vh; overflow-y: auto; border: 1px solid var(--border-subtle); border-radius: var(--r-sm); padding: 0.6rem; }
+.art-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 0.6rem; align-items: start; min-height: 120px; }
+.art-thumb { position: relative; border: 2px solid var(--border-subtle); border-radius: var(--r-sm); overflow: hidden; cursor: pointer; transition: border-color var(--t-fast); background: var(--bg-panel); }
+.art-thumb:hover { border-color: var(--accent); }
+.art-thumb.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent) inset; }
+/* Real ratio, not a forced square — same lesson `.card-img` already
+   documents: capsule is portrait, hero is a wide banner, letterboxing
+   either into a square just makes them small and padded. */
+.art-thumb img, .art-thumb video { width: 100%; height: auto; display: block; }
+.art-anim-badge { position: absolute; top: 0.3rem; left: 0.3rem; background: var(--warning); color: #000; font-size: 0.6rem; font-weight: 700; padding: 0.05rem 0.3rem; border-radius: var(--r-sm); letter-spacing: 0.03em; }
+.art-load-more { display: block; margin: 0.7rem auto 0; }
+.art-selected-row { display: flex; gap: 0.6rem; margin-top: 0.8rem; flex-wrap: wrap; }
+.art-selected-slot { display: flex; flex-direction: column; align-items: center; gap: 0.25rem; }
+.art-selected-slot span { font-size: 0.65rem; color: var(--fg-dim); text-transform: uppercase; }
+.art-selected-slot img { width: 64px; height: 64px; object-fit: cover; border-radius: var(--r-sm); border: 1px solid var(--border); }
+.art-selected-slot .art-empty { width: 64px; height: 64px; border-radius: var(--r-sm); border: 1px dashed var(--border); }
