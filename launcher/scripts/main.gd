@@ -170,6 +170,11 @@ var _copying := false
 var _source_menu: Control
 var _source_menu_options: Array[Label] = []
 var _source_menu_selected := 0
+# Godot's own FileDialog, not a native OS one (#335) — a native dialog
+# expects mouse/keyboard, breaking the gamepad-only navigation every other
+# screen in this launcher already has; FileDialog is a plain Control tree,
+# so ui_up/down/accept already move focus through it for free.
+var _folder_dialog: FileDialog
 var _scroll_tween: Tween
 var _panel_content_width := 0.0
 
@@ -526,7 +531,7 @@ func _build_layout() -> void:
 	menu_box.alignment = BoxContainer.ALIGNMENT_CENTER
 	menu_box.add_theme_constant_override("separation", 12)
 	menu_box.set_anchors_preset(Control.PRESET_CENTER)
-	for i in 2:
+	for i in 3:
 		var option := Label.new()
 		option.add_theme_font_override("font", load(FONT_BODY))
 		option.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -535,6 +540,15 @@ func _build_layout() -> void:
 		_source_menu_options.append(option)
 		menu_box.add_child(option)
 	_source_menu.add_child(menu_box)
+
+	# #335: lets "Copiar a carpeta local"/"Copiar a carpeta de Steam" target
+	# a disk other than the hardcoded default, for when that one's full.
+	_folder_dialog = FileDialog.new()
+	_folder_dialog.file_mode = FileDialog.FILE_MODE_OPEN_DIR
+	_folder_dialog.access = FileDialog.ACCESS_FILESYSTEM
+	_folder_dialog.size = Vector2i(900, 600)
+	_folder_dialog.title = "Elegí dónde instalar"
+	add_child(_folder_dialog)
 	add_child(_source_menu)
 
 	# Shown while _update_background's read is still going — a slow USB/NTFS
@@ -901,29 +915,35 @@ func _on_launch_requested() -> void:
 		return
 
 	var source := String(app.get("source", "steam"))
-	await _launch_via_proton(app_id, app_name, _resolved_exe_path(exe_relative, source), source)
+	await _launch_via_proton(app_id, app_name, _resolved_exe_path(exe_relative, source, app_id), source)
 
 ## Launch never copies anything itself (#300 moved that to the S/X menu,
 ## see _open_source_menu below) — it only ever picks whichever copy of the
-## game already exists. A Steam-sourced game copied to the real Steam
-## library ("Copiar a carpeta de Steam") runs from there; a GOG or non-Steam
-## game copied to Tatu's own local cache ("Copiar a carpeta local") runs from
-## there — neither has a Steam appmanifest to satisfy, so they share the same
-## local-cache destination; anything never copied runs straight off the
-## cartridge, same as before this existed.
-func _resolved_exe_path(exe_relative: String, source: String) -> String:
+## game already exists. A Steam-sourced game copied to a real Steam library
+## ("Copiar a carpeta de Steam") runs from there; a GOG or non-Steam game
+## copied to a local cache ("Copiar a carpeta local") runs from there —
+## neither has a Steam appmanifest to satisfy, so both use the same
+## "wherever it landed" resolution; anything never copied runs straight off
+## the cartridge, same as before this existed.
+##
+## #335 lets either copy target a user-chosen destination instead of the
+## hardcoded default, so "wherever it landed" now means: for GOG/non-Steam,
+## whatever `LocalInstallRoots` has on file for this app_id (falls back to
+## the old hardcoded default for every copy made before #335 existed); for
+## Steam, ANY library `libraryfolders.vdf` lists — Steam's own file is
+## already the per-machine registry of every destination a #335 pick could
+## have registered, so there's no separate map to keep in sync with it.
+func _resolved_exe_path(exe_relative: String, source: String, app_id: int) -> String:
 	var root_segments := 2 if source in SteamShortcuts.SHORTCUT_SOURCES else 3
 	var install_rel := _install_root_relative(exe_relative, root_segments)
 	if source in SteamShortcuts.SHORTCUT_SOURCES:
-		var local_root := _tatu_local_dir().path_join(install_rel)
-		if FileAccess.file_exists(local_root.path_join(LOCAL_COPY_DONE_FILENAME)):
-			return _tatu_local_dir().path_join(exe_relative)
+		var local_root := LocalInstallRoots.get_root(app_id, _tatu_local_dir())
+		if FileAccess.file_exists(local_root.path_join(install_rel).path_join(LOCAL_COPY_DONE_FILENAME)):
+			return local_root.path_join(exe_relative)
 	else:
-		var steam_dir := _steam_install_dir()
-		if not steam_dir.is_empty():
-			var real_root := steam_dir.path_join(install_rel)
-			if FileAccess.file_exists(real_root.path_join(LOCAL_COPY_DONE_FILENAME)):
-				return steam_dir.path_join(exe_relative)
+		for library in _all_steam_libraries():
+			if FileAccess.file_exists(library.path_join(install_rel).path_join(LOCAL_COPY_DONE_FILENAME)):
+				return library.path_join(exe_relative)
 	return _cartridge_root().path_join(exe_relative)
 
 ## Shows the action-status overlay with `text` for `seconds`, then hides it —
@@ -935,6 +955,45 @@ func _show_status(text: String, seconds: float) -> void:
 	_action_overlay.visible = true
 	await get_tree().create_timer(seconds).timeout
 	_action_overlay.visible = false
+
+## Opens the folder dialog and waits for either a real choice or a cancel —
+## empty string either way means "the player backed out, don't copy
+## anything" (#335). `current_dir` re-opens wherever they last looked
+## instead of always starting from Godot's own default (usually `res://`
+## on this platform, useless for picking a real disk location).
+##
+## `dir_selected` never fires on cancel — a plain `await` on it alone would
+## hang forever if the player backs out — so both outcomes are raced via
+## one-shot connections instead, whichever fires first ends the wait.
+func _pick_folder(current_dir: String) -> String:
+	if not current_dir.is_empty() and DirAccess.dir_exists_absolute(current_dir):
+		_folder_dialog.current_dir = current_dir
+	_folder_dialog.popup_centered()
+
+	# A plain local bool/String reassigned INSIDE these lambdas would never
+	# be visible out here — GDScript lambdas capture outer locals by value,
+	# not by reference, confirmed live (the lambda's own `print` showed the
+	# right path every time, but the loop below span forever regardless,
+	# since ITS OWN copy of `done` never changed). A Dictionary sidesteps
+	# this: the capture is still by value, but the value is a reference to
+	# the SAME underlying Dictionary object, so mutating a key through it
+	# is visible on both sides.
+	var state := {"chosen": "", "done": false}
+	var on_dir := func(path: String) -> void:
+		state.chosen = path
+		state.done = true
+	var on_cancel := func() -> void:
+		state.done = true
+	_folder_dialog.dir_selected.connect(on_dir, CONNECT_ONE_SHOT)
+	_folder_dialog.canceled.connect(on_cancel, CONNECT_ONE_SHOT)
+	_folder_dialog.close_requested.connect(on_cancel, CONNECT_ONE_SHOT)
+	while not state.done:
+		await get_tree().process_frame
+
+	for pair in [[_folder_dialog.dir_selected, on_dir], [_folder_dialog.canceled, on_cancel], [_folder_dialog.close_requested, on_cancel]]:
+		if pair[0].is_connected(pair[1]):
+			pair[0].disconnect(pair[1])
+	return String(state.chosen)
 
 ## Single-quotes `s` for `/bin/sh -c`, escaping any embedded single quote —
 ## paths here come from the marker/cartridge layout, not untrusted input,
@@ -1014,26 +1073,30 @@ func _fix_copied_permissions(dest_dir: String) -> void:
 		OS.execute("restorecon", ["-R", dest_dir])
 
 ## Copies a GOG- or non-Steam-sourced game's whole install root from the
-## cartridge onto Tatu's own local cache (#300/#236, "Copiar a carpeta local"
-## in the source menu below) — neither has a real Steam appmanifest to
+## cartridge onto a local cache (#300/#236/#335, "Copiar a carpeta local" in
+## the source menu below) — neither has a real Steam appmanifest to
 ## satisfy, so a plain file copy is the whole feature; running it off a slow
 ## USB/SD cartridge as the live storage device can otherwise stutter
-## mid-game. Mirrors the same
-## `steamapps/common/<name>` relative layout under Tatu's own local dir, so
-## nothing downstream (install_dir/CWD, Goldberg's steam_appid.txt lookup)
-## needs to know the exe moved. Blocks all input for the whole duration
-## (`_copying`) — a copy interrupted by closing the launcher, unplugging the
-## cartridge, or suspending the PC leaves a truncated install behind. Falls
-## back to the cartridge's own copy — slower, but still playable — if there
-## isn't enough local disk space or the copy itself fails.
-func _ensure_local_copy(exe_relative: String, app_name: String) -> String:
+## mid-game. `local_root` is `_tatu_local_dir()` for the plain menu option,
+## or a #335 user-chosen destination (already saved to `LocalInstallRoots`
+## by the caller before this runs) — either way this function itself
+## doesn't care which, it just copies into whatever root it's given.
+## Mirrors the same `steamapps/common/<name>` relative layout under that
+## root, so nothing downstream (install_dir/CWD, Goldberg's
+## steam_appid.txt lookup) needs to know the exe moved. Blocks all input
+## for the whole duration (`_copying`) — a copy interrupted by closing the
+## launcher, unplugging the cartridge, or suspending the PC leaves a
+## truncated install behind. Falls back to the cartridge's own copy —
+## slower, but still playable — if there isn't enough local disk space or
+## the copy itself fails.
+func _ensure_local_copy(exe_relative: String, app_name: String, local_root: String) -> String:
 	var cartridge_exe := _cartridge_root().path_join(exe_relative)
 	# Only ever called for GOG/non-Steam (see _confirm_source_menu below) —
 	# both lay out as `<GOG|NON-STEAM>/<name>/...`, always 2 root segments.
 	var install_rel := _install_root_relative(exe_relative, 2)
 	var source_dir := _cartridge_root().path_join(install_rel)
-	var dest_dir := _tatu_local_dir().path_join(install_rel)
-	var local_exe := _tatu_local_dir().path_join(exe_relative)
+	var dest_dir := local_root.path_join(install_rel)
+	var local_exe := local_root.path_join(exe_relative)
 	var done_marker := dest_dir.path_join(LOCAL_COPY_DONE_FILENAME)
 	if FileAccess.file_exists(done_marker):
 		return local_exe
@@ -1059,7 +1122,7 @@ func _ensure_local_copy(exe_relative: String, app_name: String) -> String:
 		OS.execute("rm", ["-rf", dest_dir])
 
 	var total_bytes := _dir_size_bytes(source_dir)
-	var free_bytes := _free_bytes_at(_tatu_local_dir())
+	var free_bytes := _free_bytes_at(local_root)
 	if total_bytes > 0 and free_bytes >= 0 and free_bytes < total_bytes:
 		push_warning(
 			"Not enough local disk space to copy %s (%d needed, %d free) — playing from the cartridge instead" \
@@ -1116,18 +1179,21 @@ func _ensure_local_copy(exe_relative: String, app_name: String) -> String:
 
 ## Copies a Steam-sourced game's install root, AND its real
 ## `appmanifest_<app_id>.acf` (#300, "Copiar a carpeta de Steam" in the
-## source menu below), into this machine's default Steam library — never
-## fabricated: Steam itself already wrote that exact .acf (real depot IDs,
-## buildid, SizeOnDisk) the moment this game was installed onto the
-## cartridge, so copying it byte-for-byte alongside the files is what makes
-## the real Steam client recognize the copy as already installed and
-## verified, no re-download or "verify integrity" needed. A no-op appmanifest
-## invented from scratch instead would risk Steam flagging it corrupt and
-## overwriting/deleting these very files. Restarts Steam at the end so it
-## actually notices the new local install — same restart `_launch_via_steam`
-## already does for the same reason. Same input-blocking/progress-bar
-## mechanics as `_ensure_local_copy` above.
-func _copy_to_real_steam_library(app_id: int, app_name: String, exe_relative: String) -> void:
+## source menu below), into a Steam library — never fabricated: Steam
+## itself already wrote that exact .acf (real depot IDs, buildid,
+## SizeOnDisk) the moment this game was installed onto the cartridge, so
+## copying it byte-for-byte alongside the files is what makes the real
+## Steam client recognize the copy as already installed and verified, no
+## re-download or "verify integrity" needed. A no-op appmanifest invented
+## from scratch instead would risk Steam flagging it corrupt and
+## overwriting/deleting these very files. `dest_root` is Steam's own
+## default install dir for the plain menu option, or a #335 user-chosen
+## folder — if it's not already a registered library, this registers it
+## (same mechanism `_launch_via_steam` uses for the cartridge itself) as
+## part of the same restart already needed for Steam to notice the new
+## install. Same input-blocking/progress-bar mechanics as
+## `_ensure_local_copy` above.
+func _copy_to_real_steam_library(app_id: int, app_name: String, exe_relative: String, dest_root: String) -> void:
 	var steam_dir := _steam_install_dir()
 	if steam_dir.is_empty():
 		await _show_status("No se encontró una instalación de Steam en esta máquina", 2.5)
@@ -1137,10 +1203,10 @@ func _copy_to_real_steam_library(app_id: int, app_name: String, exe_relative: St
 	# `steamapps/common/<name>/...`, always 3 root segments.
 	var install_rel := _install_root_relative(exe_relative, 3)
 	var source_dir := _cartridge_root().path_join(install_rel)
-	var dest_dir := steam_dir.path_join(install_rel)
+	var dest_dir := dest_root.path_join(install_rel)
 	var manifest_name := "appmanifest_%d.acf" % app_id
 	var manifest_src := _cartridge_root().path_join("steamapps").path_join(manifest_name)
-	var manifest_dst := steam_dir.path_join("steamapps").path_join(manifest_name)
+	var manifest_dst := dest_root.path_join("steamapps").path_join(manifest_name)
 	var done_marker := dest_dir.path_join(LOCAL_COPY_DONE_FILENAME)
 
 	if not FileAccess.file_exists(manifest_src):
@@ -1167,7 +1233,7 @@ func _copy_to_real_steam_library(app_id: int, app_name: String, exe_relative: St
 		OS.execute("rm", ["-rf", dest_dir])
 
 	var total_bytes := _dir_size_bytes(source_dir)
-	var free_bytes := _free_bytes_at(steam_dir)
+	var free_bytes := _free_bytes_at(dest_root)
 	if total_bytes > 0 and free_bytes >= 0 and free_bytes < total_bytes:
 		_copying = false
 		_action_progress.visible = false
@@ -1214,6 +1280,8 @@ func _copy_to_real_steam_library(app_id: int, app_name: String, exe_relative: St
 	_action_overlay.visible = true
 	await get_tree().process_frame
 	await _stop_steam(steam_dir)
+	if dest_root != steam_dir:
+		_register_steam_library(steam_dir, dest_root)
 	_start_steam(steam_dir)
 	await _show_status("%s copiado — Steam debería reconocerlo como instalado" % app_name, 3.0)
 
@@ -1375,17 +1443,7 @@ func _launch_via_steam() -> void:
 	if OS.get_name() != "Windows":
 		await _ensure_ntfs_symlinks()
 
-	for rel in ["config/libraryfolders.vdf", "steamapps/libraryfolders.vdf"]:
-		var path := steam_dir.path_join(rel)
-		if not FileAccess.file_exists(path):
-			continue
-		var content := FileAccess.get_file_as_string(path)
-		var updated: String = load("res://scripts/steam_library.gd").add_library(content, mount_point)
-		if updated == content:
-			continue
-		var f := FileAccess.open(path, FileAccess.WRITE)
-		f.store_string(updated)
-		f.close()
+	_register_steam_library(steam_dir, mount_point)
 
 	_start_steam(steam_dir)
 	await _apply_steam_shortcuts()
@@ -1517,15 +1575,36 @@ func _steam_install_dir() -> String:
 func _is_real_prefix(pfx_path: String) -> bool:
 	return FileAccess.file_exists(pfx_path.path_join("system.reg"))
 
-## Every `compatdata/<app_id>/pfx` Steam has ever populated for real, across
-## every library folder this machine's Steam knows about (not just the
-## cartridge) — first one found wins, `_launch_via_proton` only calls this
-## once its own cartridge-local prefix already failed `_is_real_prefix`.
-func _find_real_prefix(app_id: int) -> String:
+## Adds `path` as a Steam library folder, if it isn't one already — Steam
+## itself owns and rewrites `libraryfolders.vdf` while running, so the
+## caller closing Steam first is required, same as every other direct edit
+## of a Steam config file in this launcher. Shared by `_launch_via_steam`
+## (registering the cartridge itself, #208) and #335's own custom-copy
+## destination — same file, same mechanism either way.
+func _register_steam_library(steam_dir: String, path: String) -> void:
+	for rel in ["config/libraryfolders.vdf", "steamapps/libraryfolders.vdf"]:
+		var vdf_path := steam_dir.path_join(rel)
+		if not FileAccess.file_exists(vdf_path):
+			continue
+		var content := FileAccess.get_file_as_string(vdf_path)
+		var updated: String = load("res://scripts/steam_library.gd").add_library(content, path)
+		if updated == content:
+			continue
+		var f := FileAccess.open(vdf_path, FileAccess.WRITE)
+		f.store_string(updated)
+		f.close()
+
+## Every library folder this machine's Steam knows about — its own default
+## install dir plus everything `libraryfolders.vdf` lists (the cartridge,
+## and #335's user-chosen destinations once registered via
+## `SteamLibrary.add_library`). Shared by `_find_real_prefix` below and
+## `_resolved_exe_path`'s own multi-library scan for an already-copied
+## install, so neither has to track separately WHICH library a #335 pick
+## landed in — Steam's own file already is that registry.
+func _all_steam_libraries() -> Array[String]:
 	var steam_dir := _steam_install_dir()
 	if steam_dir.is_empty():
-		return ""
-
+		return []
 	var paths: Array[String] = [steam_dir]
 	for rel in ["config/libraryfolders.vdf", "steamapps/libraryfolders.vdf"]:
 		var path := steam_dir.path_join(rel)
@@ -1534,7 +1613,14 @@ func _find_real_prefix(app_id: int) -> String:
 		for p in load("res://scripts/steam_library.gd").registered_paths(FileAccess.get_file_as_string(path)):
 			if not paths.has(p):
 				paths.append(p)
+	return paths
 
+## Every `compatdata/<app_id>/pfx` Steam has ever populated for real, across
+## every library folder this machine's Steam knows about (not just the
+## cartridge) — first one found wins, `_launch_via_proton` only calls this
+## once its own cartridge-local prefix already failed `_is_real_prefix`.
+func _find_real_prefix(app_id: int) -> String:
+	var paths := _all_steam_libraries()
 	var cartridge := _cartridge_root()
 	for library in paths:
 		if library == cartridge:
@@ -1671,6 +1757,10 @@ func _open_source_menu() -> void:
 	else:
 		_source_menu_options[0].text = "Add Cartridge"
 		_source_menu_options[1].text = "Copiar a carpeta de Steam"
+	# #335: same copy either option 1 already does, just to a folder the
+	# player picks first instead of the hardcoded default — for when that
+	# default disk is full or they'd rather use a different drive.
+	_source_menu_options[2].text = "Elegir carpeta e instalar"
 	_source_menu_selected = 0
 	_update_source_menu_highlight()
 	_source_menu.visible = true
@@ -1684,6 +1774,7 @@ func _confirm_source_menu() -> void:
 	var app: Dictionary = _apps[_selected_index]
 	var source := String(app.get("source", "steam"))
 	var app_name := String(app.get("name", "el juego"))
+	var app_id := int(app.get("app_id", 0))
 
 	if _source_menu_selected == 0:
 		await _launch_via_steam()
@@ -1694,8 +1785,19 @@ func _confirm_source_menu() -> void:
 		await _show_status("%s no tiene Goldberg inyectado todavía" % app_name, 2.5)
 		return
 
+	var chosen_root := ""
+	if _source_menu_selected == 2:
+		var start_dir := _tatu_local_dir() if source in SteamShortcuts.SHORTCUT_SOURCES else _steam_install_dir()
+		chosen_root = await _pick_folder(start_dir)
+		if chosen_root.is_empty():
+			return
+
 	if source in SteamShortcuts.SHORTCUT_SOURCES:
-		await _ensure_local_copy(exe_relative, app_name)
+		var local_root := chosen_root if not chosen_root.is_empty() else _tatu_local_dir()
+		if not chosen_root.is_empty():
+			LocalInstallRoots.set_root(app_id, chosen_root)
+		await _ensure_local_copy(exe_relative, app_name, local_root)
 		await _show_status("%s copiado a disco local" % app_name, 2.5)
 	else:
-		await _copy_to_real_steam_library(int(app.get("app_id", 0)), app_name, exe_relative)
+		var dest_root := chosen_root if not chosen_root.is_empty() else _steam_install_dir()
+		await _copy_to_real_steam_library(app_id, app_name, exe_relative, dest_root)

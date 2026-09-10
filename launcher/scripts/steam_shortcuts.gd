@@ -74,12 +74,13 @@ static func save_map(map: Dictionary) -> void:
 ## skipped, never blocks the rest.
 ##
 ## `resolve_exe` is `main.gd::_resolved_exe_path` bound as a Callable
-## `(exe_relative, source) -> String` — same lookup "Launch" already uses to
-## prefer a local disk copy over the cartridge one, so a shortcut created
-## AFTER "Copiar a carpeta local" finished points at that fast local copy
-## instead of the cartridge (live-reported: the copy finished but Steam had
-## no shortcut for it at all yet — the fix is this call reusing the exact
-## same resolution "Launch" always did, not a second copy step).
+## `(exe_relative, source, app_id) -> String` — same lookup "Launch" already
+## uses to prefer a local/library copy over the cartridge one (including a
+## #335 user-chosen destination), so a shortcut created AFTER "Copiar a
+## carpeta local"/"...de Steam" finished points at that copy instead of the
+## cartridge (live-reported: the copy finished but Steam had no shortcut
+## for it at all yet — the fix is this call reusing the exact same
+## resolution "Launch" always did, not a second copy step).
 static func apply_shortcuts(
 	client: SteamCefClient, cartridge_root: String, apps: Array, resolve_exe: Callable
 ) -> void:
@@ -99,7 +100,7 @@ static func apply_shortcuts(
 			continue
 
 		var source := String(app_dict.get("source", "steam"))
-		var exe_path: String = resolve_exe.call(exe_relative, source)
+		var exe_path: String = resolve_exe.call(exe_relative, source, app_id)
 		var steam_app_id := await client.add_shortcut(
 			app_name, exe_path, exe_path.get_base_dir()
 		)
