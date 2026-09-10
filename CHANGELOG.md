@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.14.0](https://github.com/lobinuxsoft/tatu/compare/v0.13.5...v0.14.0) (2026-09-10)
+
+
+### Features
+
+* **cartridge:** copy non-Steam games to NON_STEAM/ with manual art ([#327](https://github.com/lobinuxsoft/tatu/issues/327), [#328](https://github.com/lobinuxsoft/tatu/issues/328)) ([2307ff6](https://github.com/lobinuxsoft/tatu/commit/2307ff629a2dd35ff49c4caa4a1e2fdca2225b47))
+* **cartridge:** non-Steam games on the cartridge — copy, art, Steam shortcut ([#236](https://github.com/lobinuxsoft/tatu/issues/236)) ([3a69feb](https://github.com/lobinuxsoft/tatu/commit/3a69feb60c620e03628d916fcd2e0e0587f0954a))
+* **launcher:** let the player choose where to install/copy a game ([54e5383](https://github.com/lobinuxsoft/tatu/commit/54e5383b1b9202ceb647c274986b424d5aa1fcbc))
+* **launcher:** let the player choose where to install/copy a game ([#335](https://github.com/lobinuxsoft/tatu/issues/335)) ([aac215d](https://github.com/lobinuxsoft/tatu/commit/aac215d4f2bb0dc74583fe16a7a6ced22e747cf1))
+* **launcher:** register Steam shortcuts for non-Steam apps too ([#329](https://github.com/lobinuxsoft/tatu/issues/329)) ([aab3d5a](https://github.com/lobinuxsoft/tatu/commit/aab3d5adcf0b1bfec7e7d3a33aa9e3c1d9f9d6d1))
+
+
+### Bug Fixes
+
+* disable VA-API to avoid WebKitGTK video decode crash ([1fc6c04](https://github.com/lobinuxsoft/tatu/commit/1fc6c04e8f41d7d1154f2aecc854060a141c8f0d))
+* **launcher:** copy the real install root, not one level too deep ([d2f0e4a](https://github.com/lobinuxsoft/tatu/commit/d2f0e4a897f824019568f5c328508a2ebbab42a9))
+* **launcher:** fix permissions on local copies from the NTFS cartridge ([21f32dd](https://github.com/lobinuxsoft/tatu/commit/21f32dd828ccd9627daae7ccec8bfbf2d7f1ad38))
+* **launcher:** folder picker never returned, hanging on any choice ([f2e3597](https://github.com/lobinuxsoft/tatu/commit/f2e35979430c33cc1c59ddc33fa748d717d9ff11))
+* **launcher:** move Tatu's local dir from ~/.local/share/tatu to ~/tatu ([3572b8c](https://github.com/lobinuxsoft/tatu/commit/3572b8cdaa93e8c726c301ad877119ab2be7ac2d))
+* **launcher:** non-Steam local copy and per-machine shortcut map ([f93ffcf](https://github.com/lobinuxsoft/tatu/commit/f93ffcf730577bf11dff139f34d62f1154404e9e))
+* **launcher:** non-Steam local copy and per-machine shortcut map ([#333](https://github.com/lobinuxsoft/tatu/issues/333)) ([d2b9af8](https://github.com/lobinuxsoft/tatu/commit/d2b9af8ed8639a2153c67f329baa735e5614a7ae))
+* **launcher:** pass app_id to resolve_exe in apply_shortcuts ([3448e33](https://github.com/lobinuxsoft/tatu/commit/3448e33f1d2376054518a0a182f0a6654efdcbf9))
+* **launcher:** restore SELinux context after copying off the cartridge ([150b54a](https://github.com/lobinuxsoft/tatu/commit/150b54addd8f1a6765423c7731913fb8f84a4506))
+* **launcher:** stop Steam gracefully so CDP-created shortcuts persist ([d28941e](https://github.com/lobinuxsoft/tatu/commit/d28941e9fac33671af2976340470af83b95a3911))
+* skip Valve compat tools when syncing installed cartridge apps ([743d3b4](https://github.com/lobinuxsoft/tatu/commit/743d3b40b610e0028e03da75e906f0fb00b877b9))
+
 ## [0.13.5](https://github.com/lobinuxsoft/tatu/compare/v0.13.4...v0.13.5) (2026-09-07)
 
 
