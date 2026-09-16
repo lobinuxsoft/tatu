@@ -34,6 +34,9 @@ pub fn get_state(state: State<'_, SharedState>) -> Result<serde_json::Value, Str
         "gog_connected": s.gog_tokens.is_some(),
         "gog_library": s.gog_library,
         "completed_gog": s.completed_gog,
+        "egs_connected": s.egs_tokens.is_some(),
+        "egs_library": s.egs_library,
+        "completed_egs": s.completed_egs,
     }))
 }
 
@@ -76,6 +79,8 @@ pub fn get_settings(state: State<'_, SharedState>) -> Result<serde_json::Value, 
         // stays in Rust.
         "gog_connected": s.gog_tokens.is_some(),
         "gog_library": s.gog_library,
+        "egs_connected": s.egs_tokens.is_some(),
+        "egs_library": s.egs_library,
     }))
 }
 
@@ -124,6 +129,17 @@ pub fn save_completed_gog(
 ) -> Result<(), String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     s.completed_gog = completed.into_iter().collect();
+    s.save();
+    Ok(())
+}
+
+#[tauri::command]
+pub fn save_completed_egs(
+    completed: Vec<u64>,
+    state: State<'_, SharedState>,
+) -> Result<(), String> {
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    s.completed_egs = completed.into_iter().collect();
     s.save();
     Ok(())
 }

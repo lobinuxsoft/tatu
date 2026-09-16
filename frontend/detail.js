@@ -2,6 +2,7 @@ import { invoke, listen } from "./js/tauri.js";
 import { state } from "./js/state.js";
 import { renderDetail } from "./js/panel/detail.js";
 import { renderGogDetail } from "./js/panel/gog_detail.js";
+import { renderEgsDetail } from "./js/panel/egs_detail.js";
 import { renderNonSteamDetail } from "./js/panel/non_steam_detail.js";
 import { installExternalLinks } from "./js/links.js";
 import { installLightbox } from "./js/panel/lightbox.js";
@@ -64,6 +65,17 @@ async function show(target) {
     }
     state.GOG = [game];
     renderGogDetail(game);
+    return;
+  }
+  if (target.source === "egs") {
+    const game = await invoke("get_egs_game_context", { appId: target.app_id });
+    if (!game) {
+      document.getElementById("detailContent").innerHTML =
+        `<div class="loading">No encontré ese juego en tu biblioteca de Epic Games.</div>`;
+      return;
+    }
+    state.EGS = [game];
+    renderEgsDetail(game);
     return;
   }
   if (target.source === "non_steam") {

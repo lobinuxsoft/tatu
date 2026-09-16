@@ -4,6 +4,7 @@ import { formatBytes } from "./utils.js";
 import { renderSteam } from "./render/steam.js";
 import { renderNonSteam } from "./render/nonsteam.js";
 import { renderGog } from "./render/gog.js";
+import { renderEgs } from "./render/egs.js";
 
 export async function doSync() {
   const btn = document.getElementById("syncBtn");
@@ -191,6 +192,41 @@ export async function doFetchGogLibrary() {
 
   try {
     await invoke("fetch_gog_library");
+  } catch (e) {
+    info.textContent = "Error: " + e;
+    btn.disabled = false; btn.textContent = "Actualizar biblioteca";
+    unlistenProgress(); unlistenDone(); unlistenError();
+  }
+}
+
+// Same shape as doFetchGogLibrary above (#343).
+export async function doFetchEgsLibrary() {
+  const btn = document.getElementById("egsTabSyncBtn");
+  const info = document.getElementById("egsSyncInfo");
+  btn.disabled = true; btn.textContent = "Actualizando...";
+  const games = [];
+
+  const unlistenProgress = await listen("egs_library_progress", e => {
+    const p = e.payload || {};
+    info.textContent = `Resolviendo biblioteca de Epic Games: ${p.current}/${p.total}...`;
+    if (p.game) games.push(p.game);
+  });
+  const unlistenDone = await listen("egs_library_done", e => {
+    const p = e.payload || {};
+    state.EGS = games;
+    renderEgs();
+    info.textContent = `Biblioteca de Epic Games actualizada — ${p.total} juegos`;
+    btn.disabled = false; btn.textContent = "Actualizar biblioteca";
+    unlistenProgress(); unlistenDone(); unlistenError();
+  });
+  const unlistenError = await listen("egs_library_error", e => {
+    info.textContent = "Error: " + e.payload;
+    btn.disabled = false; btn.textContent = "Actualizar biblioteca";
+    unlistenProgress(); unlistenDone(); unlistenError();
+  });
+
+  try {
+    await invoke("fetch_egs_library");
   } catch (e) {
     info.textContent = "Error: " + e;
     btn.disabled = false; btn.textContent = "Actualizar biblioteca";
