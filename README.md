@@ -1,7 +1,7 @@
 # Tatu
 
 <div align="center">
-  <strong>Steam backlog tracker with a native Linux cheat runtime.</strong>
+  <strong>Steam backlog tracker, single-player cheat host, and portable game cartridge.</strong>
 
   [![License](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
   [![Rust](https://img.shields.io/badge/Rust-stable-DEA584?logo=rust)](https://www.rust-lang.org/)
@@ -10,183 +10,42 @@
 
 > **Tatu** = *armadillo* in Guaraní. Sibling project to [Yryvu](https://github.com/lobinuxsoft/yryvu) (vulture, a Git client).
 
-## Overview
-
-Tatu is a desktop application for tracking what is in your Steam backlog and applying single-player cheats to games you own. The cheat layer is a clean-room re-implementation of the CheatEngine Auto-Assembler engine driving a native Linux `ptrace` backend — a Proton game is an ordinary Linux process from the kernel's point of view, so no Wine-side component is involved.
-
-### What Tatu is
+## What Tatu is
 
 - A **backlog tracker** for the games you own on Steam (progress, achievements, trading cards, DRM, size on disk).
-- A **single-player cheat host** that applies CheatEngine-style memory patches to a process you launched yourself.
+- A **single-player cheat host** — a clean-room CheatEngine Auto-Assembler engine driving a native Linux `ptrace` backend, applying `.CT`-table patches to processes you launched yourself.
+- A **portable cartridge**: a removable drive Tatu formats and populates so a game library runs on any machine via a standalone Godot launcher, without that machine needing Tatu installed.
 
-### What Tatu is NOT
+## What Tatu is NOT
 
-- **NOT a piracy tool.** Tatu does not crack DRM, distribute games, or interact with multiplayer state. It only operates on local processes you launched yourself.
-- **NOT a multiplayer cheat.** Online games with anti-cheat (EAC / BattlEye / Vanguard) are explicitly out of scope — Tatu detects and refuses, no bypass attempts.
-- **NOT a Cheat Engine fork.** The engine is a clean re-implementation that consumes `.CT` tables, not a wrapper around `cheatengine.exe`.
-
-### Key Features
-
-- **Steam library integration** — owned games, install state, play time, achievements, trading cards, DRM classification and size on disk.
-- **`.CT` import** — parses existing Cheat Engine tables and surfaces their toggles in the tracker UI.
-- **Native Linux cheat runtime** — `cheat-runtime` drives `process_vm_readv` / `process_vm_writev` and `ptrace`, against native ELF games and Proton games alike.
-- **Orphan-hook recovery** — persistent undo log of every code patch, so an interrupted session can be rolled back cleanly.
+- **NOT a piracy tool.** No DRM cracking, no distribution, no multiplayer interaction. It only operates on local processes you launched yourself.
+- **NOT a multiplayer cheat.** Anti-cheat-protected games (EAC / BattlEye / Vanguard) are explicitly out of scope — detected and refused, no bypass attempts.
+- **NOT a Cheat Engine fork.** A clean re-implementation consuming `.CT` tables, not a wrapper around `cheatengine.exe`.
 
 ## Platform support
 
 | | Linux | Windows |
 |---|---|---|
 | Backlog tracker | ✅ | ✅ |
-| Cheats | ✅ | ❌ hidden |
+| Cheats | ✅ | ❌ hidden ([#181](https://github.com/lobinuxsoft/tatu/issues/181)) |
 
-The tracker is portable. The cheat runtime is not: it is built on `ptrace`, `process_vm_readv`, `/proc/<pid>/maps` and ELF symbol lookup, none of which exist on Windows.
+## Documentation
 
-The engine above that backend already does compile for Windows — `tatu-mem` (the `MemoryAccess` trait, AOB scan, pointer-chain walk, CE address expressions) and `tatu-engine` (Auto-Assembler parser, x86_64 assembler, executor) are OS-agnostic by construction. What is missing is the Win32 sibling of the Linux backend, tracked in [#181](https://github.com/lobinuxsoft/tatu/issues/181).
-
-Until it lands, the Windows build does not register the cheat commands at all and the Cheats tab is not rendered.
-
-## How it works
-
-Tatu reads the library you already own and keeps score. It is not a store and not a launcher: it never buys, downloads or starts a game.
-
-**1. Steam Web API key + Steam ID.** In *Settings*. The key is free and you generate it against your own account at [steamcommunity.com/dev/apikey](https://steamcommunity.com/dev/apikey) — without it Steam will not answer which games you own, so nothing can sync. The Steam ID is detected automatically when the Steam client is installed. Both are stored locally, next to the rest of your data.
-
-**2. Sync.** *Sincronizar* pulls your library: titles, hours played, genre, and whether the game issues trading cards. Only games you **already own** appear — there is no browsing, no wishlist, no catalogue. Each game then opens a detail panel with achievements, cards, a DRM classification (Steam Store + PCGamingWiki) and a HowLongToBeat estimate.
-
-**3. Mark what you finished — or import it.** You can tick games one at a time, but if you already keep a **collection in the Steam client** (say one called `TERMINADOS`), *Importar Terminados* marks every game in it as completed in one pass. That is the fast way in when you have hundreds of games already sorted. Collections are read from the Steam client's local database, so Steam must be installed and the account opened at least once on this machine.
-
-**4. Non-Steam games are tracked separately.** The *Non-Steam* tab reads the shortcuts you added to the Steam client by hand (`shortcuts.vdf`) and lists them with their own progress counter. Steam knows nothing about these, so they have no hours, no achievements and no cards — which is exactly why they are not mixed into the main list. Filling in that missing data by hand is [#186](https://github.com/lobinuxsoft/tatu/issues/186).
-
-**Other actions.** *Escanear tamaño* reads how much disk each installed game takes (local, fast). *Cargar DRM* queries Steam and PCGamingWiki to classify every uncached game — roughly a second each, so the first run is worth leaving to churn.
-
-**Cheats** are Linux-only; see *Platform support* above.
-
-### Where each field comes from
-
-Tatu keeps no database of its own — every field is fetched from a different source at the time you ask for it, which is why some fail independently of the others.
-
-| Field | Source | Requires |
-|---|---|---|
-| Library, hours played | Steam Web API (`GetOwnedGames`) | API key |
-| Achievements | Steam Web API (`GetSchemaForGame` + `GetPlayerAchievements`) | API key + **public profile** |
-| Trading cards | Scraped from your Steam Community gamecards page | **Public profile and inventory** |
-| Badge art | Scraped from Steam Card Exchange | Nothing |
-| Duration (Main / Main+Extra / 100%) | HowLongToBeat | Nothing — community-submitted times |
-| DRM | Steam Store `appdetails` + PCGamingWiki | Nothing |
-| Size on disk | The local Steam client's `libraryfolders.vdf` | Nothing, it is local |
-
-Empty achievements or cards are almost always privacy rather than a bug: Steam answers **403** for a non-public profile, and Tatu surfaces that verbatim. Fix it under *Steam → Profile → Edit profile → Privacy* by setting **Game details** (and the inventory, for cards) to public.
-
-Cards and badges are scraped from HTML, not read from an API, so a layout change upstream breaks them until Tatu is updated. Library, achievements and DRM go through real APIs and are stable.
-
-### Where your data lives
-
-One local file, alongside your API key. Tatu has no server and no account of its own — delete the folder and everything is gone. The exact path is shown in *Settings* and in the *Cómo funciona* tab; see [Configuration](#configuration) for the layout.
-
-## Architecture
-
-```
-┌──────────────────────────────┐
-│        tatu-tracker          │   Tauri 2 + vanilla ES modules
-│  Steam library · .CT import  │
-│  cheat toggles · undo log    │
-└──────────────┬───────────────┘
-               │
-        ┌──────▼───────┐
-        │ tatu-engine  │   CE Auto-Assembler parser + x86_64 assembler
-        └──────┬───────┘   + executor.  OS-agnostic.
-               │
-        ┌──────▼───────┐
-        │  tatu-mem    │   MemoryAccess trait, AOB scan, pointer chains,
-        └──────┬───────┘   CE address expressions.  OS-agnostic.
-               │
-   ┌───────────┴────────────┐
-   │                        │
-┌──▼─────────────┐   ┌──────▼──────────┐
-│ cheat-runtime  │   │   tatu-win      │   #181, not written yet
-│ ptrace backend │   │ Win32 backend   │
-└────────────────┘   └─────────────────┘
-```
-
-| Component | Role |
-|-----------|------|
-| **tatu-tracker** | Desktop app (Tauri 2, `src-tauri/`). Steam library view, `.CT` import, per-game cheat toggles, orphan recovery UI. The frontend under `frontend/` is plain ES modules — no bundler, no framework. |
-| **tatu-mem** | Backend-agnostic memory primitives: the `MemoryAccess` trait plus the pure logic built on it — AOB pattern scan, pointer-chain walk, typed read/write, CE address-expression parser. |
-| **tatu-engine** | Backend-agnostic CE Auto-Assembler engine: script parser, x86_64 assembler (`iced-x86`), and the executor state machine. |
-| **cheat-runtime** | The Linux backend. `process_vm_readv`/`writev`, `ptrace` attach and POKEDATA, region enumeration from `/proc/<pid>/maps`, ELF symbol lookup, codecave allocator, freeze worker, orphan-hook persistence. |
-| **cheat-mono-collector** | Proxy DLL dropped next to a Unity game so Proton loads it; reports Mono/IL2CPP class and field offsets back over a loopback socket. |
-| **ce-launcher** | Installs and launches [Cheat Engine](https://www.cheatengine.org/) for Linux — useful for authoring the `.CT` tables Tatu then consumes. |
+Everything past this point — how Tatu works, architecture, the cartridge/launcher subsystem, build instructions, in-progress design docs — lives in the **[Tatu Wiki](https://github.com/lobinuxsoft/tatu/wiki)**.
 
 ## Status
 
-Tatu is **early-stage and not yet production-ready**. The tracker is usable day to day; the cheat runtime works but coverage varies by game and engine.
+Tatu is **early-stage and not yet production-ready**. See the [Roadmap and Status](https://github.com/lobinuxsoft/tatu/wiki/Roadmap-and-Status) wiki page for what's shipped, in flight, and frozen.
 
-The Wine-side bridge (`tatu-bridge`, `tatu-launcher`, `tatu-proto`) described in earlier revisions of this file was removed in [#128](https://github.com/lobinuxsoft/tatu/issues/128) — a Proton game is a normal Linux process, so the whole Win32 detour bought nothing that `ptrace` did not already give.
-
-## Building from source
-
-### Requirements
-
-- Rust stable: <https://rustup.rs>
-- Linux only: WebKitGTK and GTK3 development headers (see below). The frontend needs no toolchain — it is plain ES modules served straight out of `frontend/`.
-
-### Platform dependencies
-
-| Platform | Dependencies |
-|----------|--------------|
-| Bazzite / Fedora Atomic | `rpm-ostree install webkit2gtk4.1-devel gtk3-devel` |
-| Ubuntu / Debian | `apt install libwebkit2gtk-4.1-dev libgtk-3-dev pkg-config build-essential` |
-| Arch | `pacman -S webkit2gtk-4.1 gtk3 pkgconf base-devel` |
-| Windows | None beyond the MSVC toolchain. WebView2 ships with Windows 10/11. |
-
-### Build
+## Quick build
 
 ```sh
 git clone https://github.com/lobinuxsoft/tatu
 cd tatu
-
 cargo build --release -p tatu-tracker   # → target/release/tatu-tracker
-cargo test --workspace
 ```
 
-`target/` lives at the workspace root, not under `src-tauri/`.
-
-To produce the Linux AppImage locally:
-
-```sh
-./build_appimage.sh                     # → dist/appimage/Tatu_<version>_x86_64.AppImage
-```
-
-## Configuration
-
-Everything lives under the platform config dir — `$XDG_CONFIG_HOME` (`~/.config`) on Linux, `%APPDATA%` on Windows — in a `backlog-tracker/` subtree kept from the pre-rename days:
-
-| Path | Contents |
-|---|---|
-| `backlog-tracker/state.json` | Library, completion flags, API key, caches |
-| `backlog-tracker/cheat-tables/<app_id>/` | Imported `.CT` files (Linux only) |
-| `backlog-tracker/trainers/<app_id>/` | Parsed cheat manifests (Linux only) |
-| `backlog-tracker/active-hooks/` | Undo log of live code patches (Linux only) |
-
-## Versioning
-
-Tatu uses [SemVer](https://semver.org/). Releases are managed by [release-please](https://github.com/googleapis/release-please) and triggered by [Conventional Commits](https://www.conventionalcommits.org/) on `main`.
-
-## Project structure
-
-```
-tatu/
-├── Cargo.toml                          # Workspace root
-├── src-tauri/                          # tatu-tracker (Tauri 2 backend + commands)
-├── frontend/                           # Plain ES modules, no bundler
-├── crates/
-│   ├── tatu-mem/                       # MemoryAccess trait + backend-agnostic primitives
-│   ├── tatu-engine/                    # CE Auto-Assembler parser, assembler, executor
-│   ├── cheat-runtime/                  # Linux ptrace backend
-│   ├── cheat-mono-collector/           # Unity Mono/IL2CPP offset collector (proxy DLL)
-│   └── ce-launcher/                    # Cheat Engine for Linux installer/launcher
-└── build_appimage.sh                   # Local AppImage packaging
-```
+Full requirements, platform dependencies, and the Godot launcher build are on the [Building](https://github.com/lobinuxsoft/tatu/wiki/Building) wiki page.
 
 ## Contributing
 
