@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.14.1](https://github.com/lobinuxsoft/tatu/compare/v0.14.0...v0.14.1) (2026-09-16)
+
+
+### Documentation
+
+* slim README down to essentials, link out to the new wiki ([3c4598b](https://github.com/lobinuxsoft/tatu/commit/3c4598bb8551bcd98b5910788b70de4f3ef1c4f7))
+* slim README down to essentials, link out to the new wiki ([10f47c8](https://github.com/lobinuxsoft/tatu/commit/10f47c82607c9c49d2346d1e9088e335339c38f6))
+
 ## [0.14.0](https://github.com/lobinuxsoft/tatu/compare/v0.13.5...v0.14.0) (2026-09-10)
 
 
