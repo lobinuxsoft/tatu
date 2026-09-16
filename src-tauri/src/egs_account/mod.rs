@@ -130,9 +130,18 @@ fn request_token(params: &[(&str, &str)]) -> Result<EgsTokens, String> {
     let auth =
         base64::engine::general_purpose::STANDARD.encode(format!("{CLIENT_ID}:{CLIENT_SECRET}"));
     let url = format!("https://{OAUTH_HOST}/account/api/oauth/token");
+    // `http_status_as_error(false)`: ureq's default turns a 4xx/5xx into an
+    // `Err` that discards the response body — Epic's error responses are
+    // themselves informative JSON (`errorMessage`, e.g. "the authorization
+    // code you supplied was not found"), and losing that behind a bare
+    // "http status: 400" is a real UX regression from what GOG's own
+    // equivalent flow shows. Read the body ourselves regardless of status.
     let mut response = ureq::post(&url)
         .header("User-Agent", USER_AGENT)
         .header("Authorization", &format!("Basic {auth}"))
+        .config()
+        .http_status_as_error(false)
+        .build()
         .send_form(params.iter().copied())
         .map_err(|e| format!("EGS token request failed: {e}"))?;
     let body: serde_json::Value = response
@@ -166,11 +175,23 @@ fn request_token(params: &[(&str, &str)]) -> Result<EgsTokens, String> {
 }
 
 /// The apps the account owns, paginated via `responseMetadata.nextCursor` —
-/// same shape `legendary.core.py`'s own library sync loop uses. The `ue`
-/// namespace is Unreal Engine Marketplace assets (plugins/content, not
-/// installable games) bundled into the same library response — filtered out
-/// here, same "real installable game only" rule GOG's `fetch_owned_ids`
-/// already applies to its own equivalent noise.
+/// same shape `legendary.core.py`'s own library sync loop uses.
+///
+/// This response mixes in every Unreal Engine/FAB marketplace asset the
+/// account has ever claimed (content packs, code plugins, free monthly
+/// giveaways) alongside real games — checked live against a real account
+/// (2026-09-16): 640 of 667 records were non-game marketplace content, not
+/// games, with titles like "Action RPG" or "Automotive Materials" polluting
+/// the tab. `namespace == "ue"` alone (361 records) missed the newer FAB
+/// listings entirely (279 more, `sandboxName: "fab-listing-live"`, a shared
+/// `productId` across all of them) — both are Epic's own structural
+/// sentinels for "this is marketplace content", not a heuristic on the
+/// title text. Same "real installable game only" rule GOG's
+/// `fetch_owned_ids` already applies to its own equivalent noise
+/// (bundle-container ids, orphaned products).
+const MARKETPLACE_PRODUCT_ID: &str = "prod-ue";
+const FAB_SANDBOX_NAME: &str = "fab-listing-live";
+
 pub fn fetch_owned_apps(access_token: &str) -> Result<Vec<EgsLibraryEntry>, String> {
     let mut out = Vec::new();
     let mut cursor: Option<String> = None;
@@ -195,12 +216,14 @@ pub fn fetch_owned_apps(access_token: &str) -> Result<Vec<EgsLibraryEntry>, Stri
             .and_then(|v| v.as_array())
             .ok_or("EGS library response missing 'records'")?;
         for r in records {
-            let namespace = r.get("namespace").and_then(|v| v.as_str());
-            if namespace == Some("ue") {
+            let product_id = r.get("productId").and_then(|v| v.as_str());
+            let sandbox_name = r.get("sandboxName").and_then(|v| v.as_str());
+            if product_id == Some(MARKETPLACE_PRODUCT_ID) || sandbox_name == Some(FAB_SANDBOX_NAME)
+            {
                 continue;
             }
             if let (Some(namespace), Some(app_name), Some(catalog_item_id)) = (
-                namespace,
+                r.get("namespace").and_then(|v| v.as_str()),
                 r.get("appName").and_then(|v| v.as_str()),
                 r.get("catalogItemId").and_then(|v| v.as_str()),
             ) {
@@ -261,22 +284,30 @@ pub fn resolve_details(access_token: &str, entry: &EgsLibraryEntry) -> EgsOwnedG
         .map(str::to_string)
         .unwrap_or_else(|| entry.app_name.clone());
     let images = item.get("keyImages").and_then(|v| v.as_array());
-    let image_url = |wanted_type: &str| -> Option<String> {
-        images
-            .and_then(|imgs| {
-                imgs.iter()
-                    .find(|img| img.get("type").and_then(|v| v.as_str()) == Some(wanted_type))
-            })
-            .and_then(|img| img.get("url"))
-            .and_then(|v| v.as_str())
-            .map(str::to_string)
+    // A single fixed type per slot (originally "Thumbnail"/"DieselStoreFrontWide")
+    // returned nothing for most real games — checked live against a real
+    // account (2026-09-16): "Thumbnail" and "DieselStoreFrontWide" are rare,
+    // legacy-looking types (only present on titles with a bundled code-
+    // redemption item); the two types every game in the sample actually
+    // had were "DieselGameBoxTall" (portrait box art) and "DieselGameBox"
+    // (wide promo art). Tried in priority order, first match wins.
+    let image_url = |priority: &[&str]| -> Option<String> {
+        let imgs = images?;
+        priority.iter().find_map(|&wanted_type| {
+            imgs.iter()
+                .find(|img| img.get("type").and_then(|v| v.as_str()) == Some(wanted_type))
+                .and_then(|img| img.get("url"))
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+        })
     };
-    // "Thumbnail" and "DieselStoreFrontWide" are documented `keyImages`
-    // types (alongside DieselGameBoxTall/DieselGameBox/DieselGameBoxLogo) —
-    // the same square-icon vs. wide-banner split GOG's `icon_url`/
-    // `background_url` already models.
-    let icon_url = image_url("Thumbnail");
-    let background_url = image_url("DieselStoreFrontWide");
+    let icon_url = image_url(&[
+        "DieselGameBoxTall",
+        "Thumbnail",
+        "DieselGameBoxLogo",
+        "DieselGameBox",
+    ]);
+    let background_url = image_url(&["DieselStoreFrontWide", "DieselGameBox", "DieselGameBoxTall"]);
     let description = item
         .get("description")
         .and_then(|v| v.as_str())
