@@ -3,6 +3,7 @@ mod cartridge;
 mod commands;
 mod disk;
 mod drm;
+mod egs_account;
 mod gog_account;
 mod gog_download;
 mod hltb;
@@ -45,6 +46,7 @@ macro_rules! tracker_handler {
             commands::state_cmd::save_completed,
             commands::state_cmd::save_completed_nonsteam,
             commands::state_cmd::save_completed_gog,
+            commands::state_cmd::save_completed_egs,
             commands::sync_cmd::sync_steam,
             commands::sync_cmd::sync_nonsteam,
             commands::sync_cmd::fetch_details,
@@ -64,6 +66,12 @@ macro_rules! tracker_handler {
             commands::gog_cmd::gog_get_download_size,
             commands::gog_cmd::gog_download_game,
             commands::gog_cmd::gog_cancel_download,
+            commands::egs_cmd::egs_login_url,
+            commands::egs_cmd::egs_is_connected,
+            commands::egs_cmd::egs_connect,
+            commands::egs_cmd::egs_disconnect,
+            commands::egs_cmd::fetch_egs_library,
+            commands::egs_cmd::get_egs_game_context,
             commands::collection_cmd::get_steam_favorites,
             commands::collection_cmd::list_steam_collections,
             commands::collection_cmd::import_completed_from_collection,

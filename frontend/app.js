@@ -3,9 +3,10 @@ import { state } from "./js/state.js";
 import { renderSteam } from "./js/render/steam.js";
 import { renderNonSteam } from "./js/render/nonsteam.js";
 import { renderGog } from "./js/render/gog.js";
+import { renderEgs } from "./js/render/egs.js";
 import { installExternalLinks } from "./js/links.js";
 import { openImportModal, closeImportModal } from "./js/modals/import.js";
-import { doSync, doSyncNonSteam, doScanSizes, doFetchAllDrm, doFetchAllDetails, doFetchGogLibrary, doScanCartridges } from "./js/actions.js";
+import { doSync, doSyncNonSteam, doScanSizes, doFetchAllDrm, doFetchAllDetails, doFetchGogLibrary, doFetchEgsLibrary, doScanCartridges } from "./js/actions.js";
 import { loadSettingsUI, checkConfigWarning, installSettingsHandlers } from "./js/settings.js";
 import { initTheme, installThemeSwitcher } from "./js/themes.js";
 import { openCartridgeManagePanel } from "./js/panel/cartridge_manage.js";
@@ -35,10 +36,12 @@ async function init() {
     state.completedNS = new Set(data.completed_nonsteam || []);
     state.GOG = data.gog_library || [];
     state.completedGog = new Set(data.completed_gog || []);
+    state.EGS = data.egs_library || [];
+    state.completedEgs = new Set(data.completed_egs || []);
 
     loadSettingsUI(
       data.steam_api_key, data.steam_id, data.steamgriddb_api_key,
-      data.pcgw_username, data.pcgw_bot_password, data.gog_connected,
+      data.pcgw_username, data.pcgw_bot_password, data.gog_connected, data.egs_connected,
     );
 
     if (!data.steam_id) {
@@ -61,6 +64,7 @@ async function init() {
     else if (state.hasConfig) await doSync();
     renderNonSteam();
     renderGog();
+    renderEgs();
   } catch (e) {
     document.getElementById("content").innerHTML = '<div class="loading" style="color:#f85149">Error: ' + e + '</div>';
   }
@@ -113,6 +117,7 @@ document.getElementById("syncBtn").addEventListener("click", () => {
 });
 document.getElementById("nsSyncBtn").addEventListener("click", doSyncNonSteam);
 document.getElementById("gogTabSyncBtn").addEventListener("click", doFetchGogLibrary);
+document.getElementById("egsTabSyncBtn").addEventListener("click", doFetchEgsLibrary);
 document.getElementById("drmBtn").addEventListener("click", doFetchAllDrm);
 document.getElementById("detailsBtn").addEventListener("click", doFetchAllDetails);
 document.getElementById("sizeBtn").addEventListener("click", doScanSizes);
@@ -161,6 +166,10 @@ document.addEventListener("change", async e => {
       if (e.target.checked) state.completedGog.add(id); else state.completedGog.delete(id);
       renderGog();
       await invoke("save_completed_gog", { completed: [...state.completedGog] });
+    } else if (list === "egs") {
+      if (e.target.checked) state.completedEgs.add(id); else state.completedEgs.delete(id);
+      renderEgs();
+      await invoke("save_completed_egs", { completed: [...state.completedEgs] });
     }
   }
 });
@@ -182,6 +191,17 @@ document.getElementById("gogSearch").addEventListener("input", e => {
   renderGog();
 });
 document.getElementById("lNavGog").addEventListener("click", e => {
+  if (e.target.tagName === "A") {
+    e.preventDefault();
+    const t = document.querySelector(e.target.getAttribute("href"));
+    if (t) t.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+});
+document.getElementById("egsSearch").addEventListener("input", e => {
+  state.egsQ = e.target.value.toLowerCase().trim();
+  renderEgs();
+});
+document.getElementById("lNavEgs").addEventListener("click", e => {
   if (e.target.tagName === "A") {
     e.preventDefault();
     const t = document.querySelector(e.target.getAttribute("href"));
@@ -210,6 +230,20 @@ document.getElementById("gogContent").addEventListener("click", e => {
   const cb = tr.querySelector("input[data-id][data-list='gog']");
   if (!cb) return;
   invoke("open_detail_window", { appId: parseInt(cb.dataset.id, 10), source: "gog" })
+    .catch(e => console.error("open_detail_window failed", e));
+});
+
+// Same detail-window mechanism as Steam/GOG above (#343) — an EGS id is
+// derived (sha256 of catalogItemId, see egs_account::mod.rs), not a real
+// Epic identifier, but it shares the same u64 app-id space as everything
+// else here, so it still needs its own `source` to disambiguate lookups.
+document.getElementById("egsContent").addEventListener("click", e => {
+  if (e.target.type === "checkbox") return;
+  const tr = e.target.closest("tr");
+  if (!tr) return;
+  const cb = tr.querySelector("input[data-id][data-list='egs']");
+  if (!cb) return;
+  invoke("open_detail_window", { appId: parseInt(cb.dataset.id, 10), source: "egs" })
     .catch(e => console.error("open_detail_window failed", e));
 });
 

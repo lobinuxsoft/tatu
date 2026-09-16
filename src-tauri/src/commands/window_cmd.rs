@@ -11,9 +11,10 @@ use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 const DETAIL_LABEL: &str = "detail";
 
 /// Which game the detail window should be showing, and from which
-/// collection — a GOG product id and a Steam app id are both plain `u64`s
-/// with no shared namespace, so the id alone isn't enough to look the game
-/// up safely once GOG entries (#243) exist alongside Steam/Non-Steam ones.
+/// collection — a GOG product id, an EGS id (derived, #343), and a Steam
+/// app id are all plain `u64`s with no shared namespace, so the id alone
+/// isn't enough to look the game up safely once GOG/EGS entries exist
+/// alongside Steam/Non-Steam ones.
 #[derive(Debug, Clone, Copy, serde::Serialize)]
 pub struct DetailTargetValue {
     pub app_id: u64,
@@ -25,6 +26,7 @@ pub struct DetailTargetValue {
 pub enum DetailSource {
     Steam,
     Gog,
+    Egs,
     NonSteam,
 }
 

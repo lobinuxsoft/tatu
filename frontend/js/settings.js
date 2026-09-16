@@ -1,8 +1,9 @@
 import { invoke, opener } from "./tauri.js";
 import { state } from "./state.js";
 import { renderGog } from "./render/gog.js";
+import { renderEgs } from "./render/egs.js";
 
-export function loadSettingsUI(apiKey, steamId, sgdbApiKey, pcgwUsername, pcgwBotPassword, gogConnected) {
+export function loadSettingsUI(apiKey, steamId, sgdbApiKey, pcgwUsername, pcgwBotPassword, gogConnected, egsConnected) {
   document.getElementById("cfgApiKey").value = apiKey || "";
   document.getElementById("cfgSteamId").value = steamId || "";
   document.getElementById("cfgSgdbApiKey").value = sgdbApiKey || "";
@@ -10,11 +11,17 @@ export function loadSettingsUI(apiKey, steamId, sgdbApiKey, pcgwUsername, pcgwBo
   document.getElementById("cfgPcgwBotPassword").value = pcgwBotPassword || "";
   state.hasConfig = !!(apiKey && steamId);
   renderGogConnectionState(!!gogConnected);
+  renderEgsConnectionState(!!egsConnected);
 }
 
 function renderGogConnectionState(connected) {
   document.getElementById("gogDisconnected").style.display = connected ? "none" : "";
   document.getElementById("gogConnected").style.display = connected ? "" : "none";
+}
+
+function renderEgsConnectionState(connected) {
+  document.getElementById("egsDisconnected").style.display = connected ? "none" : "";
+  document.getElementById("egsConnected").style.display = connected ? "" : "none";
 }
 
 export function checkConfigWarning() {
@@ -120,5 +127,36 @@ export function installSettingsHandlers() {
     renderGogConnectionState(false);
     state.GOG = [];
     renderGog();
+  });
+
+  document.getElementById("egsConnectBtn").addEventListener("click", async () => {
+    const url = await invoke("egs_login_url");
+    opener.openUrl(url).catch(err => console.error("openUrl failed", err));
+  });
+
+  document.getElementById("egsSubmitCodeBtn").addEventListener("click", async () => {
+    const pasted = document.getElementById("egsPastedCode").value.trim();
+    const msg = document.getElementById("egsConnectMsg");
+    const btn = document.getElementById("egsSubmitCodeBtn");
+    if (!pasted) return;
+    btn.disabled = true;
+    try {
+      await invoke("egs_connect", { pasted });
+      document.getElementById("egsPastedCode").value = "";
+      msg.style.color = "#2ea043";
+      msg.textContent = "Conectado.";
+      renderEgsConnectionState(true);
+    } catch (e) {
+      msg.style.color = "#f85149";
+      msg.textContent = "Error: " + e;
+    }
+    btn.disabled = false;
+  });
+
+  document.getElementById("egsDisconnectBtn").addEventListener("click", async () => {
+    await invoke("egs_disconnect");
+    renderEgsConnectionState(false);
+    state.EGS = [];
+    renderEgs();
   });
 }
