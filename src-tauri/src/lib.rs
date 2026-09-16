@@ -4,6 +4,7 @@ mod commands;
 mod disk;
 mod drm;
 mod egs_account;
+mod egs_download;
 mod gog_account;
 mod gog_download;
 mod hltb;
