@@ -103,7 +103,7 @@ mod tests {
             notes: String::new(),
             source: "none".to_string(),
             fetched_at: 0,
-            affects_steam_copy: false,
+            affects_copy: false,
             explanation: String::new(),
             preservability: Preservability::Hard,
             preservability_hint: String::new(),

@@ -57,6 +57,8 @@ macro_rules! tracker_handler {
             commands::detail_cmd::search_hltb,
             commands::drm_cmd::get_game_drm,
             commands::drm_cmd::fetch_all_drm,
+            commands::drm_cmd::get_egs_game_drm,
+            commands::drm_cmd::fetch_all_egs_drm,
             commands::gog_cmd::gog_login_url,
             commands::gog_cmd::gog_is_connected,
             commands::gog_cmd::gog_connect,
@@ -73,6 +75,9 @@ macro_rules! tracker_handler {
             commands::egs_cmd::egs_disconnect,
             commands::egs_cmd::fetch_egs_library,
             commands::egs_cmd::get_egs_game_context,
+            commands::egs_cmd::egs_get_download_size,
+            commands::egs_cmd::egs_download_game,
+            commands::egs_cmd::egs_cancel_download,
             commands::collection_cmd::get_steam_favorites,
             commands::collection_cmd::list_steam_collections,
             commands::collection_cmd::import_completed_from_collection,
@@ -134,7 +139,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(Mutex::new(app_state))
         .manage(commands::window_cmd::DetailTarget::default())
-        .manage(commands::gog_cmd::GogDownloadCancel::default());
+        .manage(commands::gog_cmd::GogDownloadCancel::default())
+        .manage(commands::egs_cmd::EgsDownloadCancel::default());
 
     #[cfg(unix)]
     let builder = {

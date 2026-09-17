@@ -18,11 +18,8 @@
 //! it only covers part of the case" rule.
 //!
 //! Scope here stops at fetch manifest → download chunks → reassemble files
-//! into `dest_root`. Cartridge/install-path integration is #345 — nothing
-//! in this module is called from a Tauri command yet, hence the blanket
-//! `dead_code` allow below (every item is exercised by this module's own
-//! `#[ignore]`d live-integration tests, just not by any command).
-#![allow(dead_code)]
+//! into `dest_root`. Wired into a Tauri command by `commands::egs_cmd`
+//! (#345).
 
 use std::collections::HashMap;
 use std::fs;
@@ -32,7 +29,7 @@ use std::path::{Path, PathBuf};
 use flate2::read::ZlibDecoder;
 use sha1::{Digest, Sha1};
 
-use crate::egs_account::USER_AGENT;
+use crate::egs_account::{USER_AGENT, agent};
 
 const LAUNCHER_HOST: &str = "launcher-public-service-prod06.ol.epicgames.com";
 
@@ -164,7 +161,14 @@ pub struct ChunkPart {
     /// Byte offset *within that chunk's decompressed payload* this part starts at.
     pub offset: u32,
     pub size: u32,
-    /// Byte offset in the reassembled output file this part lands at.
+    /// Byte offset in the reassembled output file this part lands at. Not
+    /// read anywhere yet — `download_game` writes parts sequentially in
+    /// manifest order instead of seeking (same "concatenating in order IS
+    /// reassembly" reasoning `gog_download` uses), which happens to make
+    /// this redundant for now. Kept on the model because it's real,
+    /// verified wire data, not derived — a future out-of-order/resumable
+    /// downloader would need it.
+    #[allow(dead_code)]
     pub file_offset: u64,
 }
 
@@ -187,6 +191,11 @@ impl FileEntry {
 
 pub struct Manifest {
     pub feature_level: i32,
+    /// The manifest's own internal codename (e.g. "Garlic"), not the
+    /// display title — callers already have the real title from
+    /// `EgsOwnedGame`, so nothing reads this back off the parsed manifest.
+    /// Kept on the model since it's real parsed data, not derived.
+    #[allow(dead_code)]
     pub app_name: String,
     pub build_version: String,
     pub launch_exe: String,
@@ -485,7 +494,8 @@ pub fn fetch_manifest_mirrors(
         urlencoding::encode(catalog_item_id),
         urlencoding::encode(app_name),
     );
-    let mut response = ureq::get(&url)
+    let mut response = agent()
+        .get(&url)
         .header("User-Agent", USER_AGENT)
         .header("Authorization", &format!("Bearer {access_token}"))
         .call()
@@ -552,7 +562,8 @@ pub fn fetch_manifest_mirrors(
 pub fn fetch_manifest(mirrors: &[ManifestMirror]) -> Result<Manifest, String> {
     let mut last_err = "no mirrors available".to_string();
     for mirror in mirrors {
-        let raw = match ureq::get(&mirror.manifest_url)
+        let raw = match agent()
+            .get(&mirror.manifest_url)
             .header("User-Agent", USER_AGENT)
             .call()
         {
@@ -650,21 +661,35 @@ fn chunk_path(feature_level: i32, chunk: &ChunkInfo) -> String {
 /// download when two other working mirrors were already resolved and sitting
 /// unused. Same fallback-through-endpoints shape `gog_download::download_chunk`
 /// already uses for GOG's own CDN mirror list.
+///
+/// The whole mirror list is retried up to 3 times with a short backoff if
+/// every mirror fails on a given pass — confirmed live (2026-09-16): a
+/// second real download hit "No route to host" on *all three* mirrors for
+/// the same chunk back to back, which a single blip on one mirror doesn't
+/// explain. A brief, blanket network hiccup (VPN reroute, local link flap)
+/// does, and it clears within a couple seconds — same retry-then-give-up
+/// shape `gog_account::get_json_retrying` already uses for exactly this.
 fn download_chunk(
     mirrors: &[ManifestMirror],
     manifest: &Manifest,
     chunk: &ChunkInfo,
 ) -> Result<Vec<u8>, String> {
+    const ATTEMPTS: u32 = 3;
     let path = chunk_path(manifest.feature_level, chunk);
     let mut last_err = "no CDN mirrors available".to_string();
-    for mirror in mirrors {
-        match download_chunk_from(mirror, chunk, &path) {
-            Ok(payload) => return Ok(payload),
-            Err(e) => last_err = e,
+    for attempt in 1..=ATTEMPTS {
+        for mirror in mirrors {
+            match download_chunk_from(mirror, chunk, &path) {
+                Ok(payload) => return Ok(payload),
+                Err(e) => last_err = e,
+            }
+        }
+        if attempt < ATTEMPTS {
+            std::thread::sleep(std::time::Duration::from_millis(500 * attempt as u64));
         }
     }
     Err(format!(
-        "all CDN mirrors failed for chunk {path}: {last_err}"
+        "all CDN mirrors failed for chunk {path} after {ATTEMPTS} attempts: {last_err}"
     ))
 }
 
@@ -679,7 +704,8 @@ fn download_chunk_from(
         url.push_str(&mirror.query_string);
     }
 
-    let mut response = ureq::get(&url)
+    let mut response = agent()
+        .get(&url)
         .call()
         .map_err(|e| format!("chunk request failed ({path}): {e}"))?;
     let raw = response

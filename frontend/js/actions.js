@@ -233,3 +233,45 @@ export async function doFetchEgsLibrary() {
     unlistenProgress(); unlistenDone(); unlistenError();
   }
 }
+
+// Same shape as doFetchAllDrm above, but keyed by title against PCGW
+// instead of Steam AppID (#345) — EGS games have none.
+export async function doFetchAllEgsDrm() {
+  const btn = document.getElementById("egsDrmBtn");
+  const info = document.getElementById("egsSyncInfo");
+  const wrap = document.getElementById("egsDrmProgressWrap");
+  const bar = document.getElementById("egsDrmProgressBar");
+  const text = document.getElementById("egsDrmProgressText");
+  btn.disabled = true; btn.textContent = "Cargando DRM...";
+  const prevInfo = info.textContent;
+
+  wrap.style.display = "";
+  bar.style.width = "0%";
+  text.textContent = "DRM Análisis 0/0";
+
+  const unlisten = await listen("egs_drm_progress", e => {
+    const p = e.payload || {};
+    bar.style.width = `${(p.current / p.total) * 100}%`;
+    text.textContent = `DRM Análisis ${p.current}/${p.total}`;
+    if (p.app_id && p.info) {
+      state.egsDrmCache[p.app_id] = p.info;
+      renderEgs();
+    }
+  });
+  const unlistenDone = await listen("egs_drm_done", e => {
+    const p = e.payload || {};
+    info.textContent = prevInfo || `DRM cargado para ${p.total} juegos`;
+    wrap.style.display = "none";
+    btn.disabled = false; btn.textContent = "Cargar DRM";
+    unlisten(); unlistenDone();
+  });
+
+  try {
+    await invoke("fetch_all_egs_drm");
+  } catch (e) {
+    info.textContent = "Error DRM: " + e;
+    wrap.style.display = "none";
+    btn.disabled = false; btn.textContent = "Cargar DRM";
+    unlisten(); unlistenDone();
+  }
+}

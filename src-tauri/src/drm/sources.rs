@@ -150,6 +150,56 @@ pub(super) fn fetch_from_pcgamingwiki(agent: &ureq::Agent, app_id: u64) -> Optio
     })
 }
 
+/// Same Cargo query as `fetch_from_pcgamingwiki`, but keyed by the wiki
+/// page title instead of a Steam AppID (#345) — EGS games have no Steam
+/// AppID to query by at all. `_pageName` is the same field the two tables
+/// are already joined on, so an exact match against it is a direct page
+/// lookup, not a search. Titles that don't match PCGW's exact page title
+/// (accents, subtitle punctuation, edition suffixes) simply return no rows
+/// — same "no fuzzy guessing" bar `gog_account`'s own title-based catalog
+/// lookup already holds itself to.
+pub(super) fn fetch_from_pcgamingwiki_by_title(
+    agent: &ureq::Agent,
+    title: &str,
+) -> Option<PcgwDrm> {
+    let url = format!(
+        "{PCGW_API}?action=cargoquery\
+         &tables=Game,Availability\
+         &join_on=Game._pageName=Availability._pageName\
+         &fields=Availability.Present=Stores,Availability.Uses_DRM=UsesDRM,Availability.Removed_DRM=RemovedDRM,Availability.Retail_DRM=RetailDRM\
+         &where=Game._pageName=%22{}%22\
+         &format=json",
+        urlencoding::encode(title)
+    );
+
+    let body: serde_json::Value = agent.get(&url).call().ok()?.body_mut().read_json().ok()?;
+
+    let rows = body.get("cargoquery")?.as_array()?;
+    let has_entry = !rows.is_empty();
+    let mut stores: Vec<String> = Vec::new();
+    let mut uses: Vec<String> = Vec::new();
+    let mut removed: Vec<String> = Vec::new();
+    let mut retail: Vec<String> = Vec::new();
+
+    for row in rows {
+        let Some(title) = row.get("title") else {
+            continue;
+        };
+        collect_csv_preserve_order(&mut stores, title.get("Stores"));
+        collect_csv_preserve_order(&mut uses, title.get("UsesDRM"));
+        collect_csv_preserve_order(&mut removed, title.get("RemovedDRM"));
+        collect_csv_preserve_order(&mut retail, title.get("RetailDRM"));
+    }
+
+    Some(PcgwDrm {
+        stores,
+        uses,
+        removed,
+        retail,
+        has_entry,
+    })
+}
+
 /// Split a CSV-ish string into tokens, preserving order and empty slots.
 /// Empty slots are kept so positional alignment stays intact.
 fn collect_csv_preserve_order(out: &mut Vec<String>, value: Option<&serde_json::Value>) {

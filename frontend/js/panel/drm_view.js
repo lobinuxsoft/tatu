@@ -14,9 +14,9 @@ function drmStatusLabel(info) {
 
 function drmImpactTooltip(info) {
   if (!info) return "";
-  const impact = info.affects_steam_copy
-    ? "[Afecta tu copia de Steam] "
-    : (info.status && info.status.kind === "drm_free" ? "[Tu copia de Steam es libre] " : "");
+  const impact = info.affects_copy
+    ? "[Afecta tu copia] "
+    : (info.status && info.status.kind === "drm_free" ? "[Tu copia es libre de DRM] " : "");
   const explanation = info.explanation || info.notes || "";
   return impact + explanation;
 }
@@ -39,13 +39,13 @@ export function renderDrmInlineBadge(info) {
 
 export function renderDrmExplanation(info) {
   if (!info) return "";
-  const affects = info.affects_steam_copy;
+  const affects = info.affects_copy;
   const cls = affects
     ? "drm-impact-warn"
     : (info.status && info.status.kind === "drm_free" ? "drm-impact-ok" : "drm-impact-muted");
   const heading = affects
-    ? "\u26A0 Afecta tu copia de Steam"
-    : (info.status && info.status.kind === "drm_free" ? "\u2705 Tu copia de Steam es libre de DRM" : "\u2139 Impacto desconocido");
+    ? "\u26A0 Afecta tu copia"
+    : (info.status && info.status.kind === "drm_free" ? "\u2705 Tu copia es libre de DRM" : "\u2139 Impacto desconocido");
   const text = info.explanation || info.notes || "";
   return `<div class="drm-impact ${cls}"><div class="drm-impact-heading">${heading}</div><div class="drm-impact-text">${esc(text)}</div></div>`;
 }

@@ -44,6 +44,13 @@ pub struct AppState {
     /// DRM classification cache, keyed by Steam app ID.
     #[serde(default)]
     pub drm_cache: HashMap<u64, DrmInfo>,
+    /// DRM classification cache for EGS games (#345), keyed by the
+    /// SHA-256-derived id `egs_account::derive_app_id` produces — kept as
+    /// its own map rather than sharing `drm_cache` above, same
+    /// no-cross-source-id-collision-risk reasoning `completed_gog`/
+    /// `completed_egs` are already kept separate for.
+    #[serde(default)]
+    pub egs_drm_cache: HashMap<u64, DrmInfo>,
     /// Disk size cache (installed + previously measured), keyed by Steam app ID.
     #[serde(default)]
     pub size_cache: HashMap<u64, DiskSize>,

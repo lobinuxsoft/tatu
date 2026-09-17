@@ -1,6 +1,7 @@
 import { state } from "../state.js";
 import { esc } from "../utils.js";
 import { buildGameRow, matchesQuery, renderLetterGroupedList } from "./game_list.js";
+import { renderDrmInlineBadge } from "../panel/drm_view.js";
 
 const EMPTY_HTML = '<div class="empty-state">Conectá tu cuenta de Epic Games en <strong>Settings</strong> y dale a "Actualizar biblioteca".</div>';
 const NO_MATCH_HTML = '<div class="loading" style="color:#8b949e">No hay juegos con estos filtros.</div>';
@@ -58,6 +59,7 @@ function buildRow(g) {
     chk: g.chk,
     name: g.title,
     imgHtml: img,
+    extraNameHtml: renderDrmInlineBadge(state.egsDrmCache[g.id]),
     tagsHtml,
     rightText: esc(dev),
   });

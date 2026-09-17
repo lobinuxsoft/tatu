@@ -130,6 +130,12 @@ pub fn usage(mount_point: &Path) -> Result<CartridgeUsage, String> {
                     bytes += size_of(&mount_point.join("NON-STEAM").join(install_dir));
                 }
             }
+            // Same "exe_path" shape as GOG above (`EGS/<install_dir>/...`).
+            AppSource::Egs => {
+                if let Some(install_dir) = app.exe_path.split('/').nth(1) {
+                    bytes += size_of(&mount_point.join("EGS").join(install_dir));
+                }
+            }
         }
 
         apps_bytes += bytes;

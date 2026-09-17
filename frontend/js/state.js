@@ -19,6 +19,7 @@ export const state = {
   favorites: new Set(),
   hltbCache: {},
   drmCache: {},
+  egsDrmCache: {},
   sizeCache: {},
   // Set of "source:app_id" keys already installed on some currently-plugged
   // cartridge (#270) — populated on demand, not persisted across sessions.
