@@ -56,6 +56,11 @@ pub enum AppSource {
     /// Steam appids and observed GOG product ids in practice, not formally
     /// guaranteed unique.
     NonSteam,
+    /// An Epic Games Store product downloaded via `egs_download` (#345) —
+    /// `app_id` here is the SHA-256-derived id `egs_account::derive_app_id`
+    /// produces, same "distinct enough in practice, not formally
+    /// guaranteed unique" reasoning as `Gog` above.
+    Egs,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

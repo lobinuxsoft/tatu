@@ -38,11 +38,13 @@ pub struct DrmInfo {
     pub notes: String,
     pub source: String,
     pub fetched_at: u64,
-    /// Whether the detected DRM affects the user's Steam-purchased copy.
+    /// Whether the detected DRM affects the user's purchased copy, from
+    /// whichever store this `DrmInfo` was classified for (Steam or EGS —
+    /// renamed from `affects_steam_copy` when EGS support was added, #345).
     /// False for `DrmFree`; true for `SteamOnly` and `ThirdParty`.
     /// `Unknown` is conservatively reported as false.
     #[serde(default)]
-    pub affects_steam_copy: bool,
+    pub affects_copy: bool,
     /// Human-readable explanation (Spanish) about Steam copy impact.
     #[serde(default)]
     pub explanation: String,

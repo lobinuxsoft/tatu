@@ -3,6 +3,7 @@ import { state, TL, TC } from "../state.js";
 import { esc, fmtDate, mcColor } from "../utils.js";
 import { doneLoading, startLoading } from "../loading.js";
 import { renderSteam } from "../render/steam.js";
+import { renderEgs } from "../render/egs.js";
 import { emit } from "../tauri.js";
 import { renderDrmBadge, renderDrmExplanation, renderPreservabilityBlock } from "./drm_view.js";
 import { openCartridgeModal } from "../modals/cartridge.js";
@@ -14,6 +15,11 @@ import { headerImg, infoRow, infoRowInner, tagsRow } from "./detail_template.js"
 // so the list behind the detail view does not go stale.
 function refreshLibraryViews() {
   renderSteam();
+  emit("library-updated").catch(() => {});
+}
+
+function refreshEgsLibraryViews() {
+  renderEgs();
   emit("library-updated").catch(() => {});
 }
 
@@ -221,6 +227,30 @@ export async function loadDrm(gameId) {
     el.innerHTML = infoRowInner("DRM", `${badge}${explanation}${preservation}`, "div", "drm-detail-value");
   } catch (_) {
     const el = document.getElementById("dpDrm");
+    if (el) {
+      el.querySelector(".detail-info-value").textContent = "Error";
+      el.querySelector(".detail-info-value").style.color = "#f85149";
+    }
+  }
+}
+
+// Same shape as loadDrm above, keyed by title against PCGamingWiki instead
+// of a Steam AppID (#345) — EGS games have none, and there's no Steam Store
+// call at all here (EGS games aren't on Steam).
+export async function loadEgsDrm(gameId, title) {
+  try {
+    const info = await invoke("get_egs_game_drm", { appId: gameId, title });
+    state.egsDrmCache[gameId] = info;
+    refreshEgsLibraryViews();
+    if (state.panelGameId !== gameId) return;
+    const el = document.getElementById("dpEgsDrm");
+    if (!el) return;
+    const badge = renderDrmBadge(info);
+    const explanation = renderDrmExplanation(info);
+    const preservation = renderPreservabilityBlock(info, title);
+    el.innerHTML = infoRowInner("DRM", `${badge}${explanation}${preservation}`, "div", "drm-detail-value");
+  } catch (_) {
+    const el = document.getElementById("dpEgsDrm");
     if (el) {
       el.querySelector(".detail-info-value").textContent = "Error";
       el.querySelector(".detail-info-value").style.color = "#f85149";

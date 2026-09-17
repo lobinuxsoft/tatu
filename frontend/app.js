@@ -6,7 +6,7 @@ import { renderGog } from "./js/render/gog.js";
 import { renderEgs } from "./js/render/egs.js";
 import { installExternalLinks } from "./js/links.js";
 import { openImportModal, closeImportModal } from "./js/modals/import.js";
-import { doSync, doSyncNonSteam, doScanSizes, doFetchAllDrm, doFetchAllDetails, doFetchGogLibrary, doFetchEgsLibrary, doScanCartridges } from "./js/actions.js";
+import { doSync, doSyncNonSteam, doScanSizes, doFetchAllDrm, doFetchAllDetails, doFetchGogLibrary, doFetchEgsLibrary, doFetchAllEgsDrm, doScanCartridges } from "./js/actions.js";
 import { loadSettingsUI, checkConfigWarning, installSettingsHandlers } from "./js/settings.js";
 import { initTheme, installThemeSwitcher } from "./js/themes.js";
 import { openCartridgeManagePanel } from "./js/panel/cartridge_manage.js";
@@ -38,6 +38,7 @@ async function init() {
     state.completedGog = new Set(data.completed_gog || []);
     state.EGS = data.egs_library || [];
     state.completedEgs = new Set(data.completed_egs || []);
+    state.egsDrmCache = data.egs_drm_cache || {};
 
     loadSettingsUI(
       data.steam_api_key, data.steam_id, data.steamgriddb_api_key,
@@ -118,6 +119,7 @@ document.getElementById("syncBtn").addEventListener("click", () => {
 document.getElementById("nsSyncBtn").addEventListener("click", doSyncNonSteam);
 document.getElementById("gogTabSyncBtn").addEventListener("click", doFetchGogLibrary);
 document.getElementById("egsTabSyncBtn").addEventListener("click", doFetchEgsLibrary);
+document.getElementById("egsDrmBtn").addEventListener("click", doFetchAllEgsDrm);
 document.getElementById("drmBtn").addEventListener("click", doFetchAllDrm);
 document.getElementById("detailsBtn").addEventListener("click", doFetchAllDetails);
 document.getElementById("sizeBtn").addEventListener("click", doScanSizes);
@@ -270,7 +272,10 @@ listen("library-updated", async () => {
     state.hltbCache = data.hltb_cache || {};
     state.drmCache = data.drm_cache || {};
     state.sizeCache = data.size_cache || {};
+    state.EGS = data.egs_library || [];
+    state.egsDrmCache = data.egs_drm_cache || {};
     renderSteam();
+    renderEgs();
   } catch (_) {
     // A failed refresh just means the list is a sync behind; not worth a toast.
   }

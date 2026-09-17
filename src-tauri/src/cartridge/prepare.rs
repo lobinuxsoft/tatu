@@ -44,11 +44,11 @@ pub struct PrepareDrmResult {
 ///   already enforces on its own: no safe automatic action exists for
 ///   either.
 ///
-/// GOG and non-Steam apps (`AppSource::Gog`/`AppSource::NonSteam`, #243/#236)
-/// are skipped entirely before any of the above: their `app_id` isn't a
-/// Steam appid at all (a GOG product id, or a Steam shortcut-id), so
-/// `drm::fetch_drm_info` would be querying Steam DRM sources with the wrong
-/// kind of number.
+/// GOG, non-Steam, and EGS apps (`AppSource::Gog`/`AppSource::NonSteam`/
+/// `AppSource::Egs`, #243/#236/#345) are skipped entirely before any of the
+/// above: their `app_id` isn't a Steam appid at all (a GOG product id, a
+/// Steam shortcut-id, or an EGS-derived id), so `drm::fetch_drm_info` would
+/// be querying Steam DRM sources with the wrong kind of number.
 pub fn refresh_drm_and_inject(
     mount_point: &Path,
     template_x86: &Path,
@@ -70,7 +70,10 @@ pub fn refresh_drm_and_inject(
         // the moment they're installed (`Alternative`/`Trivial`). Calling
         // `fetch_drm_info` with their app_id would query Steam's own DRM
         // sources by a number that isn't a Steam appid at all.
-        if app.source == AppSource::Gog || app.source == AppSource::NonSteam {
+        if app.source == AppSource::Gog
+            || app.source == AppSource::NonSteam
+            || app.source == AppSource::Egs
+        {
             results.push(PrepareDrmResult {
                 app_id: app.app_id,
                 name: app.name,

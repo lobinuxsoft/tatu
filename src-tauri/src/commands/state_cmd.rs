@@ -30,6 +30,7 @@ pub fn get_state(state: State<'_, SharedState>) -> Result<serde_json::Value, Str
         "ach_progress": ach_progress,
         "hltb_cache": s.hltb_cache,
         "drm_cache": s.drm_cache,
+        "egs_drm_cache": s.egs_drm_cache,
         "size_cache": s.size_cache,
         "gog_connected": s.gog_tokens.is_some(),
         "gog_library": s.gog_library,

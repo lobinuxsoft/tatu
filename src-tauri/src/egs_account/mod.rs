@@ -14,6 +14,8 @@
 //! game is EGS's own manifest+chunk protocol (#344), and cartridge install
 //! is its own step after that (#345) — not attempted here.
 
+use std::time::Duration;
+
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -26,6 +28,28 @@ pub(crate) const USER_AGENT: &str =
 const OAUTH_HOST: &str = "account-public-service-prod03.ol.epicgames.com";
 const LIBRARY_HOST: &str = "library-service.live.use1a.on.epicgames.com";
 const CATALOG_HOST: &str = "catalog-public-service-prod06.ol.epicgames.com";
+
+/// `Ipv4Only`, not the default `Any`: confirmed live (2026-09-16, real
+/// download) a connection to Epic's CDN hung indefinitely mid-download —
+/// stuck in `SYN-SENT` to an IPv6 address, on a network with a broken/
+/// asymmetric IPv6 route. Same root cause and same fix
+/// `cartridge::runtime`'s Proton/umu-run downloader already needed for
+/// Steam's own CDN hosts — ureq's own address-fallback only retries the
+/// next resolved address on `ConnectionRefused`/`Timeout`, not on
+/// `HostUnreachable`, so a bad IPv6 route fails outright instead of falling
+/// back to the IPv4 address right behind it. Every EGS host here (Epic's
+/// own API, plus the fastly/akamai/cloudfront CDN mirrors) has a real IPv4
+/// address. `timeout_global` bounds the whole call, not just the connect
+/// step, so a hang anywhere in the request/response cycle surfaces as a
+/// normal error instead of blocking the download thread forever.
+pub(crate) fn agent() -> ureq::Agent {
+    ureq::Agent::new_with_config(
+        ureq::config::Config::builder()
+            .timeout_global(Some(Duration::from_secs(30)))
+            .ip_family(ureq::config::IpFamily::Ipv4Only)
+            .build(),
+    )
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct EgsTokens {
@@ -136,7 +160,8 @@ fn request_token(params: &[(&str, &str)]) -> Result<EgsTokens, String> {
     // code you supplied was not found"), and losing that behind a bare
     // "http status: 400" is a real UX regression from what GOG's own
     // equivalent flow shows. Read the body ourselves regardless of status.
-    let mut response = ureq::post(&url)
+    let mut response = agent()
+        .post(&url)
         .header("User-Agent", USER_AGENT)
         .header("Authorization", &format!("Basic {auth}"))
         .config()
@@ -201,7 +226,8 @@ pub fn fetch_owned_apps(access_token: &str) -> Result<Vec<EgsLibraryEntry>, Stri
         if let Some(c) = &cursor {
             url.push_str(&format!("&cursor={}", urlencoding::encode(c)));
         }
-        let mut response = ureq::get(&url)
+        let mut response = agent()
+            .get(&url)
             .header("User-Agent", USER_AGENT)
             .header("Authorization", &format!("Bearer {access_token}"))
             .call()
@@ -342,7 +368,8 @@ pub fn resolve_details(access_token: &str, entry: &EgsLibraryEntry) -> EgsOwnedG
 fn get_json_retrying(url: &str, access_token: &str) -> Option<serde_json::Value> {
     const ATTEMPTS: u32 = 3;
     for attempt in 1..=ATTEMPTS {
-        let body = ureq::get(url)
+        let body = agent()
+            .get(url)
             .header("User-Agent", USER_AGENT)
             .header("Authorization", &format!("Bearer {access_token}"))
             .call()

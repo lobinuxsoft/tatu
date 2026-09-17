@@ -116,3 +116,95 @@ pub async fn get_game_drm(
     s.save();
     Ok(info)
 }
+
+/// Same shape as `fetch_all_drm`, but for the EGS tab (#345) — queries
+/// PCGamingWiki by title (`drm::fetch_epic_drm_info`) instead of by Steam
+/// AppID, since EGS games have none, and writes into `egs_drm_cache`.
+#[tauri::command]
+pub fn fetch_all_egs_drm(
+    app: tauri::AppHandle,
+    state: State<'_, SharedState>,
+) -> Result<(), String> {
+    let s = state.lock().map_err(|e| e.to_string())?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let pending: Vec<(u64, String)> = s
+        .egs_library
+        .iter()
+        .filter(|g| {
+            s.egs_drm_cache
+                .get(&g.id)
+                .map(|cached| drm_cache_is_stale(cached, now))
+                .unwrap_or(true)
+        })
+        .map(|g| (g.id, g.title.clone()))
+        .collect();
+    let pcgw_agent = drm::login_pcgw(&s.pcgw_username, &s.pcgw_bot_password);
+    drop(s);
+
+    let app_clone = app.clone();
+    std::thread::spawn(move || {
+        let total = pending.len();
+        for (i, (app_id, title)) in pending.iter().enumerate() {
+            let info = match drm::fetch_epic_drm_info(title, pcgw_agent.as_ref()) {
+                Ok(v) => v,
+                Err(_) => {
+                    let _ = app_clone.emit(
+                        "egs_drm_progress",
+                        serde_json::json!({ "current": i + 1, "total": total }),
+                    );
+                    std::thread::sleep(std::time::Duration::from_millis(DRM_BULK_DELAY_MS));
+                    continue;
+                }
+            };
+            let state: tauri::State<'_, SharedState> = app_clone.state();
+            if let Ok(mut s) = state.lock() {
+                s.egs_drm_cache.insert(*app_id, info.clone());
+                s.save();
+            }
+            let _ = app_clone.emit(
+                "egs_drm_progress",
+                serde_json::json!({ "current": i + 1, "total": total, "app_id": app_id, "info": info }),
+            );
+            std::thread::sleep(std::time::Duration::from_millis(DRM_BULK_DELAY_MS));
+        }
+        let _ = app_clone.emit("egs_drm_done", serde_json::json!({ "total": total }));
+    });
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_egs_game_drm(
+    app_id: u64,
+    title: String,
+    state: State<'_, SharedState>,
+) -> Result<drm::DrmInfo, String> {
+    let (pcgw_username, pcgw_bot_password) = {
+        let s = state.lock().map_err(|e| e.to_string())?;
+        if let Some(cached) = s.egs_drm_cache.get(&app_id) {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            if !drm_cache_is_stale(cached, now) {
+                return Ok(cached.clone());
+            }
+        }
+        (s.pcgw_username.clone(), s.pcgw_bot_password.clone())
+    };
+
+    let info = tokio::task::spawn_blocking(move || {
+        let pcgw_agent = drm::login_pcgw(&pcgw_username, &pcgw_bot_password);
+        drm::fetch_epic_drm_info(&title, pcgw_agent.as_ref())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
+    let mut s = state.lock().map_err(|e| e.to_string())?;
+    s.egs_drm_cache.insert(app_id, info.clone());
+    s.save();
+    Ok(info)
+}

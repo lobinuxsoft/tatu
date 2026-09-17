@@ -52,7 +52,7 @@ pub(super) fn upgrade_from_installed_files(app_id: u64, info: DrmInfo) -> DrmInf
 
 fn upgraded_easy(mut info: DrmInfo) -> DrmInfo {
     info.status = DrmStatus::SteamOnly;
-    info.affects_steam_copy = true;
+    info.affects_copy = true;
     info.explanation = "Se encontró steam_api(64).dll sin protección SteamStub en los archivos \
         ya instalados — solo wrapper de Steam, sin DRM de terceros detectado."
         .to_string();
@@ -148,7 +148,7 @@ mod tests {
             notes: String::new(),
             source: "none".to_string(),
             fetched_at: 0,
-            affects_steam_copy: false,
+            affects_copy: false,
             explanation: String::new(),
             preservability,
             preservability_hint: String::new(),
