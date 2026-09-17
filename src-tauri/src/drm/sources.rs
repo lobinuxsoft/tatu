@@ -1,7 +1,13 @@
 const PCGW_API: &str = "https://www.pcgamingwiki.com/w/api.php";
 const STEAM_APPDETAILS: &str = "https://store.steampowered.com/api/appdetails";
-const USER_AGENT: &str =
-    "game-progress-tracker (+https://github.com/lobinuxsoft/game-progress-tracker)";
+// MediaWiki's own recommended shape (`name/version (contact) framework/version`,
+// per PCGamingWiki:API's own Requirements section, checked live 2026-09-17):
+// a UA missing this shape is explicitly called out as one of the two named
+// causes of a 403 ("generic user-agent string that have been blocked" — the
+// other named cause is a prior history of excessive traffic from the IP,
+// unrelated to this string). Renamed off the pre-rename "game-progress-tracker"
+// name and added the `ureq/<version>` framework suffix their example uses.
+const USER_AGENT: &str = "tatu (+https://github.com/lobinuxsoft/tatu) ureq/3.3";
 
 /// Data returned by a successful PCGamingWiki query. Stored lists preserve
 /// order and empty slots so positional alignment (Stores ↔ Uses_DRM) stays
