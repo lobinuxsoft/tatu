@@ -125,6 +125,17 @@ impl<'a> ByteReader<'a> {
         } else {
             let units = (-length) as usize;
             let raw = self.bytes(units * 2)?;
+            // `chunks_exact` over `as_chunks`: the latter is still nightly-only
+            // (`slice_as_chunks`) on the stable toolchains this project builds
+            // with — a newer clippy than this repo's pinned toolchain suggests
+            // it anyway, so this is allowed rather than adopted. `unknown_lints`
+            // is allowed alongside it: an older clippy (that predates this lint
+            // existing at all) would otherwise error on the `allow` itself
+            // under this project's `-D warnings` — confirmed live, CI's clippy
+            // and this machine's local one disagreed on whether the lint name
+            // is even valid.
+            #[allow(unknown_lints)]
+            #[allow(clippy::chunks_exact_to_as_chunks)]
             let code_units: Vec<u16> = raw
                 .chunks_exact(2)
                 .map(|c| u16::from_le_bytes([c[0], c[1]]))
