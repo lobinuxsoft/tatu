@@ -76,6 +76,16 @@ const ACTION_BAR_GAP_RATIO := 0.03
 # of a full-height side one.
 const ACTION_BAR_GLASS_HEIGHT_RATIO := 0.07
 const ACTION_BAR_GLASS_PADDING_RATIO := 0.012
+# _action_status/_mount_prompt's own text — some of these run long
+# ("Configurando auto-montaje (puede pedir tu contraseña de
+# administrador)...") and had no bounded width at all (live-reported,
+# 2026-09-17: the overlay box's one-time PRESET_CENTER offsets were sized
+# against whatever was showing at _ready(), so a longer string later grew
+# the box asymmetrically from those fixed offsets instead of from its
+# center — off-center AND clipped past the screen edge). Capping width and
+# wrapping keeps the box's minimum size stable instead of growing past what
+# PRESET_CENTER already centered.
+const ACTION_STATUS_WIDTH_RATIO := 0.6
 
 # Same display/body fonts Tatu's own web frontend themes already use (OFL,
 # vendored under assets/fonts/ — see assets/README.md for provenance).
@@ -174,6 +184,7 @@ var _source_menu_selected := 0
 # ColorRect+VBoxContainer+Label shape as _source_menu above, own visibility
 # flag since only one of the two modals is ever shown at a time.
 var _mount_prompt: Control
+var _mount_prompt_text: Label
 var _mount_prompt_options: Array[Label] = []
 var _mount_prompt_selected := 0
 var _mount_prompt_state: Dictionary = {}
@@ -250,6 +261,10 @@ func _resize_layout() -> void:
 	var icon_size := _carousel_clip.size.y * HINT_ICON_RATIO
 	for icon in _hint_icons:
 		icon.custom_minimum_size = Vector2(icon_size, icon_size)
+
+	var status_width := _carousel_clip.size.x * ACTION_STATUS_WIDTH_RATIO
+	_action_status.custom_minimum_size.x = status_width
+	_mount_prompt_text.custom_minimum_size.x = status_width
 
 	var bar_margin := int(_carousel_clip.size.y * ACTION_BAR_MARGIN_RATIO)
 	var bar_height := int(_carousel_clip.size.y * ACTION_BAR_GLASS_HEIGHT_RATIO)
@@ -518,6 +533,7 @@ func _build_layout() -> void:
 	_action_status = Label.new()
 	_action_status.add_theme_font_override("font", load(FONT_DISPLAY))
 	_action_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_action_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_title_labels.append(_action_status)
 
 	# Only visible during a local-disk copy (#300) — every other use of this
@@ -577,13 +593,14 @@ func _build_layout() -> void:
 	mount_box.alignment = BoxContainer.ALIGNMENT_CENTER
 	mount_box.add_theme_constant_override("separation", 12)
 	mount_box.set_anchors_preset(Control.PRESET_CENTER)
-	var mount_prompt_text := Label.new()
-	mount_prompt_text.text = "Este cartucho no se monta solo en esta PC.\nTatu puede configurar una excepción para que se monte\nautomáticamente la próxima vez (pedirá tu contraseña de administrador).\n¿Configurar ahora?"
-	mount_prompt_text.add_theme_font_override("font", load(FONT_BODY))
-	mount_prompt_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	mount_prompt_text.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	_body_labels.append(mount_prompt_text)
-	mount_box.add_child(mount_prompt_text)
+	_mount_prompt_text = Label.new()
+	_mount_prompt_text.text = "Este cartucho no se monta solo en esta PC.\nTatu puede configurar una excepción para que se monte\nautomáticamente la próxima vez (pedirá tu contraseña de administrador).\n¿Configurar ahora?"
+	_mount_prompt_text.add_theme_font_override("font", load(FONT_BODY))
+	_mount_prompt_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_mount_prompt_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_mount_prompt_text.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	_body_labels.append(_mount_prompt_text)
+	mount_box.add_child(_mount_prompt_text)
 	for mount_option_text in ["Sí, configurar", "No, ahora no"]:
 		var mount_option := Label.new()
 		mount_option.text = mount_option_text
