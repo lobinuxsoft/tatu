@@ -553,14 +553,23 @@ func _build_layout() -> void:
 	_action_warning.visible = false
 	_body_labels.append(_action_warning)
 
+	# CenterContainer, not a VBoxContainer with a one-shot PRESET_CENTER: the
+	# latter only computes its centering offsets once, against whatever
+	# _action_status's size happened to be at that moment — a longer status
+	# string set later doesn't recenter against that frozen offset (live-
+	# reported, 2026-09-17: text ran off both screen edges, uncentered).
+	# CenterContainer recenters its child from its OWN current minimum size
+	# on every layout pass instead, so it tracks changes.
+	var overlay_center := CenterContainer.new()
+	overlay_center.set_anchors_preset(Control.PRESET_FULL_RECT)
 	var overlay_box := VBoxContainer.new()
 	overlay_box.alignment = BoxContainer.ALIGNMENT_CENTER
 	overlay_box.add_theme_constant_override("separation", 16)
-	overlay_box.set_anchors_preset(Control.PRESET_CENTER)
 	for child in [_action_status, _action_progress, _action_warning]:
 		child.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 		overlay_box.add_child(child)
-	_action_overlay.add_child(overlay_box)
+	overlay_center.add_child(overlay_box)
+	_action_overlay.add_child(overlay_center)
 	add_child(_action_overlay)
 
 	# S/X's choice screen (#300) — built empty here, labels filled in per
@@ -589,10 +598,11 @@ func _build_layout() -> void:
 	_mount_prompt.color = Color(0, 0, 0, 0.85)
 	_mount_prompt.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_mount_prompt.visible = false
+	var mount_center := CenterContainer.new()
+	mount_center.set_anchors_preset(Control.PRESET_FULL_RECT)
 	var mount_box := VBoxContainer.new()
 	mount_box.alignment = BoxContainer.ALIGNMENT_CENTER
 	mount_box.add_theme_constant_override("separation", 12)
-	mount_box.set_anchors_preset(Control.PRESET_CENTER)
 	_mount_prompt_text = Label.new()
 	_mount_prompt_text.text = "Este cartucho no se monta solo en esta PC.\nTatu puede configurar una excepción para que se monte\nautomáticamente la próxima vez (pedirá tu contraseña de administrador).\n¿Configurar ahora?"
 	_mount_prompt_text.add_theme_font_override("font", load(FONT_BODY))
@@ -610,7 +620,8 @@ func _build_layout() -> void:
 		_body_labels.append(mount_option)
 		_mount_prompt_options.append(mount_option)
 		mount_box.add_child(mount_option)
-	_mount_prompt.add_child(mount_box)
+	mount_center.add_child(mount_box)
+	_mount_prompt.add_child(mount_center)
 	add_child(_mount_prompt)
 
 	# #335: lets "Copiar a carpeta local"/"Copiar a carpeta de Steam" target
@@ -1650,16 +1661,29 @@ func _maybe_offer_auto_mount_rule(mount_point: String) -> void:
 
 	var rule_path := "/etc/udev/rules.d/99-tatu-cartridge-" + uuid + ".rules"
 	# Built by plain concatenation, not the `%` format operator — udev's own
-	# `%E{DEVNAME}` placeholder syntax would collide with it. Retries for a
-	# few seconds instead of a single attempt: confirmed live (2026-09-17,
-	# journalctl) that a bare `udisksctl mount` invoked straight from this
-	# rule's own ADD event loses a race against udisksd's own handling of
-	# that SAME uevent — udisksd hasn't finished registering the block
-	# device's D-Bus object yet, so the very first call fails (exit 1) even
-	# though a manual retry a moment later succeeds without doing anything
-	# different. `sh -c` is required to loop at all — plain RUN+= has no
-	# shell built in.
-	var rule_content := 'ACTION=="add", ENV{ID_FS_UUID}=="' + uuid + '", RUN+="/bin/sh -c \'for i in 1 2 3 4 5 6 7 8 9 10; do /usr/bin/udisksctl mount -b %E{DEVNAME} --no-user-interaction && exit 0; sleep 1; done; exit 1\'"\n'
+	# `%E{DEVNAME}` placeholder syntax would collide with it.
+	#
+	# The RUN+= command itself: retries for a few seconds instead of a
+	# single attempt — confirmed live (2026-09-17, journalctl) that a bare
+	# `udisksctl mount` invoked straight from this rule's own event loses a
+	# race against udisksd's own handling of that SAME uevent, so the very
+	# first call fails (exit 1) even though a manual retry a moment later
+	# succeeds without doing anything different. Bails out immediately if
+	# already mounted, since ACTION=="change" (below) can fire repeatedly
+	# for reasons that have nothing to do with this rule at all, and
+	# without this check each one would burn up to 10s retrying a mount
+	# that already succeeded. `sh -c` is required to loop at all — plain
+	# RUN+= has no shell built in.
+	var run_cmd := "/bin/sh -c 'findmnt -rn %E{DEVNAME} >/dev/null 2>&1 && exit 0; for i in 1 2 3 4 5 6 7 8 9 10; do /usr/bin/udisksctl mount -b %E{DEVNAME} --no-user-interaction && exit 0; sleep 1; done; exit 1'"
+	# Two ACTIONs, not just "add": live-reported (2026-09-17) that a fixed
+	# CFexpress/USB-C reader — the card swapped, not the USB link itself —
+	# never fires an "add" at all, only "change" once the kernel notices the
+	# new media. A plain USB flash drive DOES fire "add" on every physical
+	# reconnect, so both are kept rather than switching one for the other.
+	var rule_content := (
+		'ACTION=="add", ENV{ID_FS_UUID}=="' + uuid + '", RUN+="' + run_cmd + '"\n'
+		+ 'ACTION=="change", ENV{ID_FS_UUID}=="' + uuid + '", RUN+="' + run_cmd + '"\n'
+	)
 	# Content-compared, not just existence-checked: an already-installed but
 	# outdated rule (the racy single-attempt version above) must be
 	# reinstalled once this ships, not left broken forever on a machine that
