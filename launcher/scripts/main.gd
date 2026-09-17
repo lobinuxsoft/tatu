@@ -170,6 +170,13 @@ var _copying := false
 var _source_menu: Control
 var _source_menu_options: Array[Label] = []
 var _source_menu_selected := 0
+# #351: consent popup for the udev auto-mount exception — same
+# ColorRect+VBoxContainer+Label shape as _source_menu above, own visibility
+# flag since only one of the two modals is ever shown at a time.
+var _mount_prompt: Control
+var _mount_prompt_options: Array[Label] = []
+var _mount_prompt_selected := 0
+var _mount_prompt_state: Dictionary = {}
 # Godot's own FileDialog, not a native OS one (#335) — a native dialog
 # expects mouse/keyboard, breaking the gamepad-only navigation every other
 # screen in this launcher already has; FileDialog is a plain Control tree,
@@ -311,6 +318,25 @@ func _unhandled_input(event: InputEvent) -> void:
 	# navigation, no re-triggering the launch, no closing the launcher while
 	# the cartridge has to stay connected and the PC has to stay up.
 	if _copying:
+		return
+	# #351: the auto-mount consent popup — checked before _source_menu since
+	# both are modal and mutually exclusive, order between them doesn't
+	# matter beyond that. card_launch accepts, card_close_launcher declines;
+	# the awaiting _maybe_offer_auto_mount_rule() polls _mount_prompt_state
+	# for the result (no real Godot signal to await here, same reason
+	# _pick_folder's own state Dictionary exists).
+	if _mount_prompt.visible:
+		if event.is_action_pressed("ui_up") or event.is_action_pressed("ui_down"):
+			_mount_prompt_selected = wrapi(_mount_prompt_selected + 1, 0, _mount_prompt_options.size())
+			_update_mount_prompt_highlight()
+		elif event.is_action_pressed("card_launch"):
+			_mount_prompt.visible = false
+			_mount_prompt_state.done = true
+			_mount_prompt_state.accepted = (_mount_prompt_selected == 0)
+		elif event.is_action_pressed("card_close_launcher"):
+			_mount_prompt.visible = false
+			_mount_prompt_state.done = true
+			_mount_prompt_state.accepted = false
 		return
 	# S/X's choice screen (#300) is a modal too — same input-trapping shape
 	# as the viewer below, just with ui_up/down moving between 2 options
@@ -540,6 +566,35 @@ func _build_layout() -> void:
 		_source_menu_options.append(option)
 		menu_box.add_child(option)
 	_source_menu.add_child(menu_box)
+
+	# #351: same shape as _source_menu above, static text since it only
+	# ever asks one yes/no question — no per-selected-card text to fill in.
+	_mount_prompt = ColorRect.new()
+	_mount_prompt.color = Color(0, 0, 0, 0.85)
+	_mount_prompt.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_mount_prompt.visible = false
+	var mount_box := VBoxContainer.new()
+	mount_box.alignment = BoxContainer.ALIGNMENT_CENTER
+	mount_box.add_theme_constant_override("separation", 12)
+	mount_box.set_anchors_preset(Control.PRESET_CENTER)
+	var mount_prompt_text := Label.new()
+	mount_prompt_text.text = "Este cartucho no se monta solo en esta PC.\nTatu puede configurar una excepción para que se monte\nautomáticamente la próxima vez (pedirá tu contraseña de administrador).\n¿Configurar ahora?"
+	mount_prompt_text.add_theme_font_override("font", load(FONT_BODY))
+	mount_prompt_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	mount_prompt_text.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	_body_labels.append(mount_prompt_text)
+	mount_box.add_child(mount_prompt_text)
+	for mount_option_text in ["Sí, configurar", "No, ahora no"]:
+		var mount_option := Label.new()
+		mount_option.text = mount_option_text
+		mount_option.add_theme_font_override("font", load(FONT_BODY))
+		mount_option.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		mount_option.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		_body_labels.append(mount_option)
+		_mount_prompt_options.append(mount_option)
+		mount_box.add_child(mount_option)
+	_mount_prompt.add_child(mount_box)
+	add_child(_mount_prompt)
 
 	# #335: lets "Copiar a carpeta local"/"Copiar a carpeta de Steam" target
 	# a disk other than the hardcoded default, for when that one's full.
@@ -1442,6 +1497,7 @@ func _launch_via_steam() -> void:
 	# this remounts it (see `_ensure_ntfs_symlinks`'s own header).
 	if OS.get_name() != "Windows":
 		await _ensure_ntfs_symlinks()
+		await _maybe_offer_auto_mount_rule(mount_point)
 
 	_register_steam_library(steam_dir, mount_point)
 
@@ -1549,6 +1605,94 @@ func _ensure_ntfs_symlinks() -> void:
 	# the manual `udisksctl unmount`/`mount` cycle this replicates.
 	OS.execute("udisksctl", ["unmount", "-b", source])
 	OS.execute("udisksctl", ["mount", "-b", source])
+
+## Linux only (#351): a consent-gated udev rule so this cartridge auto-mounts
+## on THIS machine next time without depending on any particular desktop's
+## automount agent already running. Confirmed live (2026-09-17): a real KDE
+## Plasma session with udisks2 itself reporting HintAuto: true still never
+## mounted the drive — the `device_automounter` kded module simply wasn't
+## loaded in that session, and nothing in Tatu can (or should) reach into
+## the user's desktop session to fix that. A udev RUN+= rule bypasses the
+## missing agent entirely by calling `udisksctl mount` directly on device
+## add — that's a D-Bus call into the separately-running udisksd, which
+## mounts in its own non-private namespace, not inside udev's own private
+## one (systemd/systemd#9873, #11982); same precedent as usbmount/udiskie.
+## Windows needs no equivalent: any correctly GPT-typed partition already
+## gets a drive letter automatically, so there's no exception to grant there.
+##
+## Per-machine, not per-cartridge, same as LocalInstallRoots/SteamShortcuts:
+## the rule lives on this PC's disk, never written to the cartridge itself.
+## A decline is remembered in user:// and re-offered after a cooldown rather
+## than nagging on every single launch or being treated as permanent.
+func _maybe_offer_auto_mount_rule(mount_point: String) -> void:
+	var uuid_out := []
+	OS.execute("findmnt", ["-no", "UUID", mount_point], uuid_out)
+	var uuid := String(uuid_out[0] if uuid_out.size() > 0 else "").strip_edges()
+	if uuid.is_empty():
+		return
+
+	var rule_path := "/etc/udev/rules.d/99-tatu-cartridge-" + uuid + ".rules"
+	if FileAccess.file_exists(rule_path):
+		return
+
+	if _mount_rule_recently_declined(uuid):
+		return
+
+	_mount_prompt_selected = 0
+	_update_mount_prompt_highlight()
+	_mount_prompt.visible = true
+	var state := {"done": false, "accepted": false}
+	_mount_prompt_state = state
+	while not state.done:
+		await get_tree().process_frame
+
+	if not state.accepted:
+		_remember_mount_rule_decline(uuid)
+		return
+
+	# Built by plain concatenation, not the `%` format operator — udev's own
+	# `%E{DEVNAME}` placeholder syntax would collide with it.
+	var rule_content := 'ACTION=="add", ENV{ID_FS_UUID}=="' + uuid + '", RUN+="/usr/bin/udisksctl mount -b %E{DEVNAME} --no-user-interaction"\n'
+	var tmp := OS.get_cache_dir().path_join("tatu-automount-%s.rules" % uuid)
+	var f := FileAccess.open(tmp, FileAccess.WRITE)
+	f.store_string(rule_content)
+	f.close()
+
+	_action_status.text = "Configurando auto-montaje (puede pedir tu contraseña de administrador)..."
+	await get_tree().process_frame
+
+	# One pkexec prompt covers install + reload + trigger — matches
+	# _ensure_ntfs_symlinks' own single-elevation shape above, and avoids
+	# asking twice for what's conceptually one action.
+	var cmd := "install -m 0644 " + _sh_quote(tmp) + " " + _sh_quote(rule_path) + " && udevadm control --reload-rules && udevadm trigger --settle"
+	OS.execute("pkexec", ["/bin/sh", "-c", cmd])
+	DirAccess.remove_absolute(tmp)
+
+func _update_mount_prompt_highlight() -> void:
+	for i in _mount_prompt_options.size():
+		_mount_prompt_options[i].modulate = Color.WHITE if i == _mount_prompt_selected else Color(1, 1, 1, 0.5)
+
+const MOUNT_PROMPT_DECLINE_MAP := "user://cartridge_automount_declines.json"
+const MOUNT_PROMPT_COOLDOWN_DAYS := 7
+
+## Per-machine, never on the cartridge — same posture as LocalInstallRoots.
+func _mount_rule_recently_declined(uuid: String) -> bool:
+	if not FileAccess.file_exists(MOUNT_PROMPT_DECLINE_MAP):
+		return false
+	var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(MOUNT_PROMPT_DECLINE_MAP))
+	var map: Dictionary = parsed if typeof(parsed) == TYPE_DICTIONARY else {}
+	if not map.has(uuid):
+		return false
+	var declined_unix := int(map[uuid])
+	return Time.get_unix_time_from_system() - declined_unix < MOUNT_PROMPT_COOLDOWN_DAYS * 86400
+
+func _remember_mount_rule_decline(uuid: String) -> void:
+	var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(MOUNT_PROMPT_DECLINE_MAP)) if FileAccess.file_exists(MOUNT_PROMPT_DECLINE_MAP) else {}
+	var map: Dictionary = parsed if typeof(parsed) == TYPE_DICTIONARY else {}
+	map[uuid] = Time.get_unix_time_from_system()
+	var f := FileAccess.open(MOUNT_PROMPT_DECLINE_MAP, FileAccess.WRITE)
+	f.store_string(JSON.stringify(map))
+	f.close()
 
 ## Linux: `~/.local/share/Steam` or the older `~/.steam/steam` symlink
 ## target. Windows: the one non-elevated, no-registry-access location a
