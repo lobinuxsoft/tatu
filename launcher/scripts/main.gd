@@ -1632,7 +1632,22 @@ func _maybe_offer_auto_mount_rule(mount_point: String) -> void:
 		return
 
 	var rule_path := "/etc/udev/rules.d/99-tatu-cartridge-" + uuid + ".rules"
-	if FileAccess.file_exists(rule_path):
+	# Built by plain concatenation, not the `%` format operator — udev's own
+	# `%E{DEVNAME}` placeholder syntax would collide with it. Retries for a
+	# few seconds instead of a single attempt: confirmed live (2026-09-17,
+	# journalctl) that a bare `udisksctl mount` invoked straight from this
+	# rule's own ADD event loses a race against udisksd's own handling of
+	# that SAME uevent — udisksd hasn't finished registering the block
+	# device's D-Bus object yet, so the very first call fails (exit 1) even
+	# though a manual retry a moment later succeeds without doing anything
+	# different. `sh -c` is required to loop at all — plain RUN+= has no
+	# shell built in.
+	var rule_content := 'ACTION=="add", ENV{ID_FS_UUID}=="' + uuid + '", RUN+="/bin/sh -c \'for i in 1 2 3 4 5 6 7 8 9 10; do /usr/bin/udisksctl mount -b %E{DEVNAME} --no-user-interaction && exit 0; sleep 1; done; exit 1\'"\n'
+	# Content-compared, not just existence-checked: an already-installed but
+	# outdated rule (the racy single-attempt version above) must be
+	# reinstalled once this ships, not left broken forever on a machine that
+	# granted the exception before the fix existed.
+	if FileAccess.file_exists(rule_path) and FileAccess.get_file_as_string(rule_path) == rule_content:
 		return
 
 	if _mount_rule_recently_declined(uuid):
@@ -1649,10 +1664,6 @@ func _maybe_offer_auto_mount_rule(mount_point: String) -> void:
 	if not state.accepted:
 		_remember_mount_rule_decline(uuid)
 		return
-
-	# Built by plain concatenation, not the `%` format operator — udev's own
-	# `%E{DEVNAME}` placeholder syntax would collide with it.
-	var rule_content := 'ACTION=="add", ENV{ID_FS_UUID}=="' + uuid + '", RUN+="/usr/bin/udisksctl mount -b %E{DEVNAME} --no-user-interaction"\n'
 	var tmp := OS.get_cache_dir().path_join("tatu-automount-%s.rules" % uuid)
 	var f := FileAccess.open(tmp, FileAccess.WRITE)
 	f.store_string(rule_content)
