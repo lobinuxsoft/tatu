@@ -1525,7 +1525,11 @@ func _launch_via_steam() -> void:
 	# this remounts it (see `_ensure_ntfs_symlinks`'s own header).
 	if OS.get_name() != "Windows":
 		await _ensure_ntfs_symlinks()
-		await _maybe_offer_auto_mount_rule(mount_point)
+		# Runs before registering (not after): granting the exception here
+		# switches `mount_point` to the new fixed path immediately, so
+		# Steam gets registered against the right path THIS run instead of
+		# needing a second run later to notice it moved.
+		mount_point = await _maybe_offer_auto_mount_rule(mount_point)
 
 	_register_steam_library(steam_dir, mount_point)
 
@@ -1653,21 +1657,28 @@ func _ensure_ntfs_symlinks() -> void:
 ## the rule lives on this PC's disk, never written to the cartridge itself.
 ## A decline is remembered in user:// and re-offered after a cooldown rather
 ## than nagging on every single launch or being treated as permanent.
-func _maybe_offer_auto_mount_rule(mount_point: String) -> void:
+## Returns the mount point Steam's library should be registered against:
+## `mount_point` unchanged if nothing changed (declined, already granted —
+## the OS should already have auto-mounted at the fixed path below by the
+## time the launcher runs at all in that case), or the new fixed path right
+## after granting it. Registering Steam against the OLD path here (the
+## caller's job, not this function's) would mean it only catches up on
+## a LATER run, once it notices the path moved — returning the new one
+## immediately means this same run already registers the right path.
+func _maybe_offer_auto_mount_rule(mount_point: String) -> String:
 	var uuid_out := []
 	OS.execute("findmnt", ["-no", "UUID", mount_point], uuid_out)
 	var uuid := String(uuid_out[0] if uuid_out.size() > 0 else "").strip_edges()
 	if uuid.is_empty():
-		return
+		return mount_point
 
 	var rule_path := "/etc/udev/rules.d/99-tatu-cartridge-" + uuid + ".rules"
 	# Fixed per-UUID path, not udisksd's own `/run/media/<user>/<label>`
-	# convention — deliberately NOT trying to replicate that here. A first
-	# reconnect after granting the exception still lands at this new path,
-	# not whatever Steam's library already points at from before, so Steam
-	# needs the launcher run once more to notice it moved; every reconnect
-	# after that lands at this SAME fixed path again, so it stays in sync
-	# with no further touch needed.
+	# convention — deliberately NOT trying to replicate that here. Every
+	# reconnect from here on lands at this SAME fixed path, so once Steam's
+	# registered against it, it stays in sync with no further touch needed
+	# (the caller registers Steam AFTER this call returns, against whatever
+	# path this function decides is current — see its own header).
 	var mount_path := "/media/tatu-cartridge-" + uuid
 
 	var uid_out := []
@@ -1736,10 +1747,10 @@ func _maybe_offer_auto_mount_rule(mount_point: String) -> void:
 	# not left broken forever on a machine that granted the exception
 	# before the fix existed.
 	if FileAccess.file_exists(rule_path) and FileAccess.get_file_as_string(rule_path) == rule_content:
-		return
+		return mount_point
 
 	if _mount_rule_recently_declined(uuid):
-		return
+		return mount_point
 
 	_mount_prompt_selected = 0
 	_update_mount_prompt_highlight()
@@ -1751,7 +1762,7 @@ func _maybe_offer_auto_mount_rule(mount_point: String) -> void:
 
 	if not state.accepted:
 		_remember_mount_rule_decline(uuid)
-		return
+		return mount_point
 	var tmp := OS.get_cache_dir().path_join("tatu-automount-%s.rules" % uuid)
 	var f := FileAccess.open(tmp, FileAccess.WRITE)
 	f.store_string(rule_content)
@@ -1766,6 +1777,11 @@ func _maybe_offer_auto_mount_rule(mount_point: String) -> void:
 	var cmd := "install -m 0644 " + _sh_quote(tmp) + " " + _sh_quote(rule_path) + " && udevadm control --reload-rules && udevadm trigger --settle"
 	OS.execute("pkexec", ["/bin/sh", "-c", cmd])
 	DirAccess.remove_absolute(tmp)
+	# `--settle` blocks until the triggered rule's own RUN+= (this same
+	# mount) finishes, so mount_path is already live by the time this
+	# returns — the currently-running launcher keeps executing from
+	# mount_point's original location either way, nothing unmounts that.
+	return mount_path
 
 func _update_mount_prompt_highlight() -> void:
 	for i in _mount_prompt_options.size():
