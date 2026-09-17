@@ -1640,13 +1640,14 @@ func _ensure_ntfs_symlinks() -> void:
 ## Plasma session with udisks2 itself reporting HintAuto: true still never
 ## mounted the drive — the `device_automounter` kded module simply wasn't
 ## loaded in that session, and nothing in Tatu can (or should) reach into
-## the user's desktop session to fix that. A udev RUN+= rule bypasses the
-## missing agent entirely by calling `udisksctl mount` directly on device
-## add — that's a D-Bus call into the separately-running udisksd, which
-## mounts in its own non-private namespace, not inside udev's own private
-## one (systemd/systemd#9873, #11982); same precedent as usbmount/udiskie.
-## Windows needs no equivalent: any correctly GPT-typed partition already
-## gets a drive letter automatically, so there's no exception to grant there.
+## the user's desktop session to fix that. The rule mounts via a plain
+## `mount` call, not `udisksctl`/udisks2 — see the RUN+= command's own
+## comment below for why going through udisks2 from a root, session-less
+## udev rule doesn't work even after granting root the relevant polkit
+## actions. Same precedent as usbmount, which bypasses udisks2 entirely
+## for exactly this reason. Windows needs no equivalent: any correctly
+## GPT-typed partition already gets a drive letter automatically, so
+## there's no exception to grant there.
 ##
 ## Per-machine, not per-cartridge, same as LocalInstallRoots/SteamShortcuts:
 ## the rule lives on this PC's disk, never written to the cartridge itself.
@@ -1660,34 +1661,80 @@ func _maybe_offer_auto_mount_rule(mount_point: String) -> void:
 		return
 
 	var rule_path := "/etc/udev/rules.d/99-tatu-cartridge-" + uuid + ".rules"
-	# Built by plain concatenation, not the `%` format operator — udev's own
-	# `%E{DEVNAME}` placeholder syntax would collide with it.
+	# Fixed per-UUID path, not udisksd's own `/run/media/<user>/<label>`
+	# convention — deliberately NOT trying to replicate that here. A first
+	# reconnect after granting the exception still lands at this new path,
+	# not whatever Steam's library already points at from before, so Steam
+	# needs the launcher run once more to notice it moved; every reconnect
+	# after that lands at this SAME fixed path again, so it stays in sync
+	# with no further touch needed.
+	var mount_path := "/media/tatu-cartridge-" + uuid
+
+	var uid_out := []
+	OS.execute("id", ["-u"], uid_out)
+	var uid := String(uid_out[0] if uid_out.size() > 0 else "0").strip_edges()
+	var gid_out := []
+	OS.execute("id", ["-g"], gid_out)
+	var gid := String(gid_out[0] if gid_out.size() > 0 else "0").strip_edges()
+
+	# Raw `mount`, not `udisksctl mount` — confirmed live (2026-09-17) that
+	# udisksctl invoked from udev runs as root with no login session, which
+	# udisks2's own polkit policy rejects outright; granting root's
+	# filesystem-mount action still isn't enough, since mounting with THIS
+	# user's uid/gid (needed for the files to be usable by anyone but root)
+	# hits a second, stricter action (filesystem-mount-other-user) that
+	# doesn't cleanly resolve non-interactively either. Root running a bare
+	# `mount` needs no polkit authorization at all — same precedent as
+	# usbmount, which never went through udisks2 for exactly this reason.
 	#
-	# The RUN+= command itself: retries for a few seconds instead of a
-	# single attempt — confirmed live (2026-09-17, journalctl) that a bare
-	# `udisksctl mount` invoked straight from this rule's own event loses a
-	# race against udisksd's own handling of that SAME uevent, so the very
-	# first call fails (exit 1) even though a manual retry a moment later
-	# succeeds without doing anything different. Bails out immediately if
-	# already mounted, since ACTION=="change" (below) can fire repeatedly
-	# for reasons that have nothing to do with this rule at all, and
-	# without this check each one would burn up to 10s retrying a mount
-	# that already succeeded. `sh -c` is required to loop at all — plain
-	# RUN+= has no shell built in.
-	var run_cmd := "/bin/sh -c 'findmnt -rn %E{DEVNAME} >/dev/null 2>&1 && exit 0; for i in 1 2 3 4 5 6 7 8 9 10; do /usr/bin/udisksctl mount -b %E{DEVNAME} --no-user-interaction && exit 0; sleep 1; done; exit 1'"
-	# Two ACTIONs, not just "add": live-reported (2026-09-17) that a fixed
-	# CFexpress/USB-C reader — the card swapped, not the USB link itself —
-	# never fires an "add" at all, only "change" once the kernel notices the
-	# new media. A plain USB flash drive DOES fire "add" on every physical
-	# reconnect, so both are kept rather than switching one for the other.
+	# `systemd-run`, not calling `mount` directly: also confirmed live
+	# (2026-09-17) that a direct `mount -t ntfs-3g` from udev's own RUN+=
+	# fails outright ("User doesn't have privilege to mount") — systemd-udevd
+	# runs with PrivateMounts=yes, and ntfs-3g's integrated FUSE mode rejects
+	# mounting inside that isolated namespace. `systemd-run` hands the mount
+	# to a brand new transient unit under the system manager instead of
+	# running it as udevd's own child, escaping that isolation; the FUSE
+	# server it starts then keeps running past udev's own event handling
+	# instead of being torn down with it (`RemainAfterExit=yes`, needed
+	# because the mount is a daemonizing FUSE process, not a script that
+	# just exits when done).
+	#
+	# Built by plain concatenation, not the `%` format operator — udev's own
+	# `%E{DEVNAME}`/`%k` placeholder syntax would collide with it.
+	var run_cmd := (
+		"/bin/sh -c '/usr/bin/mkdir -p " + mount_path + "; /usr/bin/mountpoint -q " + mount_path
+		+ " || /usr/bin/systemd-run --property=Type=oneshot --property=RemainAfterExit=yes"
+		+ " -- /usr/bin/mount -t ntfs-3g -o uid=" + uid + ",gid=" + gid + ",nodev,nosuid /dev/%k "
+		+ mount_path + "'"
+	)
+	# Not scoped by ENV{ID_FS_UUID} like the two RUN+= above — confirmed live
+	# (2026-09-17) that a "remove" event doesn't carry that property at all
+	# (blkid only ever populates it on add/change), so a UUID-scoped remove
+	# rule silently never matches. Scoped by SUBSYSTEM instead, firing on
+	# every block removal on the system; the script itself is what narrows
+	# it down, only acting if THIS mount point's own source device is the
+	# one that just disappeared.
+	var remove_cmd := (
+		"/bin/sh -c 'SRC=$(/usr/bin/findmnt -no SOURCE " + mount_path + " 2>/dev/null);"
+		+ " [ -n \"$SRC\" ] && [ ! -e \"$SRC\" ] && { /usr/bin/umount -l " + mount_path
+		+ "; /usr/bin/rmdir " + mount_path + "; }; exit 0'"
+	)
+	# "add" covers a plain USB drive's physical reconnect; "change" covers a
+	# fixed CFexpress/USB-C reader swapping the card without the USB link
+	# itself ever disconnecting (live-reported, 2026-09-17 — no "add" fired
+	# at all for that case, only "change" once the kernel noticed new
+	# media); "remove" tears the mount point back down so a later re-add/
+	# change doesn't find it busy or stale.
 	var rule_content := (
 		'ACTION=="add", ENV{ID_FS_UUID}=="' + uuid + '", RUN+="' + run_cmd + '"\n'
 		+ 'ACTION=="change", ENV{ID_FS_UUID}=="' + uuid + '", RUN+="' + run_cmd + '"\n'
+		+ 'ACTION=="remove", SUBSYSTEM=="block", RUN+="' + remove_cmd + '"\n'
 	)
 	# Content-compared, not just existence-checked: an already-installed but
-	# outdated rule (the racy single-attempt version above) must be
-	# reinstalled once this ships, not left broken forever on a machine that
-	# granted the exception before the fix existed.
+	# outdated rule (an earlier udisksctl-based version, still fragile
+	# against the polkit issue above) must be reinstalled once this ships,
+	# not left broken forever on a machine that granted the exception
+	# before the fix existed.
 	if FileAccess.file_exists(rule_path) and FileAccess.get_file_as_string(rule_path) == rule_content:
 		return
 
