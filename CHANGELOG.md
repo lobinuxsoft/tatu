@@ -1,5 +1,337 @@
 # Changelog
 
+## [0.15.0](https://github.com/lobinuxsoft/tatu/compare/v0.14.1...v0.15.0) (2026-09-18)
+
+
+### Features
+
+* **egs:** cartridge install path + DRM classification via PCGamingWiki ([d6ae0b0](https://github.com/lobinuxsoft/tatu/commit/d6ae0b09856add000a930cec7a59f52e10107b52))
+* **egs:** cartridge install path + DRM classification via PCGamingWiki ([4ddb68a](https://github.com/lobinuxsoft/tatu/commit/4ddb68a162362bcc8f0b8f5a4e25d5bc070745c1))
+* **egs:** manifest + chunked download protocol ([7420413](https://github.com/lobinuxsoft/tatu/commit/7420413d1a1831dfa7409f8c8935c4f5423076a8))
+* **egs:** manifest + chunked download protocol ([d1ceaf3](https://github.com/lobinuxsoft/tatu/commit/d1ceaf3a17f89e5b963d5fd252315b3fbf183ac3)), closes [#344](https://github.com/lobinuxsoft/tatu/issues/344)
+* **egs:** native OAuth + owned-games list + EGS tab ([c7e3112](https://github.com/lobinuxsoft/tatu/commit/c7e31123289bdca95d87e7dd9493bf06a2d31c83))
+* **egs:** native OAuth + owned-games list + EGS tab ([c70fa9c](https://github.com/lobinuxsoft/tatu/commit/c70fa9cfc8e39ba1b2eaba6f863e038988476204)), closes [#343](https://github.com/lobinuxsoft/tatu/issues/343)
+* **launcher:** add keyboard M icon for the auto-mount action hint ([84cb753](https://github.com/lobinuxsoft/tatu/commit/84cb7538dd43d5ca4651408c0dc87761f27f2592)), closes [#357](https://github.com/lobinuxsoft/tatu/issues/357)
+* **launcher:** add RB/R1 icon for the auto-mount action hint ([9f563b3](https://github.com/lobinuxsoft/tatu/commit/9f563b3047816cb3e01c7520fff0202bdaca7c57)), closes [#357](https://github.com/lobinuxsoft/tatu/issues/357)
+* **launcher:** auto-mount as its own RB/R1 button, not tied to Steam ([ea23ad0](https://github.com/lobinuxsoft/tatu/commit/ea23ad0191ffdef02fe6376362ccfea51338a93b))
+* **launcher:** auto-mount as its own RB/R1 button, not tied to Steam ([ba82b7b](https://github.com/lobinuxsoft/tatu/commit/ba82b7b7f12a64670eef041d940ada24748cffa2)), closes [#357](https://github.com/lobinuxsoft/tatu/issues/357)
+* **launcher:** auto-mount exception for the cartridge on Linux ([293a173](https://github.com/lobinuxsoft/tatu/commit/293a173661a29f9f8d3c28d0fea114199b029e46))
+* **launcher:** auto-mount exception for the cartridge on Linux ([49a3a2c](https://github.com/lobinuxsoft/tatu/commit/49a3a2cb2d40693c5505b795946fcfe5dd29c7dd)), closes [#351](https://github.com/lobinuxsoft/tatu/issues/351)
+
+
+### Bug Fixes
+
+* **drm:** downgrade Easy to Trivial when steam_api(64).dll is absent ([169e8fb](https://github.com/lobinuxsoft/tatu/commit/169e8fb7f7e56ce85af1a79c192425163bf5203d))
+* **drm:** downgrade Easy to Trivial when steam_api(64).dll is absent ([5d56694](https://github.com/lobinuxsoft/tatu/commit/5d56694adc89eb64cc6bae19df1ae139567c5988)), closes [#353](https://github.com/lobinuxsoft/tatu/issues/353)
+* **drm:** use MediaWiki's recommended User-Agent format for PCGamingWiki ([49e090c](https://github.com/lobinuxsoft/tatu/commit/49e090c4df2966cfbe034e22f6eb1870b690cea6))
+* **drm:** use MediaWiki's recommended User-Agent format for PCGamingWiki ([822ff86](https://github.com/lobinuxsoft/tatu/commit/822ff86d72d46cd32e9b866c4768aa60c295ab74))
+* **egs:** filter marketplace assets, add image-type fallback, surface real login errors ([e0661b8](https://github.com/lobinuxsoft/tatu/commit/e0661b878a635b0e9f2c70bdcaadb1c7e4b4a79a))
+* **egs:** silence a clippy lint CI's newer toolchain flags but this repo's doesn't recognize ([4712319](https://github.com/lobinuxsoft/tatu/commit/47123191c1383b8c712984b592037031cf5b33a1))
+* **launcher:** bound action-status text width so it stays centered ([0d5969c](https://github.com/lobinuxsoft/tatu/commit/0d5969c11322b977d6d9c5c4a2c0bf5188c4c295))
+* **launcher:** CenterContainer for status/prompt text, match change events too ([b0c0443](https://github.com/lobinuxsoft/tatu/commit/b0c0443e53fd714001da3d2de970bca129dcb8a1))
+* **launcher:** raw mount via systemd-run instead of udisksctl ([4cd459a](https://github.com/lobinuxsoft/tatu/commit/4cd459a8097e8081b1d45ae0b6cafbea4b3422b0))
+* **launcher:** register Steam against the new auto-mount path same run ([12e3807](https://github.com/lobinuxsoft/tatu/commit/12e380771cd261de8f1579997893e93d223e4ddf))
+* **launcher:** retry the automount rule's udisksctl call ([ed84dad](https://github.com/lobinuxsoft/tatu/commit/ed84dad7fc7b77639d5c1072c3bb63c6559237e0))
+
+
+### Tests
+
+* **cheat-runtime:** ignore flaky wait_for_debug_event timeout test ([26357ec](https://github.com/lobinuxsoft/tatu/commit/26357ec2a7d549d757656464e38e5e828e84c44e)), closes [#355](https://github.com/lobinuxsoft/tatu/issues/355)
+* ignore flaky wait_for_debug_event timeout test ([28956c9](https://github.com/lobinuxsoft/tatu/commit/28956c98b83d6e944ddd4697f2ce0ff5f1052782))
+
+## [0.14.1](https://github.com/lobinuxsoft/tatu/compare/v0.14.0...v0.14.1) (2026-09-16)
+
+
+### Documentation
+
+* slim README down to essentials, link out to the new wiki ([3c4598b](https://github.com/lobinuxsoft/tatu/commit/3c4598bb8551bcd98b5910788b70de4f3ef1c4f7))
+* slim README down to essentials, link out to the new wiki ([10f47c8](https://github.com/lobinuxsoft/tatu/commit/10f47c82607c9c49d2346d1e9088e335339c38f6))
+
+## [0.14.0](https://github.com/lobinuxsoft/tatu/compare/v0.13.5...v0.14.0) (2026-09-10)
+
+
+### Features
+
+* **cartridge:** copy non-Steam games to NON_STEAM/ with manual art ([#327](https://github.com/lobinuxsoft/tatu/issues/327), [#328](https://github.com/lobinuxsoft/tatu/issues/328)) ([2307ff6](https://github.com/lobinuxsoft/tatu/commit/2307ff629a2dd35ff49c4caa4a1e2fdca2225b47))
+* **cartridge:** non-Steam games on the cartridge — copy, art, Steam shortcut ([#236](https://github.com/lobinuxsoft/tatu/issues/236)) ([3a69feb](https://github.com/lobinuxsoft/tatu/commit/3a69feb60c620e03628d916fcd2e0e0587f0954a))
+* **launcher:** let the player choose where to install/copy a game ([54e5383](https://github.com/lobinuxsoft/tatu/commit/54e5383b1b9202ceb647c274986b424d5aa1fcbc))
+* **launcher:** let the player choose where to install/copy a game ([#335](https://github.com/lobinuxsoft/tatu/issues/335)) ([aac215d](https://github.com/lobinuxsoft/tatu/commit/aac215d4f2bb0dc74583fe16a7a6ced22e747cf1))
+* **launcher:** register Steam shortcuts for non-Steam apps too ([#329](https://github.com/lobinuxsoft/tatu/issues/329)) ([aab3d5a](https://github.com/lobinuxsoft/tatu/commit/aab3d5adcf0b1bfec7e7d3a33aa9e3c1d9f9d6d1))
+
+
+### Bug Fixes
+
+* disable VA-API to avoid WebKitGTK video decode crash ([1fc6c04](https://github.com/lobinuxsoft/tatu/commit/1fc6c04e8f41d7d1154f2aecc854060a141c8f0d))
+* **launcher:** copy the real install root, not one level too deep ([d2f0e4a](https://github.com/lobinuxsoft/tatu/commit/d2f0e4a897f824019568f5c328508a2ebbab42a9))
+* **launcher:** fix permissions on local copies from the NTFS cartridge ([21f32dd](https://github.com/lobinuxsoft/tatu/commit/21f32dd828ccd9627daae7ccec8bfbf2d7f1ad38))
+* **launcher:** folder picker never returned, hanging on any choice ([f2e3597](https://github.com/lobinuxsoft/tatu/commit/f2e35979430c33cc1c59ddc33fa748d717d9ff11))
+* **launcher:** move Tatu's local dir from ~/.local/share/tatu to ~/tatu ([3572b8c](https://github.com/lobinuxsoft/tatu/commit/3572b8cdaa93e8c726c301ad877119ab2be7ac2d))
+* **launcher:** non-Steam local copy and per-machine shortcut map ([f93ffcf](https://github.com/lobinuxsoft/tatu/commit/f93ffcf730577bf11dff139f34d62f1154404e9e))
+* **launcher:** non-Steam local copy and per-machine shortcut map ([#333](https://github.com/lobinuxsoft/tatu/issues/333)) ([d2b9af8](https://github.com/lobinuxsoft/tatu/commit/d2b9af8ed8639a2153c67f329baa735e5614a7ae))
+* **launcher:** pass app_id to resolve_exe in apply_shortcuts ([3448e33](https://github.com/lobinuxsoft/tatu/commit/3448e33f1d2376054518a0a182f0a6654efdcbf9))
+* **launcher:** restore SELinux context after copying off the cartridge ([150b54a](https://github.com/lobinuxsoft/tatu/commit/150b54addd8f1a6765423c7731913fb8f84a4506))
+* **launcher:** stop Steam gracefully so CDP-created shortcuts persist ([d28941e](https://github.com/lobinuxsoft/tatu/commit/d28941e9fac33671af2976340470af83b95a3911))
+* skip Valve compat tools when syncing installed cartridge apps ([743d3b4](https://github.com/lobinuxsoft/tatu/commit/743d3b40b610e0028e03da75e906f0fb00b877b9))
+
+## [0.13.5](https://github.com/lobinuxsoft/tatu/compare/v0.13.4...v0.13.5) (2026-09-07)
+
+
+### Bug Fixes
+
+* setear STEAM_COMPAT_INSTALL_PATH/LIBRARY_PATHS en launcher standalone ([df9a73e](https://github.com/lobinuxsoft/tatu/commit/df9a73e5ee1debcde9b5866acedc1920d92f3356))
+* setear STEAM_COMPAT_INSTALL_PATH/LIBRARY_PATHS en launcher standalone ([6a4e5fe](https://github.com/lobinuxsoft/tatu/commit/6a4e5fe80c4c953e3e4132aaa4bda298e02194ef)), closes [#323](https://github.com/lobinuxsoft/tatu/issues/323)
+
+## [0.13.4](https://github.com/lobinuxsoft/tatu/compare/v0.13.3...v0.13.4) (2026-09-06)
+
+
+### Bug Fixes
+
+* invalidar marker de runtime si cambió la versión de Proton ([504b04d](https://github.com/lobinuxsoft/tatu/commit/504b04d2d19d034c375df28befa9ce63319839b3))
+* invalidar marker de runtime si cambió la versión de Proton ([6fde2cc](https://github.com/lobinuxsoft/tatu/commit/6fde2ccf1764353992c0c6b0fe1e5a176a3c8b44)), closes [#319](https://github.com/lobinuxsoft/tatu/issues/319)
+
+## [0.13.3](https://github.com/lobinuxsoft/tatu/compare/v0.13.2...v0.13.3) (2026-09-06)
+
+
+### Bug Fixes
+
+* **launcher:** move the local-copy feature off Launch, onto its own S/X menu ([32af7eb](https://github.com/lobinuxsoft/tatu/commit/32af7eb3b661496c89670f1be22bed851c50ad32))
+* **launcher:** move the local-copy feature off Launch, onto its own S/X menu ([cc4a8ad](https://github.com/lobinuxsoft/tatu/commit/cc4a8ade8db38daa4ac1a5880ab415b94b278593))
+
+## [0.13.2](https://github.com/lobinuxsoft/tatu/compare/v0.13.1...v0.13.2) (2026-09-06)
+
+
+### Bug Fixes
+
+* **cartridge:** recover from an orphaned steam_api backup ([feae4c4](https://github.com/lobinuxsoft/tatu/commit/feae4c4573036a031c5b70ea9f60686fd79ca575))
+* **cartridge:** recover from an orphaned steam_api backup ([00471a4](https://github.com/lobinuxsoft/tatu/commit/00471a475edf860c81c977f28da35ed08d467df8))
+
+## [0.13.1](https://github.com/lobinuxsoft/tatu/compare/v0.13.0...v0.13.1) (2026-09-06)
+
+
+### Bug Fixes
+
+* **cartridge:** force IPv4 for runtime downloads ([13510dc](https://github.com/lobinuxsoft/tatu/commit/13510dc89a54072da9a777c1f0c95940cde92d32))
+* **cartridge:** force IPv4 for runtime downloads ([d1c5f39](https://github.com/lobinuxsoft/tatu/commit/d1c5f3955ac74bfb7e61af3e8dc94b6b90d9943d))
+
+## [0.13.0](https://github.com/lobinuxsoft/tatu/compare/v0.12.2...v0.13.0) (2026-09-06)
+
+
+### Features
+
+* **launcher:** copy the game to local disk before launching it ([07d0388](https://github.com/lobinuxsoft/tatu/commit/07d03887373ab9ea7e5867d6e6ba54c023f2c0a4))
+* **launcher:** copy the game to local disk before launching it ([2b06d46](https://github.com/lobinuxsoft/tatu/commit/2b06d46cf026e06712cfec7bd9bef11f0c9e69e1))
+
+## [0.12.2](https://github.com/lobinuxsoft/tatu/compare/v0.12.1...v0.12.2) (2026-09-06)
+
+
+### Bug Fixes
+
+* **drm:** scope launcher-vendor DRM detection to the Steam row only ([bd14981](https://github.com/lobinuxsoft/tatu/commit/bd149811123eb769dc17be08b277f35399d9630a))
+* **drm:** scope launcher-vendor DRM detection to the Steam row only ([c9750e9](https://github.com/lobinuxsoft/tatu/commit/c9750e9f592b50650ced2caaa1e83bed1279a3d1))
+
+## [0.12.1](https://github.com/lobinuxsoft/tatu/compare/v0.12.0...v0.12.1) (2026-09-06)
+
+
+### Bug Fixes
+
+* **ci:** copy export templates into the container's real $HOME ([554109e](https://github.com/lobinuxsoft/tatu/commit/554109e7f4230238f668bdd95a829becd80c2f27))
+* **ci:** copy export templates into the container's real $HOME ([b800951](https://github.com/lobinuxsoft/tatu/commit/b8009518e855f182a0b191754640c2ca1debc469))
+* **ci:** set the executable bit on launcher/export.sh ([bd2d243](https://github.com/lobinuxsoft/tatu/commit/bd2d2438da24cf9d7fe6125a695fad703289461f))
+* **ci:** set the executable bit on launcher/export.sh ([a496271](https://github.com/lobinuxsoft/tatu/commit/a496271da4413f6a526240c7659a287a3c5935d8))
+* **ci:** ship Goldberg and the Godot launcher in real releases ([d6b286c](https://github.com/lobinuxsoft/tatu/commit/d6b286cfd27946d948144893b6261046ba128a47))
+* **ci:** ship Goldberg and the Godot launcher in real releases ([6957b2b](https://github.com/lobinuxsoft/tatu/commit/6957b2bb8879a7e9b984966f820d888974cc2990)), closes [#285](https://github.com/lobinuxsoft/tatu/issues/285)
+
+## [0.12.0](https://github.com/lobinuxsoft/tatu/compare/v0.11.0...v0.12.0) (2026-09-05)
+
+
+### Features
+
+* **cartridge:** let the user reorder games in the launcher ([a346268](https://github.com/lobinuxsoft/tatu/commit/a3462683422ddc9074125bc4eeff5394fec7eb86))
+* **cartridge:** let the user reorder games in the launcher ([479faee](https://github.com/lobinuxsoft/tatu/commit/479faeeb04fbc3c40f985f7ff9c98db487f4757a))
+* **library:** mark Steam/GOG games as installed on a cartridge ([1b28c1b](https://github.com/lobinuxsoft/tatu/commit/1b28c1b3718b335fbb1bc5a66812a8ea3fedeb46))
+* **library:** mark Steam/GOG games as installed on a cartridge ([aac7952](https://github.com/lobinuxsoft/tatu/commit/aac795215a0653a4efa27fa65ba3b42faba5e693))
+
+
+### Bug Fixes
+
+* **cartridge:** don't refuse Goldberg injection for a SteamStub-wrapped entry point ([4c90536](https://github.com/lobinuxsoft/tatu/commit/4c90536956e9c40393f6d6b99a967bbe6286f6fd))
+* **cartridge:** don't refuse Goldberg injection for a SteamStub-wrapped entry point ([00dba4c](https://github.com/lobinuxsoft/tatu/commit/00dba4c69cfe843d3bc5e7da32796abd75fa1cc0))
+* **cartridge:** every game's saves point at its real Steam location ([9ac4d7b](https://github.com/lobinuxsoft/tatu/commit/9ac4d7b1848274b1515bea4ce3fb86b0beed13b3))
+* **cartridge:** point Goldberg's local_save_path at real Steam userdata ([a068bd7](https://github.com/lobinuxsoft/tatu/commit/a068bd7ce851838104bebb3b7b27134f2d72084b))
+* **launcher:** reuse a game's real compatdata prefix across libraries ([5a15bf7](https://github.com/lobinuxsoft/tatu/commit/5a15bf7adf98c6375982d01aae071f9507882d9d))
+
+## [0.11.0](https://github.com/lobinuxsoft/tatu/compare/v0.10.0...v0.11.0) (2026-09-05)
+
+
+### Features
+
+* **cartridge:** resolve the standalone entry point from Steam's own appinfo.vdf ([a20de04](https://github.com/lobinuxsoft/tatu/commit/a20de04e68662ce410efc844dc059069c9c0725f))
+
+
+### Bug Fixes
+
+* **cartridge:** resolve standalone entry point from Steam's own appinfo.vdf ([fae54b3](https://github.com/lobinuxsoft/tatu/commit/fae54b325e327d1e1fb6b2d2af094f04668a2569))
+* **cartridge:** surface per-app injection errors in the UI ([2a9aa8a](https://github.com/lobinuxsoft/tatu/commit/2a9aa8abd171a218cc1c7598e69f9ad606777e94))
+
+## [0.10.0](https://github.com/lobinuxsoft/tatu/compare/v0.9.0...v0.10.0) (2026-09-04)
+
+
+### Features
+
+* **cartridge:** "install to a cartridge" modal in the game detail view ([8e26eb8](https://github.com/lobinuxsoft/tatu/commit/8e26eb858c0433e697a7583771b4105bafb8ecef))
+* **cartridge:** "install to a cartridge" modal in the game detail view ([93e936b](https://github.com/lobinuxsoft/tatu/commit/93e936b2c636c33b00695123b53482ffb873b68b))
+* **cartridge:** auto re-classify and inject Goldberg in Preparar launcher ([eac0481](https://github.com/lobinuxsoft/tatu/commit/eac0481b64ecf4442a1fc8ab779c824cbfcc06a1))
+* **cartridge:** bundle Linux runtime (umu-run + Proton + Steam Linux Runtime) ([6e6bd5a](https://github.com/lobinuxsoft/tatu/commit/6e6bd5ad74d18294b349a864c65c32cdb703ca2d))
+* **cartridge:** cache SteamGridDB cover art onto the cartridge ([ef3dee7](https://github.com/lobinuxsoft/tatu/commit/ef3dee7c2655671e39acb7c9e18fb1f7351022f5))
+* **cartridge:** cache SteamGridDB cover art onto the cartridge ([722ea3e](https://github.com/lobinuxsoft/tatu/commit/722ea3e54f8e9fc8f0385e4188303b4b3ac2d56c)), closes [#205](https://github.com/lobinuxsoft/tatu/issues/205)
+* **cartridge:** dedicated format/reformat entry point in the Cartucho tab ([934fe7d](https://github.com/lobinuxsoft/tatu/commit/934fe7db29c8e8b89a3a1f865aff86ab4f5b343d))
+* **cartridge:** detect and refuse read-only drives ([447cf54](https://github.com/lobinuxsoft/tatu/commit/447cf541b5b7da6457bf65c895fb6f8fae8149bf))
+* **cartridge:** disk usage breakdown bar chart in the Cartucho tab ([93451bc](https://github.com/lobinuxsoft/tatu/commit/93451bc2e0d5d70f0776975b60aebcdb1ef7f26c))
+* **cartridge:** disk usage breakdown bar chart in the Cartucho tab ([16e5f8c](https://github.com/lobinuxsoft/tatu/commit/16e5f8cc469ec514959f882cf852d832d889866a))
+* **cartridge:** enumerate removable drives + detect an existing cartridge ([a58a974](https://github.com/lobinuxsoft/tatu/commit/a58a9743f52d24d60970cdb6ecaa6bd2ec1ef8d6))
+* **cartridge:** enumerate removable drives + detect an existing cartridge ([2b1c9ec](https://github.com/lobinuxsoft/tatu/commit/2b1c9ecc775f7bf78580d15c693e552b1e30ff1f))
+* **cartridge:** format a drive as a cartridge (destructive, own safety bar) ([8c99eb6](https://github.com/lobinuxsoft/tatu/commit/8c99eb6a8cfd017bed74a7b18b33453402fb6c3c))
+* **cartridge:** format a drive as a cartridge (destructive, own safety bar) ([410f0f1](https://github.com/lobinuxsoft/tatu/commit/410f0f1eea9c54679e30a8e559a26e0fce3b6e20))
+* **cartridge:** Goldberg injection for Steam-wrapper-only games ([92516aa](https://github.com/lobinuxsoft/tatu/commit/92516aa7c3a4a40fcbee5d0d32f7f34e31fc76a2))
+* **cartridge:** Goldberg injection for Steam-wrapper-only games ([2fdf2a6](https://github.com/lobinuxsoft/tatu/commit/2fdf2a66b3f3919485c9986fd4c5b2306806a5f4))
+* **cartridge:** Linux execution via umu-run + Proton ([#206](https://github.com/lobinuxsoft/tatu/issues/206)) ([51d5573](https://github.com/lobinuxsoft/tatu/commit/51d55737fb4c3c3701beced52986347dd7503415))
+* **cartridge:** register as a Steam library + trigger/track a standard install ([c9e4c88](https://github.com/lobinuxsoft/tatu/commit/c9e4c88aa61eae2f97b5beb24ebef539bf732d10))
+* **cartridge:** register as a Steam library + trigger/track a standard install ([1119c3f](https://github.com/lobinuxsoft/tatu/commit/1119c3f9c57bb8230002279f3185e78ca4dd0b90))
+* **drm:** fingerprint installed files when classification is Unknown ([92716a5](https://github.com/lobinuxsoft/tatu/commit/92716a524139bdc38dfd88408fe2c26ec109c06d))
+* **drm:** local-file fingerprinting + automatic Goldberg re-injection ([4e71039](https://github.com/lobinuxsoft/tatu/commit/4e71039dadccaa369fe3fe3d3e5166763d21cbe0))
+* **drm:** query GOG's own catalog instead of inferring from PCGamingWiki ([a35b26f](https://github.com/lobinuxsoft/tatu/commit/a35b26f78e63fbf4f3489c62992d8819db17632d))
+* **drm:** query GOG's own catalog instead of only inferring from PCGW ([c635672](https://github.com/lobinuxsoft/tatu/commit/c63567228b87592ff6817251969f242f6e1989c2))
+* **gog:** account login, owned-games library, shared detail template ([ff1da56](https://github.com/lobinuxsoft/tatu/commit/ff1da56af64d0fc641b3a0c02a97cad583e7b5eb))
+* **gog:** account login, owned-games library, shared detail template ([cce7019](https://github.com/lobinuxsoft/tatu/commit/cce7019dbb4dff2ef636b5c68f3f023392dba4a3))
+* **gog:** content-system v2 protocol reader ([9c1dd20](https://github.com/lobinuxsoft/tatu/commit/9c1dd20a7d18cf0ad5d82a90fb1290bf49c0649a))
+* **gog:** implement content-system v2 protocol reader ([0a97bf2](https://github.com/lobinuxsoft/tatu/commit/0a97bf265127f281671cab0199a1b9bbe3515a36))
+* **gog:** install to cartridge - marker integration, resilient downloads, launcher UI ([be9bc2a](https://github.com/lobinuxsoft/tatu/commit/be9bc2a2e1ce6b2f85f35ec45cffa6588e6540d1))
+* **gog:** install-to-cartridge UI - size preview, real cancel, GOG art in Preparar launcher ([5ba04e9](https://github.com/lobinuxsoft/tatu/commit/5ba04e9de7e53a81203f4b594325b3c5594ced04))
+* **gog:** multi-file depot download orchestration ([40efb5c](https://github.com/lobinuxsoft/tatu/commit/40efb5c78043659b7307db152fd9ed546e3f6477))
+* **gog:** register downloaded games on the cartridge marker ([298690d](https://github.com/lobinuxsoft/tatu/commit/298690da03e89f61f7de96300ef89a2cfd336956))
+* **launcher:** --cartridge-root dev override for smoke-testing ([bf71290](https://github.com/lobinuxsoft/tatu/commit/bf7129007328ab37d5ad556841a4aff11dcc3f71))
+* **launcher:** --cartridge-root dev override for smoke-testing ([#206](https://github.com/lobinuxsoft/tatu/issues/206)) ([170c550](https://github.com/lobinuxsoft/tatu/commit/170c5506ea745b06d620aa9c46d09a06fe93dd24))
+* **launcher:** add an editor-only test cartridge fixture ([68f4565](https://github.com/lobinuxsoft/tatu/commit/68f4565ed8ad999e4952303d78b22279fd690c9f))
+* **launcher:** apply Steam Non-Steam shortcut + art for GOG apps via CDP ([6b72718](https://github.com/lobinuxsoft/tatu/commit/6b727185d07b84122de3a2dfcff69d4440a75ac8))
+* **launcher:** automate Steam library registration ([#208](https://github.com/lobinuxsoft/tatu/issues/208)) ([e71f39a](https://github.com/lobinuxsoft/tatu/commit/e71f39a9b1463a7c7b86bd316fc392720e706574))
+* **launcher:** automate Steam library registration ([#208](https://github.com/lobinuxsoft/tatu/issues/208)) ([9c361d5](https://github.com/lobinuxsoft/tatu/commit/9c361d504599d81c94bbe733588fe8e8747a8d33))
+* **launcher:** copy launcher binaries onto cartridge, add Cartucho management tab ([99c3b42](https://github.com/lobinuxsoft/tatu/commit/99c3b4228ce71bfa102b34141fb69f55cbecd08f))
+* **launcher:** copy launcher binaries onto the cartridge, add cartridge management tab ([#204](https://github.com/lobinuxsoft/tatu/issues/204)) ([dbb9d77](https://github.com/lobinuxsoft/tatu/commit/dbb9d77788eb016ea4ac18f90acc93d4027ae8c1))
+* **launcher:** deploy and run Goldberg-patched games via umu-run ([#206](https://github.com/lobinuxsoft/tatu/issues/206)) ([01e9d9d](https://github.com/lobinuxsoft/tatu/commit/01e9d9dd6e6942bf0af1fbad869808c44ff6194c))
+* **launcher:** fetch real Steam screenshots for the gallery ([c16ccaa](https://github.com/lobinuxsoft/tatu/commit/c16ccaa10214fd3d55e57d53715d0c4ebfc4d120))
+* **launcher:** fetch real Steam screenshots for the gallery ([#213](https://github.com/lobinuxsoft/tatu/issues/213)) ([72069eb](https://github.com/lobinuxsoft/tatu/commit/72069eb37c1aedea4fa3ad0760dcc156821ef59b))
+* **launcher:** opt-in trailer video as cartridge background ([3bca636](https://github.com/lobinuxsoft/tatu/commit/3bca636d309aa52d63c66ac409e0979e0fe82f55))
+* **launcher:** opt-in trailer video as cartridge background ([#212](https://github.com/lobinuxsoft/tatu/issues/212)) ([b6ba4ac](https://github.com/lobinuxsoft/tatu/commit/b6ba4acf9340fd8190740a6c1f02f79d6a0f3b72))
+* **launcher:** portrait cards with rounded corners + shadow, real HBox row ([b1586e4](https://github.com/lobinuxsoft/tatu/commit/b1586e45c96c97c25e14b8956c0d7b652b086469))
+* **launcher:** real fonts/icons, bounce easing, drag-to-browse, proportional UI ([94cc845](https://github.com/lobinuxsoft/tatu/commit/94cc8456a6a85eea9cec5eb3bfd265e8d260657a))
+* **launcher:** real glass panels — cards blur through, not clip against ([d376b07](https://github.com/lobinuxsoft/tatu/commit/d376b07cc7e01381b3d1abc822ffd7030800ce69))
+* **launcher:** rework as a Steam-Deck-style carousel ([19bd23b](https://github.com/lobinuxsoft/tatu/commit/19bd23b598250b1008da64b2ef91f13333af5c5b))
+* **launcher:** scaffold the cartridge launcher (Godot, animated cards) ([29fd45d](https://github.com/lobinuxsoft/tatu/commit/29fd45df92a11882ec6a7bac17fea86c87c0c534))
+* **launcher:** scaffold the cartridge launcher (Godot, animated cards) ([15fd5ee](https://github.com/lobinuxsoft/tatu/commit/15fd5ee329e27228e577dac4d0a7e5e46722aca5))
+* **launcher:** screenshot gallery with gamepad-first navigation ([#213](https://github.com/lobinuxsoft/tatu/issues/213)) ([2555485](https://github.com/lobinuxsoft/tatu/commit/2555485fac8e8daf675156ea794af113de1887ef))
+* **launcher:** Steam shortcut + art for GOG games via CDP ([53e78fd](https://github.com/lobinuxsoft/tatu/commit/53e78fdc975e836ebff8f202ea6209a8dba26ccb))
+* **launcher:** version-check runtime, always refresh art/description, 720p trailers ([e4e198b](https://github.com/lobinuxsoft/tatu/commit/e4e198b8d755fae6f6d0ad1a8072d19d07f95b92))
+* **launcher:** version-check the runtime, always refresh art/description, bump trailer to 720p ([a7c832c](https://github.com/lobinuxsoft/tatu/commit/a7c832c2555b87893f0dee6537ab42413e139def))
+* **steam,gog,drm:** filter by publisher/developer, bulk detail fetch, PCGamingWiki auth ([f43ae0e](https://github.com/lobinuxsoft/tatu/commit/f43ae0e1cb3f1a5e556fa1425e21186fcaf16658))
+* **ui:** visible progress bar for DRM analysis ([4910f09](https://github.com/lobinuxsoft/tatu/commit/4910f09d26c6b1ca8ba421055bea33452ccd05fb))
+* **ui:** visible progress bar for DRM analysis ([1913d6b](https://github.com/lobinuxsoft/tatu/commit/1913d6b6d54545c219e92dc76aaef4fcdc92e118))
+
+
+### Bug Fixes
+
+* **cartridge,launcher:** fix silent first-run failures and dead gamepad focus ([696a4bb](https://github.com/lobinuxsoft/tatu/commit/696a4bbb103357df4b8749ab5a4844af91de673c))
+* **cartridge,launcher:** fix silent first-run failures and dead gamepad focus ([a619d0a](https://github.com/lobinuxsoft/tatu/commit/a619d0a3e8ecb96bcc6b92b4de2a1c4941d8d4ac))
+* **cartridge:** force Windows depot, resume installs, isolate umu storage ([4baf288](https://github.com/lobinuxsoft/tatu/commit/4baf28846952a086a6e711074d548ea4d40c009f))
+* **cartridge:** format the whole disk, not just the existing partition ([f62ef33](https://github.com/lobinuxsoft/tatu/commit/f62ef336e6ccecf64ef44b676e1ebc654ccd17f9))
+* **cartridge:** keep Proton's wineprefix working off a cartridge ([9a4aede](https://github.com/lobinuxsoft/tatu/commit/9a4aede5689938c60f2094bbd172d6b11bdd76a5))
+* **cartridge:** keep standalone Goldberg saves on the real account and prefix ([49bd054](https://github.com/lobinuxsoft/tatu/commit/49bd054db6e9b782d5f241cc28d70134fc3d95bc))
+* **cartridge:** make exe-picking cross-platform, unbreaking Windows CI ([ea4957d](https://github.com/lobinuxsoft/tatu/commit/ea4957d71fdd68d6761594a4cdde4f4ced993f35))
+* **cartridge:** mount an already-formatted drive that shows unmounted ([f83a6ac](https://github.com/lobinuxsoft/tatu/commit/f83a6ac8fb641841721731b0b76c1cb70242c1ec))
+* **cartridge:** mount, resume, force-Windows-depot, isolate umu (found live smoke-testing [#206](https://github.com/lobinuxsoft/tatu/issues/206)) ([2f9fe11](https://github.com/lobinuxsoft/tatu/commit/2f9fe114b8ef9a08539ffb0b7a739e3c3e42b16d))
+* **cartridge:** NTFS symlinks off a cartridge, whole-disk format, dedicated format entry point ([2b7630f](https://github.com/lobinuxsoft/tatu/commit/2b7630f7e8bd11e515088ff20dc74e831208731d))
+* **cartridge:** standalone Goldberg saves stay on the real account and Steam Cloud ([709b93b](https://github.com/lobinuxsoft/tatu/commit/709b93b9880839a8d51cd3fb82ea80171854b153))
+* **cartridge:** sync marker with Steam-installed apps, slim detail-view IPC ([f31b523](https://github.com/lobinuxsoft/tatu/commit/f31b523b51345cd97422f160e358a515d46d7c90))
+* **cartridge:** sync marker with Steam-installed apps, slim detail-view IPC ([6821427](https://github.com/lobinuxsoft/tatu/commit/6821427ec83958c23729ac654645f36cac62dd24))
+* **drm:** gate the local-file probe behind cfg(unix) ([70ebc7a](https://github.com/lobinuxsoft/tatu/commit/70ebc7a510971af3d447a7dcc708fb9ee0116c51))
+* **gog:** resilient downloads - retry, larger chunks, real cancel ([1a8cff2](https://github.com/lobinuxsoft/tatu/commit/1a8cff28bb7e41be066a5334930bcab1a2226a92))
+* **launcher:** Add to Steam gets the same status feedback as launching ([40d015f](https://github.com/lobinuxsoft/tatu/commit/40d015f74608ee0ef2621b0109d08ea301bf874b))
+* **launcher:** add window/exe icon, show feedback while launching ([#204](https://github.com/lobinuxsoft/tatu/issues/204)) ([e5e52e8](https://github.com/lobinuxsoft/tatu/commit/e5e52e843b085c597465dd6976df5c4fc63452d0))
+* **launcher:** always restart Steam on Add Cartridge, stamp build info ([f31dc05](https://github.com/lobinuxsoft/tatu/commit/f31dc054ecad04d8b79b12eb3991ec826db8b6ff))
+* **launcher:** always restart Steam on Add Cartridge, stamp build info ([5ff5393](https://github.com/lobinuxsoft/tatu/commit/5ff5393c32e662b37c329ad5bdeed172d9900168))
+* **launcher:** always show card name, anchor actions to panel bottom ([d618ae5](https://github.com/lobinuxsoft/tatu/commit/d618ae53b1a8aba46251900c3ea7bd37bd70d149))
+* **launcher:** bottom-center action bar, browsable screenshot viewer ([b7d9b06](https://github.com/lobinuxsoft/tatu/commit/b7d9b06eef2b1c1329602df37ef3621d1f807d26))
+* **launcher:** cards rescale on resize, gap at panel edges, better easing ([4eb94d1](https://github.com/lobinuxsoft/tatu/commit/4eb94d1a1d85df96a2d29012fc86424bce258267))
+* **launcher:** decouple Add Cartridge from the selected game ([1556487](https://github.com/lobinuxsoft/tatu/commit/155648706ddcb51d7d7bbd1f2c9a0a93a0b31a57))
+* **launcher:** export.sh writes straight to the vendor path Tatu reads from ([ebdbc74](https://github.com/lobinuxsoft/tatu/commit/ebdbc74c1c5411fc332d2f7c790219ac51ee72c1))
+* **launcher:** export.sh writes straight to the vendor path Tatu reads from ([e7c697e](https://github.com/lobinuxsoft/tatu/commit/e7c697ebd587f4b326eb0aa8d587bf8a12da3cb0)), closes [#252](https://github.com/lobinuxsoft/tatu/issues/252)
+* **launcher:** give Add to Steam the same status feedback as launching ([814e897](https://github.com/lobinuxsoft/tatu/commit/814e89768eac1e2d84f78073a9e04c274036e206))
+* **launcher:** glass background on action bar, smaller covers, smoother motion ([feab389](https://github.com/lobinuxsoft/tatu/commit/feab389d0201f4f619c6c01b2a3b2f8e53d67f05))
+* **launcher:** lock to 16:9 and keep input prompts on top ([abd7b44](https://github.com/lobinuxsoft/tatu/commit/abd7b449b61405411c20d870eeb21e49f7e564f8))
+* **launcher:** lock to 16:9 and keep input prompts on top ([169cc28](https://github.com/lobinuxsoft/tatu/commit/169cc28af216b2aa99255e4d87ad3818ca988ac4))
+* **launcher:** main.gd failed to parse since [#257](https://github.com/lobinuxsoft/tatu/issues/257)'s revert ([41d3127](https://github.com/lobinuxsoft/tatu/commit/41d31275b7ae1b9df08f0e9fdf10cc79ecfd4bcc))
+* **launcher:** main.gd failed to parse since [#257](https://github.com/lobinuxsoft/tatu/issues/257)'s revert ([7efe2f5](https://github.com/lobinuxsoft/tatu/commit/7efe2f56e03d0142051e8489632c10f6d3fcad75)), closes [#261](https://github.com/lobinuxsoft/tatu/issues/261)
+* **launcher:** move action bar to bottom-center, allow browsing the viewer ([0ceb6a4](https://github.com/lobinuxsoft/tatu/commit/0ceb6a4fd6dd9aa97551bbf3244c949ed856342b))
+* **launcher:** quit after launching, redesign to a 4-button A/X/Y/B layout ([d818dda](https://github.com/lobinuxsoft/tatu/commit/d818dda3f2181710c28258296676aab9690c3ffd))
+* **launcher:** quit after launching, redesign to A/X/Y/B button layout ([5c29a71](https://github.com/lobinuxsoft/tatu/commit/5c29a7199078a49a752662eab380eab21d5bb0dd))
+* **launcher:** revert WorkerThreadPool background loading, crashed live ([43188db](https://github.com/lobinuxsoft/tatu/commit/43188dbe69a3794c8f8a4ad520c30a2742a72ff9))
+* **launcher:** revert WorkerThreadPool background loading, crashed live ([7b1c53d](https://github.com/lobinuxsoft/tatu/commit/7b1c53d25f8d04d035a201f8369efc81cb1e8721)), closes [#256](https://github.com/lobinuxsoft/tatu/issues/256)
+* **launcher:** stop feeding ffmpeg the ambiguous HLS master, lock UI mid-prepare ([b51edb0](https://github.com/lobinuxsoft/tatu/commit/b51edb06741aa9f9d26782f84aa7a855e941ed76))
+* **launcher:** stop feeding ffmpeg the ambiguous HLS master, lock UI mid-prepare ([ab67d6d](https://github.com/lobinuxsoft/tatu/commit/ab67d6d8f02a9e366ced76c9bd75bf0c6dcae7a7))
+* **launcher:** stop swallowing cover-art load failures, gdignore the fixture ([846ec01](https://github.com/lobinuxsoft/tatu/commit/846ec01bce20fd4408c0d7c5c4379c791ccc3242))
+* **launcher:** stretch the card's content box to fill the button ([774a098](https://github.com/lobinuxsoft/tatu/commit/774a09869dc1d118cccdf9d07a64688862c1a54d))
+* **launcher:** wire Add to Steam button to real registration ([#208](https://github.com/lobinuxsoft/tatu/issues/208)) ([b560f10](https://github.com/lobinuxsoft/tatu/commit/b560f102d87b29c5c3ef0d94baa7074ac86b46c8))
+* **launcher:** wire Add to Steam button to real registration ([#208](https://github.com/lobinuxsoft/tatu/issues/208)) ([4468405](https://github.com/lobinuxsoft/tatu/commit/44684052fcce1a941529f9aae61e56214a216923))
+* loading label hidden behind carousel, trailers too large to open fast ([9a524e9](https://github.com/lobinuxsoft/tatu/commit/9a524e92f24c3e454bede0e5ff3b81e5a3010aeb))
+* loading label hidden behind carousel, trailers too large to open fast ([880d0c4](https://github.com/lobinuxsoft/tatu/commit/880d0c4fc7bd41ad76bf4f27a44426dfee7c8d97))
+
+
+### Performance
+
+* **launcher:** load background screenshot/trailer off the main thread ([2d6ef6b](https://github.com/lobinuxsoft/tatu/commit/2d6ef6bb59c142fa1decec4f4dc2557fd6443033))
+* **launcher:** load background screenshot/trailer off the main thread ([28a5bf4](https://github.com/lobinuxsoft/tatu/commit/28a5bf41835f8e2ec60a1ae7bd48ca459bccff7e)), closes [#254](https://github.com/lobinuxsoft/tatu/issues/254)
+* **launcher:** spread cover-art decoding across frames instead of blocking startup ([7de5e8e](https://github.com/lobinuxsoft/tatu/commit/7de5e8e465b133b8d5665f438785f8662ec41c26))
+* **launcher:** spread cover-art decoding across frames instead of blocking startup ([bc84bea](https://github.com/lobinuxsoft/tatu/commit/bc84bea88628d05d91d4dfe70fc7c9db2f834d2c)), closes [#249](https://github.com/lobinuxsoft/tatu/issues/249)
+
+
+### Documentation
+
+* **help:** explain the cartridge feature in "Cómo funciona" ([68488d6](https://github.com/lobinuxsoft/tatu/commit/68488d6476f6cbb0b98778fbe0688dd830cd1a69))
+* **help:** explain the cartridge feature in "Cómo funciona" ([26213f2](https://github.com/lobinuxsoft/tatu/commit/26213f2de41d84bf89b87c53505e7331816decb5))
+
+## [0.9.0](https://github.com/lobinuxsoft/tatu/compare/v0.8.0...v0.9.0) (2026-08-23)
+
+
+### Features
+
+* **cards:** 3D tilt on hover, real card proportions, capped zoom ([707972e](https://github.com/lobinuxsoft/tatu/commit/707972ee3381146f3a58f045284d94e740f549de))
+* **ui:** click a card or badge to see it full size ([5f3d2aa](https://github.com/lobinuxsoft/tatu/commit/5f3d2aae679897975818f18c64dc1223fe991273))
+* **ui:** give the game detail its own window (closes [#187](https://github.com/lobinuxsoft/tatu/issues/187)) ([2cd63ec](https://github.com/lobinuxsoft/tatu/commit/2cd63ec168b49328c3841fe7689602d81ee496e0))
+
+
+### Bug Fixes
+
+* **ui:** let the detail tabs use the whole window ([0598a87](https://github.com/lobinuxsoft/tatu/commit/0598a87bb9c5b036796b8a74c0234e6b83af458f))
+* **ui:** links, icons, fonts, a detachable detail window, and an app that explains itself ([204190b](https://github.com/lobinuxsoft/tatu/commit/204190b19a9b1251544e11dfe284b770c3549b56))
+* **ui:** stop stranding the window on external links, and explain the app ([a742894](https://github.com/lobinuxsoft/tatu/commit/a74289414c72c38cd1d98aa6e13f19d41b24a596)), closes [#180](https://github.com/lobinuxsoft/tatu/issues/180)
+
+
+### Documentation
+
+* **ui:** explain where achievements, cards, duration and DRM come from ([b53e0d4](https://github.com/lobinuxsoft/tatu/commit/b53e0d49a28bdb4d7d2b196a56d222524618a6e8)), closes [#180](https://github.com/lobinuxsoft/tatu/issues/180)
+
+## [0.8.0](https://github.com/lobinuxsoft/tatu/compare/v0.7.0...v0.8.0) (2026-08-23)
+
+
+### Features
+
+* **windows:** build the tracker on Windows with cheats gated off ([b13da35](https://github.com/lobinuxsoft/tatu/commit/b13da35bb501bb3520e2153dd93d21e5c06614f6)), closes [#180](https://github.com/lobinuxsoft/tatu/issues/180)
+* **windows:** ship a Windows build — release rename + cheats gated off ([bb8515b](https://github.com/lobinuxsoft/tatu/commit/bb8515b60645257c4f0d93261863c29b681522d2))
+
+
+### Documentation
+
+* **release:** rename shipped artifacts to Tatu and enable the Windows leg ([97546c6](https://github.com/lobinuxsoft/tatu/commit/97546c67ebdcf77bb5da96d4ebd1d1dcc76f8896)), closes [#180](https://github.com/lobinuxsoft/tatu/issues/180)
+
 ## [0.7.0](https://github.com/lobinuxsoft/tatu/compare/v0.6.0...v0.7.0) (2026-08-01)
 
 
