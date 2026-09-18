@@ -112,6 +112,11 @@ const ICON_CLOSE: Array[String] = [
 	"res://assets/input_prompts/keyboard_escape.png",
 	"res://assets/input_prompts/steamdeck_button_b.png",
 ]
+# RB/R1 has no keyboard-letter icon vendored (only enter/s/g/escape are) —
+# gamepad-only hint, same Kenney Input Prompts pack as the rest.
+const ICON_AUTOMOUNT: Array[String] = [
+	"res://assets/input_prompts/steamdeck_button_r1.png",
+]
 
 # #206: umu-run + Proton + Steam Linux Runtime, bundled onto the cartridge
 # by Tatu's runtime.rs at the same moment Goldberg injection runs — must
@@ -475,10 +480,7 @@ func _build_layout() -> void:
 	# gallery its full height to work with.
 	_action_launch = _action_hint(ICON_LAUNCH, "Launch")
 	_action_add_to_steam = _action_hint(ICON_ADD_TO_STEAM, "Cartucho")
-	# No RB/R1 icon asset exists yet (only face-button prompts do) — text
-	# only for now, same _action_hint helper degrades fine with an empty
-	# icon list.
-	_action_automount = _action_hint([], "Auto-montaje")
+	_action_automount = _action_hint(ICON_AUTOMOUNT, "Auto-montaje")
 	_action_automount.visible = OS.get_name() != "Windows"
 	_action_gallery = _action_hint(ICON_GALLERY, "Gallery")
 	_action_close = _action_hint(ICON_CLOSE, "Close")
