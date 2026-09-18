@@ -159,6 +159,7 @@ var _info_name: Label
 var _info_description: Label
 var _action_launch: Control
 var _action_add_to_steam: Control
+var _action_automount: Control
 var _action_gallery: Control
 var _action_close: Control
 var _action_bar: HBoxContainer
@@ -305,6 +306,10 @@ func _on_carousel_resized() -> void:
 func _register_input_actions() -> void:
 	_ensure_action("card_launch", KEY_ENTER, JOY_BUTTON_A)
 	_ensure_action("card_add_to_steam", KEY_S, JOY_BUTTON_X)
+	# RB/R1 — independent of card_add_to_steam on purpose (#357): a
+	# GOG/EGS/NonSteam-only cartridge never goes through that flow, but the
+	# OS recognizing the drive on its own has nothing to do with Steam.
+	_ensure_action("card_toggle_automount", KEY_M, JOY_BUTTON_RIGHT_SHOULDER)
 	# ui_up/ui_down are built-in (arrow keys + D-pad/stick already wired by
 	# Godot's default input map) — the screenshot gallery reuses them
 	# directly rather than registering its own, same as the carousel
@@ -337,9 +342,9 @@ func _unhandled_input(event: InputEvent) -> void:
 	# #351: the auto-mount consent popup — checked before _source_menu since
 	# both are modal and mutually exclusive, order between them doesn't
 	# matter beyond that. card_launch accepts, card_close_launcher declines;
-	# the awaiting _maybe_offer_auto_mount_rule() polls _mount_prompt_state
-	# for the result (no real Godot signal to await here, same reason
-	# _pick_folder's own state Dictionary exists).
+	# the awaiting _show_mount_prompt() polls _mount_prompt_state for the
+	# result (no real Godot signal to await here, same reason _pick_folder's
+	# own state Dictionary exists).
 	if _mount_prompt.visible:
 		if event.is_action_pressed("ui_up") or event.is_action_pressed("ui_down"):
 			_mount_prompt_selected = wrapi(_mount_prompt_selected + 1, 0, _mount_prompt_options.size())
@@ -398,6 +403,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		_on_launch_requested()
 	elif event.is_action_pressed("card_add_to_steam"):
 		_on_add_to_steam_requested()
+	elif event.is_action_pressed("card_toggle_automount"):
+		_on_toggle_automount_requested()
 	elif event.is_action_pressed("card_close_launcher"):
 		get_tree().quit()
 
@@ -468,11 +475,16 @@ func _build_layout() -> void:
 	# gallery its full height to work with.
 	_action_launch = _action_hint(ICON_LAUNCH, "Launch")
 	_action_add_to_steam = _action_hint(ICON_ADD_TO_STEAM, "Cartucho")
+	# No RB/R1 icon asset exists yet (only face-button prompts do) — text
+	# only for now, same _action_hint helper degrades fine with an empty
+	# icon list.
+	_action_automount = _action_hint([], "Auto-montaje")
+	_action_automount.visible = OS.get_name() != "Windows"
 	_action_gallery = _action_hint(ICON_GALLERY, "Gallery")
 	_action_close = _action_hint(ICON_CLOSE, "Close")
 	_action_bar = HBoxContainer.new()
 	_action_bar.alignment = BoxContainer.ALIGNMENT_CENTER
-	for action in [_action_launch, _action_add_to_steam, _action_gallery, _action_close]:
+	for action in [_action_launch, _action_add_to_steam, _action_automount, _action_gallery, _action_close]:
 		_action_bar.add_child(action)
 
 	# Frosted-glass background, same shader + structure the side panels
@@ -1525,11 +1537,11 @@ func _launch_via_steam() -> void:
 	# this remounts it (see `_ensure_ntfs_symlinks`'s own header).
 	if OS.get_name() != "Windows":
 		await _ensure_ntfs_symlinks()
-		# Runs before registering (not after): granting the exception here
-		# switches `mount_point` to the new fixed path immediately, so
-		# Steam gets registered against the right path THIS run instead of
-		# needing a second run later to notice it moved.
-		mount_point = await _maybe_offer_auto_mount_rule(mount_point)
+		# Granting the auto-mount exception itself is RB's own job now
+		# (#357) — this only picks up whatever's already there, so Steam
+		# registers against the fixed path if it's been granted already
+		# instead of needing a second run later to notice it moved.
+		mount_point = _resolve_steam_mount_point(mount_point)
 
 	_register_steam_library(steam_dir, mount_point)
 
@@ -1645,48 +1657,81 @@ func _ensure_ntfs_symlinks() -> void:
 ## mounted the drive — the `device_automounter` kded module simply wasn't
 ## loaded in that session, and nothing in Tatu can (or should) reach into
 ## the user's desktop session to fix that. The rule mounts via a plain
-## `mount` call, not `udisksctl`/udisks2 — see the RUN+= command's own
-## comment below for why going through udisks2 from a root, session-less
-## udev rule doesn't work even after granting root the relevant polkit
-## actions. Same precedent as usbmount, which bypasses udisks2 entirely
-## for exactly this reason. Windows needs no equivalent: any correctly
-## GPT-typed partition already gets a drive letter automatically, so
-## there's no exception to grant there.
+## `mount` call, not `udisksctl`/udisks2 — see `_auto_mount_rule_content`'s
+## own comment for why going through udisks2 from a root, session-less udev
+## rule doesn't work even after granting root the relevant polkit actions.
+## Same precedent as usbmount, which bypasses udisks2 entirely for exactly
+## this reason. Windows needs no equivalent: any correctly GPT-typed
+## partition already gets a drive letter automatically, so there's no
+## exception to grant there.
 ##
-## Per-machine, not per-cartridge, same as LocalInstallRoots/SteamShortcuts:
-## the rule lives on this PC's disk, never written to the cartridge itself.
-## A decline is remembered in user:// and re-offered after a cooldown rather
-## than nagging on every single launch or being treated as permanent.
-## Returns the mount point Steam's library should be registered against:
-## `mount_point` unchanged if nothing changed (declined, already granted —
-## the OS should already have auto-mounted at the fixed path below by the
-## time the launcher runs at all in that case), or the new fixed path right
-## after granting it. Registering Steam against the OLD path here (the
-## caller's job, not this function's) would mean it only catches up on
-## a LATER run, once it notices the path moved — returning the new one
-## immediately means this same run already registers the right path.
-func _maybe_offer_auto_mount_rule(mount_point: String) -> String:
-	var uuid_out := []
-	OS.execute("findmnt", ["-no", "UUID", mount_point], uuid_out)
-	var uuid := String(uuid_out[0] if uuid_out.size() > 0 else "").strip_edges()
+## Per-cartridge, keyed by the filesystem's own UUID (assigned per-format,
+## never per-label) — two cartridges sharing the same volume LABEL still
+## get separate rules and separate consent. Per-machine too: the rule file
+## lives on this PC's disk, never written to the cartridge itself.
+##
+## Toggled from its own button (RB/R1, card_toggle_automount), independent
+## of "Agregar a Steam" — live-reported (2026-09-18): a cartridge that's
+## only GOG/EGS/NonSteam never goes through that flow at all, but the OS
+## recognizing the drive on its own has nothing to do with Steam
+## specifically. No decline-cooldown here anymore either — pressing a
+## dedicated button is already an explicit choice, unlike the old
+## automatic offer this replaced.
+func _toggle_auto_mount_rule() -> void:
+	var mount_point := _cartridge_root()
+	var uuid := _cartridge_fs_uuid(mount_point)
+	if uuid.is_empty():
+		return
+
+	var rule_path := _auto_mount_rule_path(uuid)
+	var rule_content := _auto_mount_rule_content(uuid)
+	var configured := (
+		FileAccess.file_exists(rule_path)
+		and FileAccess.get_file_as_string(rule_path) == rule_content
+	)
+
+	if configured:
+		await _offer_revert_auto_mount(rule_path)
+	else:
+		await _offer_grant_auto_mount(rule_path, rule_content)
+
+## The mount point Steam's library should be registered against: the fixed
+## auto-mount path if the exception is already granted for this cartridge,
+## `mount_point` unchanged otherwise. Never shows the consent popup itself
+## — granting only happens via _toggle_auto_mount_rule's own button now,
+## not as a side effect of registering with Steam.
+func _resolve_steam_mount_point(mount_point: String) -> String:
+	var uuid := _cartridge_fs_uuid(mount_point)
 	if uuid.is_empty():
 		return mount_point
+	var rule_path := _auto_mount_rule_path(uuid)
+	if FileAccess.file_exists(rule_path) and FileAccess.get_file_as_string(rule_path) == _auto_mount_rule_content(uuid):
+		return _auto_mount_path(uuid)
+	return mount_point
 
-	var rule_path := "/etc/udev/rules.d/99-tatu-cartridge-" + uuid + ".rules"
-	# Fixed per-UUID path, not udisksd's own `/run/media/<user>/<label>`
-	# convention — deliberately NOT trying to replicate that here. Every
-	# reconnect from here on lands at this SAME fixed path, so once Steam's
-	# registered against it, it stays in sync with no further touch needed
-	# (the caller registers Steam AFTER this call returns, against whatever
-	# path this function decides is current — see its own header).
-	var mount_path := "/media/tatu-cartridge-" + uuid
+func _cartridge_fs_uuid(mount_point: String) -> String:
+	var uuid_out := []
+	OS.execute("findmnt", ["-no", "UUID", mount_point], uuid_out)
+	return String(uuid_out[0] if uuid_out.size() > 0 else "").strip_edges()
 
+func _auto_mount_rule_path(uuid: String) -> String:
+	return "/etc/udev/rules.d/99-tatu-cartridge-" + uuid + ".rules"
+
+## Fixed per-UUID path, not udisksd's own `/run/media/<user>/<label>`
+## convention — every reconnect lands at this SAME path once granted, so
+## Steam's registration (`_resolve_steam_mount_point`) stays valid with no
+## further touch needed after the first time.
+func _auto_mount_path(uuid: String) -> String:
+	return "/media/tatu-cartridge-" + uuid
+
+func _auto_mount_rule_content(uuid: String) -> String:
 	var uid_out := []
 	OS.execute("id", ["-u"], uid_out)
 	var uid := String(uid_out[0] if uid_out.size() > 0 else "0").strip_edges()
 	var gid_out := []
 	OS.execute("id", ["-g"], gid_out)
 	var gid := String(gid_out[0] if gid_out.size() > 0 else "0").strip_edges()
+	var mount_path := _auto_mount_path(uuid)
 
 	# Raw `mount`, not `udisksctl mount` — confirmed live (2026-09-17) that
 	# udisksctl invoked from udev runs as root with no login session, which
@@ -1736,22 +1781,59 @@ func _maybe_offer_auto_mount_rule(mount_point: String) -> String:
 	# at all for that case, only "change" once the kernel noticed new
 	# media); "remove" tears the mount point back down so a later re-add/
 	# change doesn't find it busy or stale.
-	var rule_content := (
+	return (
 		'ACTION=="add", ENV{ID_FS_UUID}=="' + uuid + '", RUN+="' + run_cmd + '"\n'
 		+ 'ACTION=="change", ENV{ID_FS_UUID}=="' + uuid + '", RUN+="' + run_cmd + '"\n'
 		+ 'ACTION=="remove", SUBSYSTEM=="block", RUN+="' + remove_cmd + '"\n'
 	)
-	# Content-compared, not just existence-checked: an already-installed but
-	# outdated rule (an earlier udisksctl-based version, still fragile
-	# against the polkit issue above) must be reinstalled once this ships,
-	# not left broken forever on a machine that granted the exception
-	# before the fix existed.
-	if FileAccess.file_exists(rule_path) and FileAccess.get_file_as_string(rule_path) == rule_content:
-		return mount_point
 
-	if _mount_rule_recently_declined(uuid):
-		return mount_point
+func _offer_grant_auto_mount(rule_path: String, rule_content: String) -> void:
+	_mount_prompt_text.text = "Este cartucho no se monta solo en esta PC.\nTatu puede configurar una excepción para que se monte\nautomáticamente la próxima vez (pedirá tu contraseña de administrador).\n¿Configurar ahora?"
+	_mount_prompt_options[0].text = "Sí, configurar"
+	_mount_prompt_options[1].text = "No, ahora no"
+	if not await _show_mount_prompt():
+		return
 
+	var tmp := OS.get_cache_dir().path_join("tatu-automount-%d.rules" % Time.get_unix_time_from_system())
+	var f := FileAccess.open(tmp, FileAccess.WRITE)
+	f.store_string(rule_content)
+	f.close()
+
+	_action_status.text = "Configurando auto-montaje (puede pedir tu contraseña de administrador)..."
+	_action_overlay.visible = true
+	await get_tree().process_frame
+
+	# One pkexec prompt covers install + reload + trigger — matches
+	# _ensure_ntfs_symlinks' own single-elevation shape above, and avoids
+	# asking twice for what's conceptually one action. `--settle` blocks
+	# until the triggered rule's own RUN+= (this same mount) finishes, so
+	# the fixed path is already live once this returns.
+	var cmd := "install -m 0644 " + _sh_quote(tmp) + " " + _sh_quote(rule_path) + " && udevadm control --reload-rules && udevadm trigger --settle"
+	OS.execute("pkexec", ["/bin/sh", "-c", cmd])
+	DirAccess.remove_absolute(tmp)
+	_action_overlay.visible = false
+	await _show_status("Auto-montaje configurado", 2.0)
+
+func _offer_revert_auto_mount(rule_path: String) -> void:
+	_mount_prompt_text.text = "Este cartucho ya se monta solo en esta PC.\n¿Revertir el auto-montaje? La próxima vez\nvas a tener que montarlo a mano de nuevo."
+	_mount_prompt_options[0].text = "Sí, revertir"
+	_mount_prompt_options[1].text = "No, dejarlo así"
+	if not await _show_mount_prompt():
+		return
+
+	_action_status.text = "Revirtiendo auto-montaje (puede pedir tu contraseña de administrador)..."
+	_action_overlay.visible = true
+	await get_tree().process_frame
+
+	OS.execute("pkexec", ["/bin/sh", "-c", "rm -f " + _sh_quote(rule_path) + " && udevadm control --reload-rules"])
+	_action_overlay.visible = false
+	await _show_status("Auto-montaje revertido", 2.0)
+
+## Shared await-a-yes/no-answer machinery for both grant/revert prompts —
+## same shared-Dictionary-by-reference pattern _pick_folder uses, since
+## this popup has no real Godot signal to hook into (see the input
+## handler's own `_mount_prompt.visible` branch).
+func _show_mount_prompt() -> bool:
 	_mount_prompt_selected = 0
 	_update_mount_prompt_highlight()
 	_mount_prompt.visible = true
@@ -1759,55 +1841,11 @@ func _maybe_offer_auto_mount_rule(mount_point: String) -> String:
 	_mount_prompt_state = state
 	while not state.done:
 		await get_tree().process_frame
-
-	if not state.accepted:
-		_remember_mount_rule_decline(uuid)
-		return mount_point
-	var tmp := OS.get_cache_dir().path_join("tatu-automount-%s.rules" % uuid)
-	var f := FileAccess.open(tmp, FileAccess.WRITE)
-	f.store_string(rule_content)
-	f.close()
-
-	_action_status.text = "Configurando auto-montaje (puede pedir tu contraseña de administrador)..."
-	await get_tree().process_frame
-
-	# One pkexec prompt covers install + reload + trigger — matches
-	# _ensure_ntfs_symlinks' own single-elevation shape above, and avoids
-	# asking twice for what's conceptually one action.
-	var cmd := "install -m 0644 " + _sh_quote(tmp) + " " + _sh_quote(rule_path) + " && udevadm control --reload-rules && udevadm trigger --settle"
-	OS.execute("pkexec", ["/bin/sh", "-c", cmd])
-	DirAccess.remove_absolute(tmp)
-	# `--settle` blocks until the triggered rule's own RUN+= (this same
-	# mount) finishes, so mount_path is already live by the time this
-	# returns — the currently-running launcher keeps executing from
-	# mount_point's original location either way, nothing unmounts that.
-	return mount_path
+	return state.accepted
 
 func _update_mount_prompt_highlight() -> void:
 	for i in _mount_prompt_options.size():
 		_mount_prompt_options[i].modulate = Color.WHITE if i == _mount_prompt_selected else Color(1, 1, 1, 0.5)
-
-const MOUNT_PROMPT_DECLINE_MAP := "user://cartridge_automount_declines.json"
-const MOUNT_PROMPT_COOLDOWN_DAYS := 7
-
-## Per-machine, never on the cartridge — same posture as LocalInstallRoots.
-func _mount_rule_recently_declined(uuid: String) -> bool:
-	if not FileAccess.file_exists(MOUNT_PROMPT_DECLINE_MAP):
-		return false
-	var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(MOUNT_PROMPT_DECLINE_MAP))
-	var map: Dictionary = parsed if typeof(parsed) == TYPE_DICTIONARY else {}
-	if not map.has(uuid):
-		return false
-	var declined_unix := int(map[uuid])
-	return Time.get_unix_time_from_system() - declined_unix < MOUNT_PROMPT_COOLDOWN_DAYS * 86400
-
-func _remember_mount_rule_decline(uuid: String) -> void:
-	var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(MOUNT_PROMPT_DECLINE_MAP)) if FileAccess.file_exists(MOUNT_PROMPT_DECLINE_MAP) else {}
-	var map: Dictionary = parsed if typeof(parsed) == TYPE_DICTIONARY else {}
-	map[uuid] = Time.get_unix_time_from_system()
-	var f := FileAccess.open(MOUNT_PROMPT_DECLINE_MAP, FileAccess.WRITE)
-	f.store_string(JSON.stringify(map))
-	f.close()
 
 ## Linux: `~/.local/share/Steam` or the older `~/.steam/steam` symlink
 ## target. Windows: the one non-elevated, no-registry-access location a
@@ -2007,6 +2045,13 @@ func _extract_tar(archive_path: String, dest_dir: String, strip_top_level: bool)
 ## is the new per-selected-game local copy.
 func _on_add_to_steam_requested() -> void:
 	_open_source_menu()
+
+## RB/R1, standalone of "Agregar a Steam" (#357) — a no-op on Windows, same
+## as _ensure_ntfs_symlinks/_toggle_auto_mount_rule's own Linux-only scope.
+func _on_toggle_automount_requested() -> void:
+	if OS.get_name() == "Windows":
+		return
+	await _toggle_auto_mount_rule()
 
 func _open_source_menu() -> void:
 	var app: Dictionary = _apps[_selected_index]
