@@ -9,8 +9,8 @@ Both pulled from Google Fonts' own repo (`github.com/google/fonts`, `ofl/` direc
 
 ## Input prompt icons (`input_prompts/`)
 
-- `steamdeck_button_{a,b,x,y,r1}.png`, `keyboard_{enter,s,g,escape}.png` — from Kenney's [Input Prompts](https://kenney.nl/assets/input-prompts) pack, **CC0** — no attribution required, credited here anyway. The `x`/`y`/`g`/`escape` files were converted from the pack's SVG originals (source PNGs weren't at hand locally) at the same 64×64 as the rest — same shapes, same license, just re-rasterized.
-- Only these 9 files are vendored, not the full ~1500-icon pack — the launcher only needs the actions it actually has (`card_launch`, `card_add_to_steam`, `card_toggle_automount`, `gallery_select`, `card_close_launcher`).
+- `steamdeck_button_{a,b,x,y,r1}.png`, `keyboard_{enter,s,g,escape,m}.png` — from Kenney's [Input Prompts](https://kenney.nl/assets/input-prompts) pack, **CC0** — no attribution required, credited here anyway. The `x`/`y`/`g`/`escape` files were converted from the pack's SVG originals (source PNGs weren't at hand locally) at the same 64×64 as the rest — same shapes, same license, just re-rasterized. `r1`/`m` are the pack's own source PNGs, unmodified.
+- Only these 10 files are vendored, not the full ~1500-icon pack — the launcher only needs the actions it actually has (`card_launch`, `card_add_to_steam`, `card_toggle_automount`, `gallery_select`, `card_close_launcher`).
 
 ## App icon (`icon/`)
 

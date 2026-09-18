@@ -112,9 +112,8 @@ const ICON_CLOSE: Array[String] = [
 	"res://assets/input_prompts/keyboard_escape.png",
 	"res://assets/input_prompts/steamdeck_button_b.png",
 ]
-# RB/R1 has no keyboard-letter icon vendored (only enter/s/g/escape are) —
-# gamepad-only hint, same Kenney Input Prompts pack as the rest.
 const ICON_AUTOMOUNT: Array[String] = [
+	"res://assets/input_prompts/keyboard_m.png",
 	"res://assets/input_prompts/steamdeck_button_r1.png",
 ]
 
@@ -480,6 +479,7 @@ func _build_layout() -> void:
 	# gallery its full height to work with.
 	_action_launch = _action_hint(ICON_LAUNCH, "Launch")
 	_action_add_to_steam = _action_hint(ICON_ADD_TO_STEAM, "Cartucho")
+	# Keyboard M + RB/R1, same pairing as the other three actions.
 	_action_automount = _action_hint(ICON_AUTOMOUNT, "Auto-montaje")
 	_action_automount.visible = OS.get_name() != "Windows"
 	_action_gallery = _action_hint(ICON_GALLERY, "Gallery")
