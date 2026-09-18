@@ -1,5 +1,44 @@
 # Changelog
 
+## [0.15.0](https://github.com/lobinuxsoft/tatu/compare/v0.14.1...v0.15.0) (2026-09-18)
+
+
+### Features
+
+* **egs:** cartridge install path + DRM classification via PCGamingWiki ([d6ae0b0](https://github.com/lobinuxsoft/tatu/commit/d6ae0b09856add000a930cec7a59f52e10107b52))
+* **egs:** cartridge install path + DRM classification via PCGamingWiki ([4ddb68a](https://github.com/lobinuxsoft/tatu/commit/4ddb68a162362bcc8f0b8f5a4e25d5bc070745c1))
+* **egs:** manifest + chunked download protocol ([7420413](https://github.com/lobinuxsoft/tatu/commit/7420413d1a1831dfa7409f8c8935c4f5423076a8))
+* **egs:** manifest + chunked download protocol ([d1ceaf3](https://github.com/lobinuxsoft/tatu/commit/d1ceaf3a17f89e5b963d5fd252315b3fbf183ac3)), closes [#344](https://github.com/lobinuxsoft/tatu/issues/344)
+* **egs:** native OAuth + owned-games list + EGS tab ([c7e3112](https://github.com/lobinuxsoft/tatu/commit/c7e31123289bdca95d87e7dd9493bf06a2d31c83))
+* **egs:** native OAuth + owned-games list + EGS tab ([c70fa9c](https://github.com/lobinuxsoft/tatu/commit/c70fa9cfc8e39ba1b2eaba6f863e038988476204)), closes [#343](https://github.com/lobinuxsoft/tatu/issues/343)
+* **launcher:** add keyboard M icon for the auto-mount action hint ([84cb753](https://github.com/lobinuxsoft/tatu/commit/84cb7538dd43d5ca4651408c0dc87761f27f2592)), closes [#357](https://github.com/lobinuxsoft/tatu/issues/357)
+* **launcher:** add RB/R1 icon for the auto-mount action hint ([9f563b3](https://github.com/lobinuxsoft/tatu/commit/9f563b3047816cb3e01c7520fff0202bdaca7c57)), closes [#357](https://github.com/lobinuxsoft/tatu/issues/357)
+* **launcher:** auto-mount as its own RB/R1 button, not tied to Steam ([ea23ad0](https://github.com/lobinuxsoft/tatu/commit/ea23ad0191ffdef02fe6376362ccfea51338a93b))
+* **launcher:** auto-mount as its own RB/R1 button, not tied to Steam ([ba82b7b](https://github.com/lobinuxsoft/tatu/commit/ba82b7b7f12a64670eef041d940ada24748cffa2)), closes [#357](https://github.com/lobinuxsoft/tatu/issues/357)
+* **launcher:** auto-mount exception for the cartridge on Linux ([293a173](https://github.com/lobinuxsoft/tatu/commit/293a173661a29f9f8d3c28d0fea114199b029e46))
+* **launcher:** auto-mount exception for the cartridge on Linux ([49a3a2c](https://github.com/lobinuxsoft/tatu/commit/49a3a2cb2d40693c5505b795946fcfe5dd29c7dd)), closes [#351](https://github.com/lobinuxsoft/tatu/issues/351)
+
+
+### Bug Fixes
+
+* **drm:** downgrade Easy to Trivial when steam_api(64).dll is absent ([169e8fb](https://github.com/lobinuxsoft/tatu/commit/169e8fb7f7e56ce85af1a79c192425163bf5203d))
+* **drm:** downgrade Easy to Trivial when steam_api(64).dll is absent ([5d56694](https://github.com/lobinuxsoft/tatu/commit/5d56694adc89eb64cc6bae19df1ae139567c5988)), closes [#353](https://github.com/lobinuxsoft/tatu/issues/353)
+* **drm:** use MediaWiki's recommended User-Agent format for PCGamingWiki ([49e090c](https://github.com/lobinuxsoft/tatu/commit/49e090c4df2966cfbe034e22f6eb1870b690cea6))
+* **drm:** use MediaWiki's recommended User-Agent format for PCGamingWiki ([822ff86](https://github.com/lobinuxsoft/tatu/commit/822ff86d72d46cd32e9b866c4768aa60c295ab74))
+* **egs:** filter marketplace assets, add image-type fallback, surface real login errors ([e0661b8](https://github.com/lobinuxsoft/tatu/commit/e0661b878a635b0e9f2c70bdcaadb1c7e4b4a79a))
+* **egs:** silence a clippy lint CI's newer toolchain flags but this repo's doesn't recognize ([4712319](https://github.com/lobinuxsoft/tatu/commit/47123191c1383b8c712984b592037031cf5b33a1))
+* **launcher:** bound action-status text width so it stays centered ([0d5969c](https://github.com/lobinuxsoft/tatu/commit/0d5969c11322b977d6d9c5c4a2c0bf5188c4c295))
+* **launcher:** CenterContainer for status/prompt text, match change events too ([b0c0443](https://github.com/lobinuxsoft/tatu/commit/b0c0443e53fd714001da3d2de970bca129dcb8a1))
+* **launcher:** raw mount via systemd-run instead of udisksctl ([4cd459a](https://github.com/lobinuxsoft/tatu/commit/4cd459a8097e8081b1d45ae0b6cafbea4b3422b0))
+* **launcher:** register Steam against the new auto-mount path same run ([12e3807](https://github.com/lobinuxsoft/tatu/commit/12e380771cd261de8f1579997893e93d223e4ddf))
+* **launcher:** retry the automount rule's udisksctl call ([ed84dad](https://github.com/lobinuxsoft/tatu/commit/ed84dad7fc7b77639d5c1072c3bb63c6559237e0))
+
+
+### Tests
+
+* **cheat-runtime:** ignore flaky wait_for_debug_event timeout test ([26357ec](https://github.com/lobinuxsoft/tatu/commit/26357ec2a7d549d757656464e38e5e828e84c44e)), closes [#355](https://github.com/lobinuxsoft/tatu/issues/355)
+* ignore flaky wait_for_debug_event timeout test ([28956c9](https://github.com/lobinuxsoft/tatu/commit/28956c98b83d6e944ddd4697f2ce0ff5f1052782))
+
 ## [0.14.1](https://github.com/lobinuxsoft/tatu/compare/v0.14.0...v0.14.1) (2026-09-16)
 
 
