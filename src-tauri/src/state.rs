@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::achievements::GameAchievements;
 use crate::disk::DiskSize;
 use crate::drm::DrmInfo;
+use crate::egs_account::EgsTokens;
 use crate::gog_account::GogTokens;
 use crate::hltb::HltbResult;
 use crate::inventory::GameCards;
@@ -43,6 +44,13 @@ pub struct AppState {
     /// DRM classification cache, keyed by Steam app ID.
     #[serde(default)]
     pub drm_cache: HashMap<u64, DrmInfo>,
+    /// DRM classification cache for EGS games (#345), keyed by the
+    /// SHA-256-derived id `egs_account::derive_app_id` produces — kept as
+    /// its own map rather than sharing `drm_cache` above, same
+    /// no-cross-source-id-collision-risk reasoning `completed_gog`/
+    /// `completed_egs` are already kept separate for.
+    #[serde(default)]
+    pub egs_drm_cache: HashMap<u64, DrmInfo>,
     /// Disk size cache (installed + previously measured), keyed by Steam app ID.
     #[serde(default)]
     pub size_cache: HashMap<u64, DiskSize>,
@@ -60,6 +68,17 @@ pub struct AppState {
     /// Steam appid share the same numeric type but not the same namespace.
     #[serde(default)]
     pub completed_gog: HashSet<u64>,
+    /// Epic Games Store account OAuth2 tokens (#343) — same
+    /// plaintext-in-state.json posture as `gog_tokens` above.
+    #[serde(default)]
+    pub egs_tokens: Option<EgsTokens>,
+    /// Cached from the last successful library fetch, same role
+    /// `gog_library` plays for GOG.
+    #[serde(default)]
+    pub egs_library: Vec<crate::egs_account::EgsOwnedGame>,
+    /// Completed tracking for the EGS tab — same shape as `completed_gog`.
+    #[serde(default)]
+    pub completed_egs: HashSet<u64>,
     /// PCGamingWiki bot password login (`user@botname`) — required since
     /// their August 2026 server migration locked `cargoquery` (the DRM data
     /// source) behind auth. Same plaintext-in-state.json posture as

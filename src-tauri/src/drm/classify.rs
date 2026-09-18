@@ -95,7 +95,7 @@ pub(super) fn merge(raw: RawDrm, fetched_at: u64) -> DrmInfo {
         fallback_classify(&raw)
     };
 
-    let affects_steam_copy = matches!(&status, DrmStatus::ThirdParty { .. } | DrmStatus::SteamOnly);
+    let affects_copy = matches!(&status, DrmStatus::ThirdParty { .. } | DrmStatus::SteamOnly);
     let explanation = impact_explanation(&status);
 
     // Add any detected store-only vendors (MS Store, Epic Games) to notes for visibility.
@@ -125,7 +125,7 @@ pub(super) fn merge(raw: RawDrm, fetched_at: u64) -> DrmInfo {
         notes: notes_parts.join(" | "),
         source: source.into(),
         fetched_at,
-        affects_steam_copy,
+        affects_copy,
         explanation,
         preservability,
         preservability_hint,
@@ -190,6 +190,11 @@ fn is_steam_store(s: &str) -> bool {
     l == "steam" || l == "steamworks" || l.starts_with("steam ")
 }
 
+fn is_epic_store(s: &str) -> bool {
+    let l = s.trim().to_lowercase();
+    l == "epic games" || l == "epic games store" || l == "egs" || l.starts_with("epic games ")
+}
+
 fn is_gog_store(s: &str) -> bool {
     let l = s.trim().to_lowercase();
     l == "gog.com" || l == "gog" || l.starts_with("gog ")
@@ -227,6 +232,125 @@ fn fallback_classify(raw: &RawDrm) -> DrmStatus {
         return DrmStatus::SteamOnly;
     }
     DrmStatus::Unknown
+}
+
+/// Merge PCGamingWiki data into a `DrmInfo` for the EGS release
+/// specifically (#345). No Steam Store query involved — EGS games aren't on
+/// Steam, so this only ever has PCGW data to work with, keyed by title
+/// (`sources::fetch_from_pcgamingwiki_by_title`) rather than a Steam AppID.
+///
+/// Unlike Steam, EGS has no known removable "wrapper" DRM equivalent to
+/// Goldberg — investigated live for #345: the closest tool, ScreamAPI, only
+/// unlocks DLC entitlement checks, not a base-game bypass, and its repo was
+/// taken down for a ToS violation. So there's no `SteamOnly`-shaped middle
+/// status worth inventing here: a bare "Epic Games"/"Epic Games Store"
+/// token on its own row is self-referential noise (of course an EGS
+/// release needs the Epic ecosystem to exist at all — that's not a DRM
+/// finding), so it's treated as `DrmFree` rather than manufacturing an
+/// "EpicOnly" status with no corresponding tooling story to point to.
+pub(super) fn merge_epic(raw: RawDrm, fetched_at: u64) -> DrmInfo {
+    let mut notes_parts: Vec<String> = Vec::new();
+    let mut vendors: Vec<String> = Vec::new();
+
+    for token in raw.pcgw_uses.iter().chain(raw.pcgw_retail.iter()) {
+        add_vendors(&mut vendors, &detect_binary_vendors(token));
+    }
+    match raw.pcgw_stores.iter().position(|s| is_epic_store(s)) {
+        Some(pos) => {
+            if let Some(epic_token) = raw.pcgw_uses.get(pos) {
+                add_vendors(&mut vendors, &detect_launcher_vendors(epic_token));
+            }
+        }
+        None => {
+            for token in raw.pcgw_uses.iter().chain(raw.pcgw_retail.iter()) {
+                add_vendors(&mut vendors, &detect_launcher_vendors(token));
+            }
+        }
+    }
+
+    if !raw.pcgw_stores.is_empty() {
+        notes_parts.push(format!("PCGW Stores: {}", raw.pcgw_stores.join(", ")));
+    }
+    if !raw.pcgw_uses.is_empty() {
+        notes_parts.push(format!("PCGW Uses: {}", raw.pcgw_uses.join(", ")));
+    }
+    if !raw.pcgw_removed.is_empty() {
+        notes_parts.push(format!("PCGW Removed: {}", raw.pcgw_removed.join(", ")));
+    }
+
+    let epic_release_drm = if raw.pcgw_stores.len() == raw.pcgw_uses.len() {
+        raw.pcgw_stores
+            .iter()
+            .position(|s| is_epic_store(s))
+            .and_then(|pos| raw.pcgw_uses.get(pos))
+    } else {
+        None
+    };
+
+    let status = if !vendors.is_empty() {
+        DrmStatus::ThirdParty {
+            vendors: vendors.clone(),
+        }
+    } else if let Some(token) = epic_release_drm {
+        let l = token.to_lowercase();
+        if is_drm_free_token(&l) || is_epic_store(token) || l.is_empty() {
+            DrmStatus::DrmFree
+        } else {
+            DrmStatus::Unknown
+        }
+    } else {
+        // No Epic row in the Availability table at all (game not tracked as
+        // an EGS release there), or the Stores/Uses_DRM lists don't line up
+        // 1:1 — no signal either way.
+        DrmStatus::Unknown
+    };
+
+    let affects_copy = matches!(&status, DrmStatus::ThirdParty { .. });
+    let explanation = epic_impact_explanation(&status);
+    let source = if raw.pcgw_ok && raw.pcgw_has_entry {
+        "pcgamingwiki"
+    } else {
+        "none"
+    };
+
+    let preservability = classify_preservability(&raw, &status);
+    let preservability_hint = preservability_hint(&preservability);
+
+    DrmInfo {
+        status,
+        notes: notes_parts.join(" | "),
+        source: source.into(),
+        fetched_at,
+        affects_copy,
+        explanation,
+        preservability,
+        preservability_hint,
+        stores: raw.pcgw_stores,
+        removed_drm: raw.pcgw_removed,
+    }
+}
+
+fn epic_impact_explanation(status: &DrmStatus) -> String {
+    match status {
+        DrmStatus::DrmFree => {
+            "Sin DRM. Tu copia de Epic Games Store corre sin el launcher abierto \
+            ni verificación online."
+                .to_string()
+        }
+        DrmStatus::ThirdParty { vendors } => format!(
+            "Tu copia de Epic Games Store está afectada por: {}. Estos DRMs están embebidos en el \
+             binario y funcionan en TODOS los releases (Steam, Epic, MS Store, etc.), no solo donde \
+             los compraste.",
+            vendors.join(", ")
+        ),
+        DrmStatus::Unknown => "Sin información suficiente para clasificar el DRM de la copia de \
+            Epic Games Store. PCGamingWiki no tiene datos para este juego, o no lista una fila de \
+            Epic Games en su tabla de disponibilidad."
+            .to_string(),
+        // merge_epic never produces this — kept exhaustive rather than
+        // panicking if that ever changes.
+        DrmStatus::SteamOnly => String::new(),
+    }
 }
 
 fn impact_explanation(status: &DrmStatus) -> String {

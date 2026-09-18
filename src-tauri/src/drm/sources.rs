@@ -1,7 +1,13 @@
 const PCGW_API: &str = "https://www.pcgamingwiki.com/w/api.php";
 const STEAM_APPDETAILS: &str = "https://store.steampowered.com/api/appdetails";
-const USER_AGENT: &str =
-    "game-progress-tracker (+https://github.com/lobinuxsoft/game-progress-tracker)";
+// MediaWiki's own recommended shape (`name/version (contact) framework/version`,
+// per PCGamingWiki:API's own Requirements section, checked live 2026-09-17):
+// a UA missing this shape is explicitly called out as one of the two named
+// causes of a 403 ("generic user-agent string that have been blocked" — the
+// other named cause is a prior history of excessive traffic from the IP,
+// unrelated to this string). Renamed off the pre-rename "game-progress-tracker"
+// name and added the `ureq/<version>` framework suffix their example uses.
+const USER_AGENT: &str = "tatu (+https://github.com/lobinuxsoft/tatu) ureq/3.3";
 
 /// Data returned by a successful PCGamingWiki query. Stored lists preserve
 /// order and empty slots so positional alignment (Stores ↔ Uses_DRM) stays
@@ -120,6 +126,56 @@ pub(super) fn fetch_from_pcgamingwiki(agent: &ureq::Agent, app_id: u64) -> Optio
          &fields=Availability.Present=Stores,Availability.Uses_DRM=UsesDRM,Availability.Removed_DRM=RemovedDRM,Availability.Retail_DRM=RetailDRM\
          &where=Game.Steam_AppID%20HOLDS%20%22{app_id}%22\
          &format=json"
+    );
+
+    let body: serde_json::Value = agent.get(&url).call().ok()?.body_mut().read_json().ok()?;
+
+    let rows = body.get("cargoquery")?.as_array()?;
+    let has_entry = !rows.is_empty();
+    let mut stores: Vec<String> = Vec::new();
+    let mut uses: Vec<String> = Vec::new();
+    let mut removed: Vec<String> = Vec::new();
+    let mut retail: Vec<String> = Vec::new();
+
+    for row in rows {
+        let Some(title) = row.get("title") else {
+            continue;
+        };
+        collect_csv_preserve_order(&mut stores, title.get("Stores"));
+        collect_csv_preserve_order(&mut uses, title.get("UsesDRM"));
+        collect_csv_preserve_order(&mut removed, title.get("RemovedDRM"));
+        collect_csv_preserve_order(&mut retail, title.get("RetailDRM"));
+    }
+
+    Some(PcgwDrm {
+        stores,
+        uses,
+        removed,
+        retail,
+        has_entry,
+    })
+}
+
+/// Same Cargo query as `fetch_from_pcgamingwiki`, but keyed by the wiki
+/// page title instead of a Steam AppID (#345) — EGS games have no Steam
+/// AppID to query by at all. `_pageName` is the same field the two tables
+/// are already joined on, so an exact match against it is a direct page
+/// lookup, not a search. Titles that don't match PCGW's exact page title
+/// (accents, subtitle punctuation, edition suffixes) simply return no rows
+/// — same "no fuzzy guessing" bar `gog_account`'s own title-based catalog
+/// lookup already holds itself to.
+pub(super) fn fetch_from_pcgamingwiki_by_title(
+    agent: &ureq::Agent,
+    title: &str,
+) -> Option<PcgwDrm> {
+    let url = format!(
+        "{PCGW_API}?action=cargoquery\
+         &tables=Game,Availability\
+         &join_on=Game._pageName=Availability._pageName\
+         &fields=Availability.Present=Stores,Availability.Uses_DRM=UsesDRM,Availability.Removed_DRM=RemovedDRM,Availability.Retail_DRM=RetailDRM\
+         &where=Game._pageName=%22{}%22\
+         &format=json",
+        urlencoding::encode(title)
     );
 
     let body: serde_json::Value = agent.get(&url).call().ok()?.body_mut().read_json().ok()?;

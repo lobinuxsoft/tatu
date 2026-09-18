@@ -20,6 +20,7 @@
     <div class="tab active" data-tab="steam">Steam <span class="tab-count" id="tabSteamCount"></span></div>
     <div class="tab" data-tab="nonsteam">Non-Steam <span class="tab-count" id="tabNonsteamCount"></span></div>
     <div class="tab" data-tab="gog">GOG <span class="tab-count" id="tabGogCount"></span></div>
+    <div class="tab" data-tab="egs">Epic Games <span class="tab-count" id="tabEgsCount"></span></div>
     <div class="tab" data-tab="cartridge">Cartucho</div>
     <div class="tab" data-tab="help" style="margin-left:auto;">Cómo funciona</div>
     <div class="tab" data-tab="settings" style="color:#6e7681;">Settings</div>
@@ -117,6 +118,27 @@
     <div class="controls"><input type="text" class="search" id="gogSearch" placeholder="Buscar juego, género, developer o publisher..." autocomplete="off"></div>
     <div class="letter-nav" id="lNavGog"></div>
     <div id="gogContent"><div class="empty-state">Conectá tu cuenta de GOG en <strong>Settings</strong> y dale a "Actualizar biblioteca".</div></div>
+  </div>
+
+  <!-- EGS TAB -->
+  <div class="tab-panel" id="panel-egs">
+    <div class="sync-bar">
+      <span class="sync-info" id="egsSyncInfo"></span>
+      <button class="sync-btn" id="egsTabSyncBtn">Actualizar biblioteca</button>
+      <button class="sync-btn" id="egsDrmBtn" title="Consulta PCGamingWiki para clasificar el DRM de cada juego. Tarda ~1s por juego.">Cargar DRM</button>
+    </div>
+    <div class="progress-wrap" id="egsDrmProgressWrap" style="display:none;">
+      <div class="progress-bar" id="egsDrmProgressBar"></div>
+      <div class="progress-text" id="egsDrmProgressText"></div>
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="stat-value c1" id="egsComp">0</div><div class="stat-label">Completados</div></div>
+      <div class="stat"><div class="stat-value c2" id="egsPend">0</div><div class="stat-label">Pendientes</div></div>
+    </div>
+    <div class="progress-wrap"><div class="progress-bar" id="egspBar"></div><div class="progress-text" id="egspText">0%</div></div>
+    <div class="controls"><input type="text" class="search" id="egsSearch" placeholder="Buscar juego o developer..." autocomplete="off"></div>
+    <div class="letter-nav" id="lNavEgs"></div>
+    <div id="egsContent"><div class="empty-state">Conectá tu cuenta de Epic Games en <strong>Settings</strong> y dale a "Actualizar biblioteca".</div></div>
   </div>
 
   <!-- CARTRIDGE TAB -->
@@ -416,6 +438,32 @@
         </div>
         <p style="font-size:0.7rem; color:var(--fg-ghost); margin-top:0.5rem;">
           Tu biblioteca de GOG vive en la pestaña <strong>GOG</strong>.
+        </p>
+      </div>
+
+      <h2 style="color:var(--accent); font-size:1.2rem; margin:1.5rem 0 1rem;">Cuenta Epic Games (#343)</h2>
+
+      <div id="egsDisconnected" style="margin-bottom:1.2rem;">
+        <button class="sync-btn" id="egsConnectBtn">Conectar con Epic Games</button>
+        <p style="font-size:0.7rem; color:var(--fg-ghost); margin-top:0.5rem;">
+          Se abre tu navegador para loguearte. Cuando termine, Epic te muestra una página con un
+          bloque de texto JSON — copiá todo ese texto (o solo el valor de <code>authorizationCode</code>)
+          y pegalo abajo.
+        </p>
+        <div style="display:flex; gap:0.4rem; margin-top:0.5rem;">
+          <input type="text" id="egsPastedCode" class="search" style="flex:1; font-family:monospace;" placeholder="Pegá el JSON o el código acá...">
+          <button class="sync-btn" id="egsSubmitCodeBtn">Confirmar</button>
+        </div>
+        <p id="egsConnectMsg" style="font-size:0.8rem; margin-top:0.4rem;"></p>
+      </div>
+
+      <div id="egsConnected" style="display:none; margin-bottom:1.2rem;">
+        <div style="display:flex; gap:0.5rem; align-items:center;">
+          <span style="color:#2ea043; font-size:0.85rem;">✓ Cuenta conectada</span>
+          <button class="sync-btn" id="egsDisconnectBtn" style="border-color:#f85149; color:#f85149;">Desconectar</button>
+        </div>
+        <p style="font-size:0.7rem; color:var(--fg-ghost); margin-top:0.5rem;">
+          Tu biblioteca de Epic Games vive en la pestaña <strong>Epic Games</strong>.
         </p>
       </div>
 

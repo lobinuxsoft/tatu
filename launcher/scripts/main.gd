@@ -76,6 +76,16 @@ const ACTION_BAR_GAP_RATIO := 0.03
 # of a full-height side one.
 const ACTION_BAR_GLASS_HEIGHT_RATIO := 0.07
 const ACTION_BAR_GLASS_PADDING_RATIO := 0.012
+# _action_status/_mount_prompt's own text — some of these run long
+# ("Configurando auto-montaje (puede pedir tu contraseña de
+# administrador)...") and had no bounded width at all (live-reported,
+# 2026-09-17: the overlay box's one-time PRESET_CENTER offsets were sized
+# against whatever was showing at _ready(), so a longer string later grew
+# the box asymmetrically from those fixed offsets instead of from its
+# center — off-center AND clipped past the screen edge). Capping width and
+# wrapping keeps the box's minimum size stable instead of growing past what
+# PRESET_CENTER already centered.
+const ACTION_STATUS_WIDTH_RATIO := 0.6
 
 # Same display/body fonts Tatu's own web frontend themes already use (OFL,
 # vendored under assets/fonts/ — see assets/README.md for provenance).
@@ -101,6 +111,10 @@ const ICON_GALLERY: Array[String] = [
 const ICON_CLOSE: Array[String] = [
 	"res://assets/input_prompts/keyboard_escape.png",
 	"res://assets/input_prompts/steamdeck_button_b.png",
+]
+const ICON_AUTOMOUNT: Array[String] = [
+	"res://assets/input_prompts/keyboard_m.png",
+	"res://assets/input_prompts/steamdeck_button_r1.png",
 ]
 
 # #206: umu-run + Proton + Steam Linux Runtime, bundled onto the cartridge
@@ -149,6 +163,7 @@ var _info_name: Label
 var _info_description: Label
 var _action_launch: Control
 var _action_add_to_steam: Control
+var _action_automount: Control
 var _action_gallery: Control
 var _action_close: Control
 var _action_bar: HBoxContainer
@@ -170,6 +185,14 @@ var _copying := false
 var _source_menu: Control
 var _source_menu_options: Array[Label] = []
 var _source_menu_selected := 0
+# #351: consent popup for the udev auto-mount exception — same
+# ColorRect+VBoxContainer+Label shape as _source_menu above, own visibility
+# flag since only one of the two modals is ever shown at a time.
+var _mount_prompt: Control
+var _mount_prompt_text: Label
+var _mount_prompt_options: Array[Label] = []
+var _mount_prompt_selected := 0
+var _mount_prompt_state: Dictionary = {}
 # Godot's own FileDialog, not a native OS one (#335) — a native dialog
 # expects mouse/keyboard, breaking the gamepad-only navigation every other
 # screen in this launcher already has; FileDialog is a plain Control tree,
@@ -244,6 +267,10 @@ func _resize_layout() -> void:
 	for icon in _hint_icons:
 		icon.custom_minimum_size = Vector2(icon_size, icon_size)
 
+	var status_width := _carousel_clip.size.x * ACTION_STATUS_WIDTH_RATIO
+	_action_status.custom_minimum_size.x = status_width
+	_mount_prompt_text.custom_minimum_size.x = status_width
+
 	var bar_margin := int(_carousel_clip.size.y * ACTION_BAR_MARGIN_RATIO)
 	var bar_height := int(_carousel_clip.size.y * ACTION_BAR_GLASS_HEIGHT_RATIO)
 	var bar_padding := int(_carousel_clip.size.y * ACTION_BAR_GLASS_PADDING_RATIO)
@@ -283,6 +310,10 @@ func _on_carousel_resized() -> void:
 func _register_input_actions() -> void:
 	_ensure_action("card_launch", KEY_ENTER, JOY_BUTTON_A)
 	_ensure_action("card_add_to_steam", KEY_S, JOY_BUTTON_X)
+	# RB/R1 — independent of card_add_to_steam on purpose (#357): a
+	# GOG/EGS/NonSteam-only cartridge never goes through that flow, but the
+	# OS recognizing the drive on its own has nothing to do with Steam.
+	_ensure_action("card_toggle_automount", KEY_M, JOY_BUTTON_RIGHT_SHOULDER)
 	# ui_up/ui_down are built-in (arrow keys + D-pad/stick already wired by
 	# Godot's default input map) — the screenshot gallery reuses them
 	# directly rather than registering its own, same as the carousel
@@ -311,6 +342,25 @@ func _unhandled_input(event: InputEvent) -> void:
 	# navigation, no re-triggering the launch, no closing the launcher while
 	# the cartridge has to stay connected and the PC has to stay up.
 	if _copying:
+		return
+	# #351: the auto-mount consent popup — checked before _source_menu since
+	# both are modal and mutually exclusive, order between them doesn't
+	# matter beyond that. card_launch accepts, card_close_launcher declines;
+	# the awaiting _show_mount_prompt() polls _mount_prompt_state for the
+	# result (no real Godot signal to await here, same reason _pick_folder's
+	# own state Dictionary exists).
+	if _mount_prompt.visible:
+		if event.is_action_pressed("ui_up") or event.is_action_pressed("ui_down"):
+			_mount_prompt_selected = wrapi(_mount_prompt_selected + 1, 0, _mount_prompt_options.size())
+			_update_mount_prompt_highlight()
+		elif event.is_action_pressed("card_launch"):
+			_mount_prompt.visible = false
+			_mount_prompt_state.done = true
+			_mount_prompt_state.accepted = (_mount_prompt_selected == 0)
+		elif event.is_action_pressed("card_close_launcher"):
+			_mount_prompt.visible = false
+			_mount_prompt_state.done = true
+			_mount_prompt_state.accepted = false
 		return
 	# S/X's choice screen (#300) is a modal too — same input-trapping shape
 	# as the viewer below, just with ui_up/down moving between 2 options
@@ -357,6 +407,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		_on_launch_requested()
 	elif event.is_action_pressed("card_add_to_steam"):
 		_on_add_to_steam_requested()
+	elif event.is_action_pressed("card_toggle_automount"):
+		_on_toggle_automount_requested()
 	elif event.is_action_pressed("card_close_launcher"):
 		get_tree().quit()
 
@@ -427,11 +479,14 @@ func _build_layout() -> void:
 	# gallery its full height to work with.
 	_action_launch = _action_hint(ICON_LAUNCH, "Launch")
 	_action_add_to_steam = _action_hint(ICON_ADD_TO_STEAM, "Cartucho")
+	# Keyboard M + RB/R1, same pairing as the other three actions.
+	_action_automount = _action_hint(ICON_AUTOMOUNT, "Auto-montaje")
+	_action_automount.visible = OS.get_name() != "Windows"
 	_action_gallery = _action_hint(ICON_GALLERY, "Gallery")
 	_action_close = _action_hint(ICON_CLOSE, "Close")
 	_action_bar = HBoxContainer.new()
 	_action_bar.alignment = BoxContainer.ALIGNMENT_CENTER
-	for action in [_action_launch, _action_add_to_steam, _action_gallery, _action_close]:
+	for action in [_action_launch, _action_add_to_steam, _action_automount, _action_gallery, _action_close]:
 		_action_bar.add_child(action)
 
 	# Frosted-glass background, same shader + structure the side panels
@@ -492,6 +547,7 @@ func _build_layout() -> void:
 	_action_status = Label.new()
 	_action_status.add_theme_font_override("font", load(FONT_DISPLAY))
 	_action_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_action_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_title_labels.append(_action_status)
 
 	# Only visible during a local-disk copy (#300) — every other use of this
@@ -511,14 +567,23 @@ func _build_layout() -> void:
 	_action_warning.visible = false
 	_body_labels.append(_action_warning)
 
+	# CenterContainer, not a VBoxContainer with a one-shot PRESET_CENTER: the
+	# latter only computes its centering offsets once, against whatever
+	# _action_status's size happened to be at that moment — a longer status
+	# string set later doesn't recenter against that frozen offset (live-
+	# reported, 2026-09-17: text ran off both screen edges, uncentered).
+	# CenterContainer recenters its child from its OWN current minimum size
+	# on every layout pass instead, so it tracks changes.
+	var overlay_center := CenterContainer.new()
+	overlay_center.set_anchors_preset(Control.PRESET_FULL_RECT)
 	var overlay_box := VBoxContainer.new()
 	overlay_box.alignment = BoxContainer.ALIGNMENT_CENTER
 	overlay_box.add_theme_constant_override("separation", 16)
-	overlay_box.set_anchors_preset(Control.PRESET_CENTER)
 	for child in [_action_status, _action_progress, _action_warning]:
 		child.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 		overlay_box.add_child(child)
-	_action_overlay.add_child(overlay_box)
+	overlay_center.add_child(overlay_box)
+	_action_overlay.add_child(overlay_center)
 	add_child(_action_overlay)
 
 	# S/X's choice screen (#300) — built empty here, labels filled in per
@@ -540,6 +605,38 @@ func _build_layout() -> void:
 		_source_menu_options.append(option)
 		menu_box.add_child(option)
 	_source_menu.add_child(menu_box)
+
+	# #351: same shape as _source_menu above, static text since it only
+	# ever asks one yes/no question — no per-selected-card text to fill in.
+	_mount_prompt = ColorRect.new()
+	_mount_prompt.color = Color(0, 0, 0, 0.85)
+	_mount_prompt.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_mount_prompt.visible = false
+	var mount_center := CenterContainer.new()
+	mount_center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	var mount_box := VBoxContainer.new()
+	mount_box.alignment = BoxContainer.ALIGNMENT_CENTER
+	mount_box.add_theme_constant_override("separation", 12)
+	_mount_prompt_text = Label.new()
+	_mount_prompt_text.text = "Este cartucho no se monta solo en esta PC.\nTatu puede configurar una excepción para que se monte\nautomáticamente la próxima vez (pedirá tu contraseña de administrador).\n¿Configurar ahora?"
+	_mount_prompt_text.add_theme_font_override("font", load(FONT_BODY))
+	_mount_prompt_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_mount_prompt_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_mount_prompt_text.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	_body_labels.append(_mount_prompt_text)
+	mount_box.add_child(_mount_prompt_text)
+	for mount_option_text in ["Sí, configurar", "No, ahora no"]:
+		var mount_option := Label.new()
+		mount_option.text = mount_option_text
+		mount_option.add_theme_font_override("font", load(FONT_BODY))
+		mount_option.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		mount_option.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		_body_labels.append(mount_option)
+		_mount_prompt_options.append(mount_option)
+		mount_box.add_child(mount_option)
+	mount_center.add_child(mount_box)
+	_mount_prompt.add_child(mount_center)
+	add_child(_mount_prompt)
 
 	# #335: lets "Copiar a carpeta local"/"Copiar a carpeta de Steam" target
 	# a disk other than the hardcoded default, for when that one's full.
@@ -1442,6 +1539,11 @@ func _launch_via_steam() -> void:
 	# this remounts it (see `_ensure_ntfs_symlinks`'s own header).
 	if OS.get_name() != "Windows":
 		await _ensure_ntfs_symlinks()
+		# Granting the auto-mount exception itself is RB's own job now
+		# (#357) — this only picks up whatever's already there, so Steam
+		# registers against the fixed path if it's been granted already
+		# instead of needing a second run later to notice it moved.
+		mount_point = _resolve_steam_mount_point(mount_point)
 
 	_register_steam_library(steam_dir, mount_point)
 
@@ -1549,6 +1651,203 @@ func _ensure_ntfs_symlinks() -> void:
 	# the manual `udisksctl unmount`/`mount` cycle this replicates.
 	OS.execute("udisksctl", ["unmount", "-b", source])
 	OS.execute("udisksctl", ["mount", "-b", source])
+
+## Linux only (#351): a consent-gated udev rule so this cartridge auto-mounts
+## on THIS machine next time without depending on any particular desktop's
+## automount agent already running. Confirmed live (2026-09-17): a real KDE
+## Plasma session with udisks2 itself reporting HintAuto: true still never
+## mounted the drive — the `device_automounter` kded module simply wasn't
+## loaded in that session, and nothing in Tatu can (or should) reach into
+## the user's desktop session to fix that. The rule mounts via a plain
+## `mount` call, not `udisksctl`/udisks2 — see `_auto_mount_rule_content`'s
+## own comment for why going through udisks2 from a root, session-less udev
+## rule doesn't work even after granting root the relevant polkit actions.
+## Same precedent as usbmount, which bypasses udisks2 entirely for exactly
+## this reason. Windows needs no equivalent: any correctly GPT-typed
+## partition already gets a drive letter automatically, so there's no
+## exception to grant there.
+##
+## Per-cartridge, keyed by the filesystem's own UUID (assigned per-format,
+## never per-label) — two cartridges sharing the same volume LABEL still
+## get separate rules and separate consent. Per-machine too: the rule file
+## lives on this PC's disk, never written to the cartridge itself.
+##
+## Toggled from its own button (RB/R1, card_toggle_automount), independent
+## of "Agregar a Steam" — live-reported (2026-09-18): a cartridge that's
+## only GOG/EGS/NonSteam never goes through that flow at all, but the OS
+## recognizing the drive on its own has nothing to do with Steam
+## specifically. No decline-cooldown here anymore either — pressing a
+## dedicated button is already an explicit choice, unlike the old
+## automatic offer this replaced.
+func _toggle_auto_mount_rule() -> void:
+	var mount_point := _cartridge_root()
+	var uuid := _cartridge_fs_uuid(mount_point)
+	if uuid.is_empty():
+		return
+
+	var rule_path := _auto_mount_rule_path(uuid)
+	var rule_content := _auto_mount_rule_content(uuid)
+	var configured := (
+		FileAccess.file_exists(rule_path)
+		and FileAccess.get_file_as_string(rule_path) == rule_content
+	)
+
+	if configured:
+		await _offer_revert_auto_mount(rule_path)
+	else:
+		await _offer_grant_auto_mount(rule_path, rule_content)
+
+## The mount point Steam's library should be registered against: the fixed
+## auto-mount path if the exception is already granted for this cartridge,
+## `mount_point` unchanged otherwise. Never shows the consent popup itself
+## — granting only happens via _toggle_auto_mount_rule's own button now,
+## not as a side effect of registering with Steam.
+func _resolve_steam_mount_point(mount_point: String) -> String:
+	var uuid := _cartridge_fs_uuid(mount_point)
+	if uuid.is_empty():
+		return mount_point
+	var rule_path := _auto_mount_rule_path(uuid)
+	if FileAccess.file_exists(rule_path) and FileAccess.get_file_as_string(rule_path) == _auto_mount_rule_content(uuid):
+		return _auto_mount_path(uuid)
+	return mount_point
+
+func _cartridge_fs_uuid(mount_point: String) -> String:
+	var uuid_out := []
+	OS.execute("findmnt", ["-no", "UUID", mount_point], uuid_out)
+	return String(uuid_out[0] if uuid_out.size() > 0 else "").strip_edges()
+
+func _auto_mount_rule_path(uuid: String) -> String:
+	return "/etc/udev/rules.d/99-tatu-cartridge-" + uuid + ".rules"
+
+## Fixed per-UUID path, not udisksd's own `/run/media/<user>/<label>`
+## convention — every reconnect lands at this SAME path once granted, so
+## Steam's registration (`_resolve_steam_mount_point`) stays valid with no
+## further touch needed after the first time.
+func _auto_mount_path(uuid: String) -> String:
+	return "/media/tatu-cartridge-" + uuid
+
+func _auto_mount_rule_content(uuid: String) -> String:
+	var uid_out := []
+	OS.execute("id", ["-u"], uid_out)
+	var uid := String(uid_out[0] if uid_out.size() > 0 else "0").strip_edges()
+	var gid_out := []
+	OS.execute("id", ["-g"], gid_out)
+	var gid := String(gid_out[0] if gid_out.size() > 0 else "0").strip_edges()
+	var mount_path := _auto_mount_path(uuid)
+
+	# Raw `mount`, not `udisksctl mount` — confirmed live (2026-09-17) that
+	# udisksctl invoked from udev runs as root with no login session, which
+	# udisks2's own polkit policy rejects outright; granting root's
+	# filesystem-mount action still isn't enough, since mounting with THIS
+	# user's uid/gid (needed for the files to be usable by anyone but root)
+	# hits a second, stricter action (filesystem-mount-other-user) that
+	# doesn't cleanly resolve non-interactively either. Root running a bare
+	# `mount` needs no polkit authorization at all — same precedent as
+	# usbmount, which never went through udisks2 for exactly this reason.
+	#
+	# `systemd-run`, not calling `mount` directly: also confirmed live
+	# (2026-09-17) that a direct `mount -t ntfs-3g` from udev's own RUN+=
+	# fails outright ("User doesn't have privilege to mount") — systemd-udevd
+	# runs with PrivateMounts=yes, and ntfs-3g's integrated FUSE mode rejects
+	# mounting inside that isolated namespace. `systemd-run` hands the mount
+	# to a brand new transient unit under the system manager instead of
+	# running it as udevd's own child, escaping that isolation; the FUSE
+	# server it starts then keeps running past udev's own event handling
+	# instead of being torn down with it (`RemainAfterExit=yes`, needed
+	# because the mount is a daemonizing FUSE process, not a script that
+	# just exits when done).
+	#
+	# Built by plain concatenation, not the `%` format operator — udev's own
+	# `%E{DEVNAME}`/`%k` placeholder syntax would collide with it.
+	var run_cmd := (
+		"/bin/sh -c '/usr/bin/mkdir -p " + mount_path + "; /usr/bin/mountpoint -q " + mount_path
+		+ " || /usr/bin/systemd-run --property=Type=oneshot --property=RemainAfterExit=yes"
+		+ " -- /usr/bin/mount -t ntfs-3g -o uid=" + uid + ",gid=" + gid + ",nodev,nosuid /dev/%k "
+		+ mount_path + "'"
+	)
+	# Not scoped by ENV{ID_FS_UUID} like the two RUN+= above — confirmed live
+	# (2026-09-17) that a "remove" event doesn't carry that property at all
+	# (blkid only ever populates it on add/change), so a UUID-scoped remove
+	# rule silently never matches. Scoped by SUBSYSTEM instead, firing on
+	# every block removal on the system; the script itself is what narrows
+	# it down, only acting if THIS mount point's own source device is the
+	# one that just disappeared.
+	var remove_cmd := (
+		"/bin/sh -c 'SRC=$(/usr/bin/findmnt -no SOURCE " + mount_path + " 2>/dev/null);"
+		+ " [ -n \"$SRC\" ] && [ ! -e \"$SRC\" ] && { /usr/bin/umount -l " + mount_path
+		+ "; /usr/bin/rmdir " + mount_path + "; }; exit 0'"
+	)
+	# "add" covers a plain USB drive's physical reconnect; "change" covers a
+	# fixed CFexpress/USB-C reader swapping the card without the USB link
+	# itself ever disconnecting (live-reported, 2026-09-17 — no "add" fired
+	# at all for that case, only "change" once the kernel noticed new
+	# media); "remove" tears the mount point back down so a later re-add/
+	# change doesn't find it busy or stale.
+	return (
+		'ACTION=="add", ENV{ID_FS_UUID}=="' + uuid + '", RUN+="' + run_cmd + '"\n'
+		+ 'ACTION=="change", ENV{ID_FS_UUID}=="' + uuid + '", RUN+="' + run_cmd + '"\n'
+		+ 'ACTION=="remove", SUBSYSTEM=="block", RUN+="' + remove_cmd + '"\n'
+	)
+
+func _offer_grant_auto_mount(rule_path: String, rule_content: String) -> void:
+	_mount_prompt_text.text = "Este cartucho no se monta solo en esta PC.\nTatu puede configurar una excepción para que se monte\nautomáticamente la próxima vez (pedirá tu contraseña de administrador).\n¿Configurar ahora?"
+	_mount_prompt_options[0].text = "Sí, configurar"
+	_mount_prompt_options[1].text = "No, ahora no"
+	if not await _show_mount_prompt():
+		return
+
+	var tmp := OS.get_cache_dir().path_join("tatu-automount-%d.rules" % Time.get_unix_time_from_system())
+	var f := FileAccess.open(tmp, FileAccess.WRITE)
+	f.store_string(rule_content)
+	f.close()
+
+	_action_status.text = "Configurando auto-montaje (puede pedir tu contraseña de administrador)..."
+	_action_overlay.visible = true
+	await get_tree().process_frame
+
+	# One pkexec prompt covers install + reload + trigger — matches
+	# _ensure_ntfs_symlinks' own single-elevation shape above, and avoids
+	# asking twice for what's conceptually one action. `--settle` blocks
+	# until the triggered rule's own RUN+= (this same mount) finishes, so
+	# the fixed path is already live once this returns.
+	var cmd := "install -m 0644 " + _sh_quote(tmp) + " " + _sh_quote(rule_path) + " && udevadm control --reload-rules && udevadm trigger --settle"
+	OS.execute("pkexec", ["/bin/sh", "-c", cmd])
+	DirAccess.remove_absolute(tmp)
+	_action_overlay.visible = false
+	await _show_status("Auto-montaje configurado", 2.0)
+
+func _offer_revert_auto_mount(rule_path: String) -> void:
+	_mount_prompt_text.text = "Este cartucho ya se monta solo en esta PC.\n¿Revertir el auto-montaje? La próxima vez\nvas a tener que montarlo a mano de nuevo."
+	_mount_prompt_options[0].text = "Sí, revertir"
+	_mount_prompt_options[1].text = "No, dejarlo así"
+	if not await _show_mount_prompt():
+		return
+
+	_action_status.text = "Revirtiendo auto-montaje (puede pedir tu contraseña de administrador)..."
+	_action_overlay.visible = true
+	await get_tree().process_frame
+
+	OS.execute("pkexec", ["/bin/sh", "-c", "rm -f " + _sh_quote(rule_path) + " && udevadm control --reload-rules"])
+	_action_overlay.visible = false
+	await _show_status("Auto-montaje revertido", 2.0)
+
+## Shared await-a-yes/no-answer machinery for both grant/revert prompts —
+## same shared-Dictionary-by-reference pattern _pick_folder uses, since
+## this popup has no real Godot signal to hook into (see the input
+## handler's own `_mount_prompt.visible` branch).
+func _show_mount_prompt() -> bool:
+	_mount_prompt_selected = 0
+	_update_mount_prompt_highlight()
+	_mount_prompt.visible = true
+	var state := {"done": false, "accepted": false}
+	_mount_prompt_state = state
+	while not state.done:
+		await get_tree().process_frame
+	return state.accepted
+
+func _update_mount_prompt_highlight() -> void:
+	for i in _mount_prompt_options.size():
+		_mount_prompt_options[i].modulate = Color.WHITE if i == _mount_prompt_selected else Color(1, 1, 1, 0.5)
 
 ## Linux: `~/.local/share/Steam` or the older `~/.steam/steam` symlink
 ## target. Windows: the one non-elevated, no-registry-access location a
@@ -1748,6 +2047,13 @@ func _extract_tar(archive_path: String, dest_dir: String, strip_top_level: bool)
 ## is the new per-selected-game local copy.
 func _on_add_to_steam_requested() -> void:
 	_open_source_menu()
+
+## RB/R1, standalone of "Agregar a Steam" (#357) — a no-op on Windows, same
+## as _ensure_ntfs_symlinks/_toggle_auto_mount_rule's own Linux-only scope.
+func _on_toggle_automount_requested() -> void:
+	if OS.get_name() == "Windows":
+		return
+	await _toggle_auto_mount_rule()
 
 func _open_source_menu() -> void:
 	var app: Dictionary = _apps[_selected_index]

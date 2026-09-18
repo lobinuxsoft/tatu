@@ -27,6 +27,10 @@ md-5 = "0.11"
 # Verifying the vendored Proton/Steam Linux Runtime downloads (#206) against
 # their own published SHA256/SHA512 sums — same RustCrypto family as md-5.
 sha2 = "0.10"
+# EGS manifest/chunk integrity verification (#344) — every manifest body and
+# every chunk payload carries its own SHA1, same RustCrypto family as
+# md-5/sha2 above. Already in the tree transitively via zip; pinned directly.
+sha1 = "0.11"
 # Extracting umu-run out of umu-launcher's zipapp release tarball (#206).
 tar = "0.4"
 # Goldberg injection (#199): PE section scan to detect a SteamStub wrapper
@@ -42,6 +46,11 @@ goblin = { version = "0.10", default-features = false, features = [
 # rolling either — only the "disk" feature, no process/network/user scanning.
 sysinfo = { version = "0.39.6", default-features = false, features = ["disk"] }
 flate2 = "1.1.10"
+# EGS token exchange (#343) authenticates the CLIENT via HTTP Basic (the
+# UELauncher credentials, not a form field like GOG's) — already in the
+# dependency tree transitively via tauri/plist, pinned directly here rather
+# than duplicating a base64 encoder by hand.
+base64 = "0.22"
 
 # The cheat runtime is the Linux ptrace backend (nix, /proc, ELF symbols).
 # Windows gets the tracker only until tatu-win lands (#181); gating the deps
