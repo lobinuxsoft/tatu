@@ -18,7 +18,8 @@ use crate::steam::exe::find_install_path;
 /// enough to know for certain it's Goldberg-compatible and separately sold
 /// DRM-free on GOG, without asking any network source at all.
 pub(super) fn upgrade_from_installed_files(app_id: u64, info: DrmInfo) -> DrmInfo {
-    if info.preservability != Preservability::Unknown {
+    if info.preservability != Preservability::Unknown && info.preservability != Preservability::Easy
+    {
         return info;
     }
     let Ok(install_dir) = find_install_path(&app_id.to_string()) else {
@@ -33,6 +34,23 @@ pub(super) fn upgrade_from_installed_files(app_id: u64, info: DrmInfo) -> DrmInf
     // — prefer that over pointing at a GOG alternative when both signals
     // happen to be present (as with Hellpoint, which ships both SDKs).
     let has_steam_api = files.iter().any(|p| is_steam_api_dll(p));
+
+    // A remote "SteamOnly" claim (PCGamingWiki's own generic wiki entry,
+    // true of most Steam releases as a baseline) doesn't hold once the
+    // actual install proves there's no steam_api(64).dll anywhere to strip.
+    // Live-caught 2026-09-17: Monster Hunter Stories/Stories 2/Resident
+    // Evil 5 all classified Easy from PCGW's data, but none of their
+    // installs (nor the executables themselves, checked separately via
+    // `strings`) reference SteamAPI at all — absence on disk is a
+    // stronger, more direct signal than a remote wiki claim about the
+    // SAME copy, and `inject_goldberg` would just fail on these anyway.
+    if info.preservability == Preservability::Easy && !has_steam_api {
+        return downgraded_trivial(info);
+    }
+    if info.preservability != Preservability::Unknown {
+        return info;
+    }
+
     if has_steam_api {
         let stubbed = files
             .iter()
@@ -62,6 +80,22 @@ fn upgraded_easy(mut info: DrmInfo) -> DrmInfo {
     info.notes = push_note(
         info.notes,
         "steam_api(64).dll sin SteamStub en la instalación",
+    );
+    info
+}
+
+fn downgraded_trivial(mut info: DrmInfo) -> DrmInfo {
+    info.status = DrmStatus::DrmFree;
+    info.affects_copy = false;
+    info.explanation = "No se encontró steam_api(64).dll en los archivos ya instalados — \
+        el juego no depende de Steamworks pese a la clasificación remota."
+        .to_string();
+    info.preservability = Preservability::Trivial;
+    info.preservability_hint = preservability_hint(&Preservability::Trivial);
+    info.source = "archivos locales".to_string();
+    info.notes = push_note(
+        info.notes,
+        "sin steam_api(64).dll en la instalación pese a clasificación SteamOnly remota",
     );
     info
 }
@@ -162,6 +196,16 @@ mod tests {
         let info = base_info(Preservability::Hard);
         let result = upgrade_from_installed_files(1, info.clone());
         assert_eq!(result.preservability, info.preservability);
+    }
+
+    #[test]
+    fn easy_with_no_install_stays_easy() {
+        // No Steam library on this machine has appid 999999999 installed —
+        // find_install_path fails, same no-op find_install_path failure
+        // unknown_with_no_install_stays_unknown below relies on, just
+        // confirming the new Easy branch doesn't skip that guard.
+        let result = upgrade_from_installed_files(999999999, base_info(Preservability::Easy));
+        assert_eq!(result.preservability, Preservability::Easy);
     }
 
     #[test]
