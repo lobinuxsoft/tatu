@@ -3,7 +3,7 @@
 <div align="center">
   <strong>Steam backlog tracker, single-player cheat host, and portable game cartridge.</strong>
 
-  [![License](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
+  [![License](https://img.shields.io/badge/License-Personal%20%26%20Share--Back-blue.svg)](LICENSE)
   [![Rust](https://img.shields.io/badge/Rust-stable-DEA584?logo=rust)](https://www.rust-lang.org/)
   [![Tauri](https://img.shields.io/badge/Tauri-v2-FFC131?logo=tauri)](https://tauri.app/)
 </div>
@@ -58,14 +58,16 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
 
 ## License
 
-AGPL v3 — see [LICENSE](LICENSE) for details.
+Tatu Personal & Share-Back License — see [LICENSE](LICENSE) for details.
 
 This means:
-- Free to use, modify, and distribute
-- Contributions welcome
-- Derivatives must use the same license
-- Source code must be provided (even for SaaS)
-- Original authors must be credited
+- Free for personal, noncommercial use — use it, modify it, learn from it
+- No commercial use of any kind (selling, SaaS, use inside a for-profit business) without a separate agreement with the author
+- Derivatives are allowed, but any modification you deploy or distribute must be shared back with the author (notice + source), not just published to the world
+- No use of the Software as AI/ML training, fine-tuning, or retrieval data without a separate agreement (TDM rights reserved under EU Directive 2019/790 Art. 4)
+- Versions released before 2026-09-24 remain under AGPLv3
+
+**Contact for share-back / commercial or AI-training licensing:** [@lobinuxsoft](https://github.com/lobinuxsoft) — open an issue on this repo or a GitHub DM.
 
 ## Disclaimer
 
