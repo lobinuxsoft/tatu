@@ -1,0 +1,12 @@
+{
+  "format_version": 1,
+  "label": "64M3_C4R7R1D63",
+  "apps": [
+    {"app_id": 1, "name": "DOOM", "preservability": {"kind": "easy"}, "standalone": true, "exe_path": "steamapps/common/DOOM/DOOM.exe"},
+    {"app_id": 2, "name": "Sin Carátula", "preservability": {"kind": "hard"}, "standalone": false},
+    {"app_id": 3, "name": "Ender Magnolia", "preservability": {"kind": "trivial"}, "standalone": false},
+    {"app_id": 4, "name": "Enigma of Fear", "preservability": {"kind": "easy"}, "standalone": true}
+  ],
+  "created_at": 0,
+  "checksum": "test-fixture-not-a-real-checksum"
+}

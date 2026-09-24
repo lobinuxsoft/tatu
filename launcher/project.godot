@@ -1,0 +1,37 @@
+; Engine configuration file.
+; It's best edited using the editor UI and not directly,
+; since the parameters that go here are not all obvious.
+;
+; Format:
+;   [section] ; section goes between []
+;   param=value ; assign values to parameters
+
+config_version=5
+
+[application]
+
+config/name="Tatu Launcher"
+run/main_scene="res://scenes/main.tscn"
+config/features=PackedStringArray("4.7", "GL Compatibility")
+config/icon="res://assets/icon/icon.png"
+boot_splash/bg_color=Color(0.043137, 0.054902, 0.070588, 1)
+boot_splash/show_image=false
+
+[display]
+
+; Live-tested (2026-08-28): every size in main.gd is a RATIO of the root
+; Control's own `.size`, which without this section tracks the raw OS
+; window — a non-16:9 window shape distorted every proportion downstream
+; (cards, fonts, the side panels). Locking the logical canvas to a fixed
+; 16:9 resolution with `aspect="keep"` letterboxes/pillarboxes instead,
+; so `.size` is always 16:9 regardless of the actual window shape.
+window/size/viewport_width=1920
+window/size/viewport_height=1080
+window/size/mode=3
+window/stretch/mode="canvas_items"
+window/stretch/aspect="keep"
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"

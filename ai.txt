@@ -1,0 +1,14 @@
+# TDM / AI-training reservation
+
+The copyright holder of this repository (Matias Galarza / Lobinux)
+expressly reserves all rights for text-and-data-mining purposes,
+including use for training, fine-tuning, or evaluating machine learning
+or artificial intelligence models, under Article 4 of Directive (EU)
+2019/790 and any equivalent reservation recognized under other
+jurisdictions' laws.
+
+No permission is granted to use this repository's contents as AI/ML
+training, fine-tuning, or retrieval data without a separate, signed
+agreement with the copyright holder. See LICENSE, Section 5.
+
+Contact: https://github.com/lobinuxsoft

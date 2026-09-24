@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<CheatTable CheatEngineTableVersion="45">
+  <CheatEntries>
+    <CheatEntry>
+      <ID>7</ID>
+      <Description>"aobscan no-module — Mono / JIT pattern"</Description>
+      <VariableType>Auto Assembler Script</VariableType>
+      <AssemblerScript>{ Game   : fixture.exe
+  Version: 1.0
+  Author : test
+}
+
+[ENABLE]
+aobscan(INJECT,DE AD BE EF CA FE BA BE)
+alloc(newmem,$1000)
+label(code)
+label(return)
+
+newmem:
+code:
+  nop 8
+  jmp return
+
+INJECT:
+  jmp newmem
+  nop 3
+return:
+
+[DISABLE]
+INJECT:
+  db DE AD BE EF CA FE BA BE
+
+unregistersymbol(*)
+dealloc(*)
+</AssemblerScript>
+    </CheatEntry>
+  </CheatEntries>
+</CheatTable>

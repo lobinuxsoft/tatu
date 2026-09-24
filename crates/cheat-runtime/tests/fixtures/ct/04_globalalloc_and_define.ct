@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<CheatTable CheatEngineTableVersion="45">
+  <CheatEntries>
+    <CheatEntry>
+      <ID>4</ID>
+      <Description>"globalalloc + define — Elden Ring pattern"</Description>
+      <VariableType>Auto Assembler Script</VariableType>
+      <AssemblerScript>[ENABLE]
+define(slot, 0x40)
+define(injectOffset, fixture.exe+CD2FC1)
+
+globalalloc(newmem,0x100)
+label(code)
+label(return)
+registersymbol(newmem)
+
+newmem:
+code:
+  nop 6
+  jmp return
+
+[DISABLE]
+unregistersymbol(newmem)
+dealloc(newmem)
+</AssemblerScript>
+    </CheatEntry>
+  </CheatEntries>
+</CheatTable>

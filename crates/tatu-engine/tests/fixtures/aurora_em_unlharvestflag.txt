@@ -1,0 +1,48 @@
+[ENABLE]
+aobscanmodule(originalcode_7149,$process,6F 4C C2 4A 88 D4 22 98 F2 DC 64 C7 0B) //unique
+registersymbol(originalcode_7149)
+label(originalcode_7149Restore)
+registersymbol(originalcode_7149Restore)
+alloc(codecave,1024)
+label(code)
+label(return)
+registersymbol(unlHarvestFlag)
+label(unlHarvestFlag)
+
+codecave:
+{$begin_obfuscate}
+push ebx
+cmp byte ptr [unlHarvestFlag],1
+jne @f
+mov dword ptr [r13+13C],(float)100
+{$end_obfuscate}
+
+
+code:
+pop r13d
+readmem(originalcode_7149, 8)
+
+jmp return
+
+unlHarvestFlag:
+dq 0
+
+originalcode_7149Restore:
+readmem(originalcode_7149,8)
+
+
+originalcode_7149:
+jmp codecave
+nop 3
+return:
+
+
+
+[DISABLE]
+unregistersymbol(unlHarvestFlag)
+originalcode_7149:
+readmem(originalcode_7149Restore,8)
+
+unregistersymbol(originalcode_7149)
+unregistersymbol(originalcode_7149Restore)
+dealloc(codecave)

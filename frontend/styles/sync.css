@@ -1,0 +1,5 @@
+.sync-bar { display: flex; align-items: center; justify-content: center; gap: 0.6rem; margin-bottom: 1.2rem; flex-wrap: wrap; }
+.sync-info { font-size: 0.75rem; color: var(--fg-muted); }
+.sync-btn { padding: 0.3rem 0.7rem; background: var(--bg-3); border: 1px solid var(--border); border-radius: var(--r); color: var(--accent); cursor: pointer; font-size: 0.75rem; transition: all var(--t-fast); }
+.sync-btn:hover { background: var(--bg-hover); }
+.sync-btn:disabled { opacity: 0.4; cursor: default; }

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<CheatTable CheatEngineTableVersion="45">
+  <CheatEntries>
+    <CheatEntry>
+      <ID>5</ID>
+      <Description>"Lua-only — no [ENABLE] block, pure CE Lua payload"</Description>
+      <VariableType>Auto Assembler Script</VariableType>
+      <AssemblerScript>{$lua}
+if syntaxcheck then return end
+
+-- This entry is pure CE Lua. Tatu has no Lua VM, so we must surface
+-- this with lua_only=true and ExecError::LuaNotSupported instead of
+-- breaking the surrounding table.
+local timer = createTimer(nil, false)
+timer.Interval = 100
+timer.OnTimer = function(t)
+  t.Enabled = false
+  t.destroy()
+end
+timer.Enabled = true
+</AssemblerScript>
+    </CheatEntry>
+  </CheatEntries>
+</CheatTable>

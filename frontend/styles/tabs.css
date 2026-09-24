@@ -1,0 +1,7 @@
+.tabs { display: flex; gap: 0; margin-bottom: 1.2rem; border-bottom: 2px solid var(--border-subtle); }
+.tab { font-family: var(--font-display); padding: 0.6rem 1.2rem; cursor: pointer; color: var(--fg-dim); font-size: 0.82rem; font-weight: 700; text-transform: var(--display-transform); letter-spacing: var(--display-tracking); border-bottom: 2px solid transparent; margin-bottom: -2px; transition: all var(--t-fast); user-select: none; }
+.tab:hover { color: var(--fg-strong); }
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); text-shadow: 0 0 6px rgba(255, 0, 255, 0.5); }
+.tab .tab-count { font-size: 0.7rem; opacity: 0.6; margin-left: 0.3rem; }
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }

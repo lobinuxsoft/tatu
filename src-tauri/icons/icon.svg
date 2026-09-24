@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1a1e2e"/>
+      <stop offset="100%" style="stop-color:#0e1117"/>
+    </linearGradient>
+    <linearGradient id="progress" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#238636"/>
+      <stop offset="100%" style="stop-color:#2ea043"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#58a6ff"/>
+      <stop offset="100%" style="stop-color:#388bfd"/>
+    </linearGradient>
+  </defs>
+  <!-- Background rounded square -->
+  <rect width="512" height="512" rx="100" fill="url(#bg)"/>
+  <!-- Gamepad body -->
+  <path d="M156 200 C156 180, 176 160, 196 160 L316 160 C336 160, 356 180, 356 200 L356 260 C356 280, 380 340, 380 360 C380 390, 360 400, 340 400 C320 400, 310 390, 290 360 L280 340 L232 340 L222 360 C202 390, 192 400, 172 400 C152 400, 132 390, 132 360 C132 340, 156 280, 156 260 Z" fill="#21262d" stroke="#30363d" stroke-width="4"/>
+  <!-- D-pad -->
+  <rect x="190" y="224" width="16" height="48" rx="4" fill="#58a6ff"/>
+  <rect x="178" y="236" width="40" height="16" rx="4" fill="#58a6ff"/>
+  <!-- Buttons -->
+  <circle cx="320" cy="220" r="10" fill="#2ea043"/>
+  <circle cx="344" cy="244" r="10" fill="#f85149"/>
+  <circle cx="296" cy="244" r="10" fill="#d29922"/>
+  <circle cx="320" cy="268" r="10" fill="#58a6ff"/>
+  <!-- Progress bar track -->
+  <rect x="100" y="420" width="312" height="28" rx="14" fill="#21262d" stroke="#30363d" stroke-width="2"/>
+  <!-- Progress bar fill -->
+  <rect x="102" y="422" width="200" height="24" rx="12" fill="url(#progress)"/>
+  <!-- Progress percentage -->
+  <text x="256" y="440" text-anchor="middle" font-family="sans-serif" font-size="16" font-weight="bold" fill="#e6edf3">64%</text>
+</svg>

@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<CheatTable CheatEngineTableVersion="45">
+  <CheatEntries>
+    <CheatEntry>
+      <ID>1</ID>
+      <Description>"Basic toggle — aobscan + alloc + jmp + db restore"</Description>
+      <VariableType>Auto Assembler Script</VariableType>
+      <AssemblerScript>[ENABLE]
+aobscanmodule(injectsite,fixture.exe,DE AD BE EF CA FE)
+alloc(newmem,1024,injectsite)
+label(code)
+label(return)
+registersymbol(injectsite)
+
+newmem:
+code:
+  nop 6
+  jmp return
+
+injectsite:
+  jmp newmem
+  nop 1
+return:
+
+[DISABLE]
+injectsite:
+  db DE AD BE EF CA FE
+
+unregistersymbol(injectsite)
+dealloc(newmem)
+</AssemblerScript>
+    </CheatEntry>
+  </CheatEntries>
+</CheatTable>

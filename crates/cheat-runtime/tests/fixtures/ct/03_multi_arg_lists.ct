@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<CheatTable CheatEngineTableVersion="45">
+  <CheatEntries>
+    <CheatEntry>
+      <ID>3</ID>
+      <Description>"Multi-arg name lists — space- and comma-separated (Dragon's Dogma 2 pattern)"</Description>
+      <VariableType>Auto Assembler Script</VariableType>
+      <AssemblerScript>[ENABLE]
+aobscanmodule(scanSite,fixture.exe,AA BB CC DD)
+alloc(newmem,1024,scanSite)
+registersymbol(scanSite,pHealth,bMaxStamina)
+label(pHealth pSpirit pStamina bMaxStamina bInfHealth)
+
+newmem:
+pHealth:
+  dq 0
+pSpirit:
+  dq 0
+pStamina:
+  dq 0
+bMaxStamina:
+  dd 0
+bInfHealth:
+  dd 0
+
+scanSite:
+  jmp newmem
+
+[DISABLE]
+scanSite:
+  db AA BB CC DD
+
+unregistersymbol(scanSite pHealth pSpirit pStamina bMaxStamina bInfHealth)
+dealloc(newmem)
+</AssemblerScript>
+    </CheatEntry>
+  </CheatEntries>
+</CheatTable>

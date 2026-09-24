@@ -1,0 +1,16 @@
+[package]
+name = "ce-launcher"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+ureq = "3"
+zip = "8"
+sha2 = "0.10"
+dirs = "6"
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+
+[dev-dependencies]
+tempfile = "3"

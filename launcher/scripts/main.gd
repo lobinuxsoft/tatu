@@ -1,0 +1,2109 @@
+extends Control
+## Cartridge launcher entry point (#204). Reads #193's marker directly — no
+## separate manifest — and renders a Steam-Deck-style carousel: the selected
+## app always sits centered and enlarged, with an info panel on one side and
+## the two direct actions (launch standalone / add to Steam) on the other.
+## Only two actions ever exist, so they are bound straight to a gamepad
+## button + a keyboard key rather than needing on-screen buttons to
+## navigate to.
+##
+## The carousel is a real HBoxContainer of cards (gets spacing/sizing right
+## for free — an earlier hand-rolled version positioned each card by hand
+## and had cards bleeding past the side panels, see PR #211's history)
+## sitting inside a plain clipped Control. A ScrollContainer was tried in
+## between: it cannot scroll a card to center-screen when the total row is
+## NARROWER than the viewport (a small cartridge with few games) — its
+## scroll_horizontal clamps to 0, so nothing short of overflowing content
+## can ever be centered. Animating the ROW's own position instead has no
+## such floor. Studied ShadowBlip/OpenGamepadUI (GPL-3.0, compatible with
+## this project's AGPL-3.0) before rewriting this — a real, maintained,
+## gamepad-native Godot launcher building the exact same kind of screen.
+##
+## Never re-verifies the marker's checksum: yaguarete_os#314 already does
+## that before autorunning this binary, so redoing it here would just
+## duplicate that trust boundary for no benefit.
+
+const MARKER_FILENAME := ".tatu-cartridge.json"
+const IMAGE_EXTENSIONS: Array[String] = ["png", "jpg", "jpeg", "webp"]
+# Opt-in trailer (#212), Ogg Theora — the only video format Godot 4 plays
+# natively. Absent for most games unless the user checked "Incluir
+# trailers" in the Cartucho tab: falls back to a cached screenshot, then
+# the blurred grid art, same tier order the background already had.
+const TRAILER_FILENAME := "trailer.ogv"
+# Cards size off the carousel area's own height, not a fixed pixel value —
+# resizing the window (or running on a different screen entirely) has to
+# rescale them, not leave them stuck at whatever size they started at.
+# Reduced from 0.62 (2026-08-31, user request): a smaller cover leaves more
+# of the blurred background trailer/screenshot actually visible around it.
+const CARD_HEIGHT_RATIO := 0.48
+const CARD_GAP_RATIO := 0.06
+# Where the row sits vertically within the carousel clip area — 0.5 is dead
+# center, 1.0 would rest its bottom edge on the clip's own bottom edge.
+# Biased down (2026-08-31, user request) so more of the background
+# trailer/screenshot shows above the cards instead of being split evenly.
+const CARD_VERTICAL_BIAS_RATIO := 0.68
+const SCROLL_DURATION := 0.4
+# Every size below is a RATIO of the window's own size, never a fixed pixel
+# constant — a first pass used fixed pixels throughout (300px panels,
+# 22px/16px fonts) and it read fine on the 1152x648 debug window but broke
+# down completely at a real screen size: tiny text in a huge empty panel,
+# or (once fonts scaled up to fix that) a panel too narrow to fit them.
+# Everything has to scale off the same window together or they drift apart.
+const SIDE_PANEL_WIDTH_RATIO := 0.22
+const SIDE_PANEL_MARGIN_RATIO := 0.018
+const TITLE_FONT_RATIO := 0.036
+const BODY_FONT_RATIO := 0.02
+# Smaller and its own ratio, not BODY_FONT_RATIO — these sit in their own
+# bottom-center bar (see ACTION_BAR_* below), so shrinking them doesn't
+# fight the info panel's actual body text for space. Reduced again from an
+# earlier pass — found live-testing with the user: all four still need to
+# fit in one row without crowding.
+const HINT_FONT_RATIO := 0.011
+const HINT_ICON_RATIO := 0.02
+# The action bar's own bottom margin and the gap between its four action
+# groups, both ratios of the window rather than fixed pixels — same rule
+# as every other size in this file.
+# Live-reported (2026-08-31): a visible gap sat between the glass bar and
+# the actual bottom edge of the screen — flush against the edge reads more
+# like a real console/Deck button-prompt bar.
+const ACTION_BAR_MARGIN_RATIO := 0.0
+const ACTION_BAR_GAP_RATIO := 0.03
+# Height of the frosted-glass strip behind the action bar, and the padding
+# between that strip's edge and the icons/labels inside it — the bar had no
+# background at all before this (live-reported, 2026-08-31: icons/text
+# vanished against a bright background image). Same shader the side panels
+# already use (`glass_panel.gdshader`), just a bottom-anchored strip instead
+# of a full-height side one.
+const ACTION_BAR_GLASS_HEIGHT_RATIO := 0.07
+const ACTION_BAR_GLASS_PADDING_RATIO := 0.012
+# _action_status/_mount_prompt's own text — some of these run long
+# ("Configurando auto-montaje (puede pedir tu contraseña de
+# administrador)...") and had no bounded width at all (live-reported,
+# 2026-09-17: the overlay box's one-time PRESET_CENTER offsets were sized
+# against whatever was showing at _ready(), so a longer string later grew
+# the box asymmetrically from those fixed offsets instead of from its
+# center — off-center AND clipped past the screen edge). Capping width and
+# wrapping keeps the box's minimum size stable instead of growing past what
+# PRESET_CENTER already centered.
+const ACTION_STATUS_WIDTH_RATIO := 0.6
+
+# Same display/body fonts Tatu's own web frontend themes already use (OFL,
+# vendored under assets/fonts/ — see assets/README.md for provenance).
+const FONT_DISPLAY := "res://assets/fonts/Rajdhani-Bold.ttf"
+const FONT_BODY := "res://assets/fonts/Inter-Regular.ttf"
+# Kenney's CC0 Input Prompts pack (assets/README.md) — Steam Deck face
+# buttons, since that's the physical device this whole look targets. A, X,
+# Y, B map to launch/add-to-steam/gallery/close, in that order — matches
+# the layout of the buttons themselves on a real controller, not an
+# arbitrary pick.
+const ICON_LAUNCH: Array[String] = [
+	"res://assets/input_prompts/keyboard_enter.png",
+	"res://assets/input_prompts/steamdeck_button_a.png",
+]
+const ICON_ADD_TO_STEAM: Array[String] = [
+	"res://assets/input_prompts/keyboard_s.png",
+	"res://assets/input_prompts/steamdeck_button_x.png",
+]
+const ICON_GALLERY: Array[String] = [
+	"res://assets/input_prompts/keyboard_g.png",
+	"res://assets/input_prompts/steamdeck_button_y.png",
+]
+const ICON_CLOSE: Array[String] = [
+	"res://assets/input_prompts/keyboard_escape.png",
+	"res://assets/input_prompts/steamdeck_button_b.png",
+]
+const ICON_AUTOMOUNT: Array[String] = [
+	"res://assets/input_prompts/keyboard_m.png",
+	"res://assets/input_prompts/steamdeck_button_r1.png",
+]
+
+# #206: umu-run + Proton + Steam Linux Runtime, bundled onto the cartridge
+# by Tatu's runtime.rs at the same moment Goldberg injection runs — must
+# match those filenames/pins exactly, or the launcher extracts nothing.
+const CARTRIDGE_RUNTIME_SUBDIR := "runtime/linux"
+const RUNTIME_ARCHIVE := "SteamLinuxRuntime_4.tar.xz"
+const PROTON_ARCHIVE := "GE-Proton11-6-x86_64.tar.gz"
+const PROTON_DIRNAME := "GE-Proton11-6-x86_64"
+
+# #209: GOG-shortcut side, applied via CDP once Steam is back up after
+# `_launch_via_steam`'s own restart below.
+const CEF_DEBUG_FILE := ".cef-enable-remote-debugging"
+const CEF_WAIT_TIMEOUT_SEC := 30.0
+const CEF_POLL_INTERVAL_SEC := 2.0
+
+# #300: a slow USB/SD cartridge can stutter mid-game if it stays the live
+# storage device — the whole install root gets copied to local disk first.
+# Sentinel written only once every file has landed, so a copy killed mid-way
+# (crash, cartridge pulled) is never mistaken for a finished one on the next
+# launch.
+const LOCAL_COPY_DONE_FILENAME := ".tatu-copy-complete"
+const LOCAL_COPY_POLL_INTERVAL_SEC := 1.0
+
+var _apps: Array = []
+var _selected_index: int = 0
+var _cards: Array[GameCard] = []
+
+# Cover art decodes are spread across frames instead of blocking the first
+# one for as long as the whole library's art takes to read off the
+# cartridge (#249) — each entry is {"card": GameCard, "path": String}.
+var _pending_art: Array[Dictionary] = []
+const ART_LOAD_BUDGET_MS := 4.0
+
+var _empty_state: Label
+var _background: TextureRect
+var _background_video: VideoStreamPlayer
+var _background_loading: Label
+# Bumped on every _update_background call — a background-thread load whose
+# id no longer matches when it finishes belongs to a selection the player
+# already scrolled past, and must not overwrite what's shown now (#254).
+var _background_load_id := 0
+var _carousel_clip: Control
+var _carousel_row: HBoxContainer
+var _info_name: Label
+var _info_description: Label
+var _action_launch: Control
+var _action_add_to_steam: Control
+var _action_automount: Control
+var _action_gallery: Control
+var _action_close: Control
+var _action_bar: HBoxContainer
+var _gallery: ScreenshotGallery
+var _viewer: Control
+var _viewer_image: TextureRect
+var _action_status: Label
+var _action_progress: ProgressBar
+var _action_warning: Label
+var _action_overlay: Control
+# Set for the whole duration of a local-disk copy (#300) — checked first in
+# _unhandled_input so nothing (navigation, another launch, closing the
+# launcher) can run while a copy is in flight and the cartridge must stay
+# connected.
+var _copying := false
+# S/X's own choice screen (#300) — "Add Cartridge"/"Add a Non-Steam" (the
+# pre-existing #208 flow) vs "Copiar a carpeta de Steam/GOG" (the new
+# per-game local copy), labeled per the selected card's source.
+var _source_menu: Control
+var _source_menu_options: Array[Label] = []
+var _source_menu_selected := 0
+# #351: consent popup for the udev auto-mount exception — same
+# ColorRect+VBoxContainer+Label shape as _source_menu above, own visibility
+# flag since only one of the two modals is ever shown at a time.
+var _mount_prompt: Control
+var _mount_prompt_text: Label
+var _mount_prompt_options: Array[Label] = []
+var _mount_prompt_selected := 0
+var _mount_prompt_state: Dictionary = {}
+# Godot's own FileDialog, not a native OS one (#335) — a native dialog
+# expects mouse/keyboard, breaking the gamepad-only navigation every other
+# screen in this launcher already has; FileDialog is a plain Control tree,
+# so ui_up/down/accept already move focus through it for free.
+var _folder_dialog: FileDialog
+var _scroll_tween: Tween
+var _panel_content_width := 0.0
+
+var _left_glass: ColorRect
+var _left_margin: MarginContainer
+var _right_glass: ColorRect
+var _right_margin: MarginContainer
+var _action_bar_glass: ColorRect
+var _action_bar_margin: MarginContainer
+
+# Everything whose size scales with the window — populated as each is
+# built, resized together in _resize_layout().
+var _title_labels: Array[Label] = []
+var _body_labels: Array[Label] = []
+var _hint_labels: Array[Label] = []
+var _hint_icons: Array[TextureRect] = []
+
+var _dragging := false
+var _drag_start_mouse_x := 0.0
+var _drag_start_row_x := 0.0
+
+func _ready() -> void:
+	# `window/size/mode=3` (borderless fullscreen) isn't enough on its own on
+	# every compositor — some never hand a newly-mapped fullscreen window
+	# input focus, leaving the gamepad dead until the user clicks it by hand.
+	get_window().grab_focus()
+	_register_input_actions()
+	_build_layout()
+	_carousel_clip.resized.connect(_on_carousel_resized)
+	_apps = _load_apps()
+	_empty_state.visible = _apps.is_empty()
+	_carousel_clip.visible = not _apps.is_empty()
+	for i in _apps.size():
+		_add_card(i, _apps[i])
+	if _apps.is_empty():
+		return
+	# The HBoxContainer only settles each card's real position one idle
+	# frame after they're all added — centering the scroll any earlier
+	# would compute against a stale (zero) position for the first card.
+	await get_tree().process_frame
+	_resize_layout()
+	# resize_layout() sets custom_minimum_size/size directly on every card,
+	# which only marks the HBoxContainer dirty — it re-sorts children on the
+	# NEXT idle frame, not synchronously. Centering right here would read
+	# every card's PRE-resize position, landing the carousel offset wrong
+	# on every single launch (confirmed live, #247).
+	await get_tree().process_frame
+	_update_selection(false)
+
+## Re-sizes cards, fonts, and hint icons off the carousel area's CURRENT
+## height and re-centers without animating — called on the initial layout
+## and again every time the window (or just this area) is resized.
+func _resize_layout() -> void:
+	var title_size := int(_carousel_clip.size.y * TITLE_FONT_RATIO)
+	for label in _title_labels:
+		label.add_theme_font_size_override("font_size", title_size)
+
+	var body_size := int(_carousel_clip.size.y * BODY_FONT_RATIO)
+	for label in _body_labels:
+		label.add_theme_font_size_override("font_size", body_size)
+
+	var hint_size := int(_carousel_clip.size.y * HINT_FONT_RATIO)
+	for label in _hint_labels:
+		label.add_theme_font_size_override("font_size", hint_size)
+
+	var icon_size := _carousel_clip.size.y * HINT_ICON_RATIO
+	for icon in _hint_icons:
+		icon.custom_minimum_size = Vector2(icon_size, icon_size)
+
+	var status_width := _carousel_clip.size.x * ACTION_STATUS_WIDTH_RATIO
+	_action_status.custom_minimum_size.x = status_width
+	_mount_prompt_text.custom_minimum_size.x = status_width
+
+	var bar_margin := int(_carousel_clip.size.y * ACTION_BAR_MARGIN_RATIO)
+	var bar_height := int(_carousel_clip.size.y * ACTION_BAR_GLASS_HEIGHT_RATIO)
+	var bar_padding := int(_carousel_clip.size.y * ACTION_BAR_GLASS_PADDING_RATIO)
+	_action_bar_glass.offset_bottom = -bar_margin
+	_action_bar_glass.offset_top = -bar_margin - bar_height
+	for side in ["left", "top", "right", "bottom"]:
+		_action_bar_margin.add_theme_constant_override("margin_%s" % side, bar_padding)
+	_action_bar.add_theme_constant_override(
+		"separation", int(_carousel_clip.size.x * ACTION_BAR_GAP_RATIO)
+	)
+
+	var panel_width := _carousel_clip.size.x * SIDE_PANEL_WIDTH_RATIO
+	var panel_margin := int(_carousel_clip.size.x * SIDE_PANEL_MARGIN_RATIO)
+	_left_glass.offset_right = panel_width
+	_right_glass.offset_left = -panel_width
+	for side in ["left", "top", "right", "bottom"]:
+		_left_margin.add_theme_constant_override("margin_%s" % side, panel_margin)
+		_right_margin.add_theme_constant_override("margin_%s" % side, panel_margin)
+	_panel_content_width = panel_width - panel_margin * 2.0
+	_gallery.resize(_panel_content_width)
+
+	if _cards.is_empty():
+		return
+	var card_height := _carousel_clip.size.y * CARD_HEIGHT_RATIO
+	_carousel_row.add_theme_constant_override("separation", int(card_height * CARD_GAP_RATIO))
+	for card in _cards:
+		card.resize(card_height)
+
+func _on_carousel_resized() -> void:
+	_resize_layout()
+	if _apps.is_empty():
+		return
+	# Same one-frame container-sort lag as _ready() above.
+	await get_tree().process_frame
+	_center_on_selected(false)
+
+func _register_input_actions() -> void:
+	_ensure_action("card_launch", KEY_ENTER, JOY_BUTTON_A)
+	_ensure_action("card_add_to_steam", KEY_S, JOY_BUTTON_X)
+	# RB/R1 — independent of card_add_to_steam on purpose (#357): a
+	# GOG/EGS/NonSteam-only cartridge never goes through that flow, but the
+	# OS recognizing the drive on its own has nothing to do with Steam.
+	_ensure_action("card_toggle_automount", KEY_M, JOY_BUTTON_RIGHT_SHOULDER)
+	# ui_up/ui_down are built-in (arrow keys + D-pad/stick already wired by
+	# Godot's default input map) — the screenshot gallery reuses them
+	# directly rather than registering its own, same as the carousel
+	# already reuses ui_left/ui_right instead of custom actions.
+	_ensure_action("gallery_select", KEY_G, JOY_BUTTON_Y)
+	_ensure_action("gallery_close", KEY_ESCAPE, JOY_BUTTON_B)
+	# Same physical keys as gallery_close above, on purpose: the two are
+	# checked in mutually exclusive branches below (viewer open vs. not),
+	# so ESCAPE/B reads as one consistent "back" button either way — closes
+	# whatever's in front, up to and including the launcher itself.
+	_ensure_action("card_close_launcher", KEY_ESCAPE, JOY_BUTTON_B)
+
+func _ensure_action(action: StringName, key: int, joy_button: int) -> void:
+	if InputMap.has_action(action):
+		return
+	InputMap.add_action(action)
+	var key_event := InputEventKey.new()
+	key_event.keycode = key
+	InputMap.action_add_event(action, key_event)
+	var joy_event := InputEventJoypadButton.new()
+	joy_event.button_index = joy_button
+	InputMap.action_add_event(action, joy_event)
+
+func _unhandled_input(event: InputEvent) -> void:
+	# A local-disk copy (#300) in flight owns input exclusively — no
+	# navigation, no re-triggering the launch, no closing the launcher while
+	# the cartridge has to stay connected and the PC has to stay up.
+	if _copying:
+		return
+	# #351: the auto-mount consent popup — checked before _source_menu since
+	# both are modal and mutually exclusive, order between them doesn't
+	# matter beyond that. card_launch accepts, card_close_launcher declines;
+	# the awaiting _show_mount_prompt() polls _mount_prompt_state for the
+	# result (no real Godot signal to await here, same reason _pick_folder's
+	# own state Dictionary exists).
+	if _mount_prompt.visible:
+		if event.is_action_pressed("ui_up") or event.is_action_pressed("ui_down"):
+			_mount_prompt_selected = wrapi(_mount_prompt_selected + 1, 0, _mount_prompt_options.size())
+			_update_mount_prompt_highlight()
+		elif event.is_action_pressed("card_launch"):
+			_mount_prompt.visible = false
+			_mount_prompt_state.done = true
+			_mount_prompt_state.accepted = (_mount_prompt_selected == 0)
+		elif event.is_action_pressed("card_close_launcher"):
+			_mount_prompt.visible = false
+			_mount_prompt_state.done = true
+			_mount_prompt_state.accepted = false
+		return
+	# S/X's choice screen (#300) is a modal too — same input-trapping shape
+	# as the viewer below, just with ui_up/down moving between 2 options
+	# instead of screenshots, Launch (card_launch) confirming, and Close
+	# (card_close_launcher) backing out without doing anything.
+	if _source_menu.visible:
+		if event.is_action_pressed("ui_up") or event.is_action_pressed("ui_down"):
+			_source_menu_selected = wrapi(_source_menu_selected + 1, 0, _source_menu_options.size())
+			_update_source_menu_highlight()
+		elif event.is_action_pressed("card_launch"):
+			_confirm_source_menu()
+		elif event.is_action_pressed("card_close_launcher"):
+			_source_menu.visible = false
+		return
+	# The enlarged viewer is a modal — while it's open, it owns input
+	# exclusively (no carousel navigation leaking through behind it). #214's
+	# bonus-content gallery reuses this exact same trap. ui_up/ui_down still
+	# move through the screenshots while enlarged, though — found live-
+	# testing with the user: the viewer opened but there was no way to
+	# browse past the one screenshot you enlarged first.
+	if _viewer.visible:
+		if event.is_action_pressed("gallery_close") or event.is_action_pressed("gallery_select"):
+			_close_viewer()
+		elif event.is_action_pressed("ui_up"):
+			_gallery.move_selection(-1)
+			_open_viewer(_gallery.selected_path())
+		elif event.is_action_pressed("ui_down"):
+			_gallery.move_selection(1)
+			_open_viewer(_gallery.selected_path())
+		return
+	if _apps.is_empty():
+		return
+	if event.is_action_pressed("ui_left"):
+		_move_selection(-1)
+	elif event.is_action_pressed("ui_right"):
+		_move_selection(1)
+	elif event.is_action_pressed("ui_up"):
+		_gallery.move_selection(-1)
+	elif event.is_action_pressed("ui_down"):
+		_gallery.move_selection(1)
+	elif event.is_action_pressed("gallery_select"):
+		_open_viewer(_gallery.selected_path())
+	elif event.is_action_pressed("card_launch"):
+		_on_launch_requested()
+	elif event.is_action_pressed("card_add_to_steam"):
+		_on_add_to_steam_requested()
+	elif event.is_action_pressed("card_toggle_automount"):
+		_on_toggle_automount_requested()
+	elif event.is_action_pressed("card_close_launcher"):
+		get_tree().quit()
+
+func _move_selection(delta: int) -> void:
+	_selected_index = wrapi(_selected_index + delta, 0, _apps.size())
+	_update_selection(true)
+
+func _build_layout() -> void:
+	# Full-screen backdrop: the selected app's own cover art, blown up and
+	# blurred, first child so everything else draws on top of it.
+	_background = TextureRect.new()
+	_background.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_background.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_background.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	_background.modulate = Color(0.55, 0.55, 0.6)
+	_background.material = ShaderMaterial.new()
+	_background.material.shader = load("res://shaders/box_blur.gdshader")
+	add_child(_background)
+
+	# Same full-rect slot as the TextureRect above — only one of the two is
+	# ever visible at a time (#212), toggled in _update_background(). Muted:
+	# this is background dressing behind the carousel, not something that
+	# should compete with whatever audio the player already has going.
+	_background_video = VideoStreamPlayer.new()
+	_background_video.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_background_video.expand = true
+	_background_video.loop = true
+	_background_video.volume_db = -80.0
+	_background_video.visible = false
+	add_child(_background_video)
+
+
+	# The carousel spans the FULL screen — the glass side panels overlay on
+	# top of its edges rather than living in separate side-by-side columns,
+	# so a card visibly slides (and softens through the glass shader) behind
+	# them instead of stopping short at a hard-clipped gap.
+	_carousel_clip = Control.new()
+	_carousel_clip.clip_contents = true
+	_carousel_clip.set_anchors_preset(Control.PRESET_FULL_RECT)
+	add_child(_carousel_clip)
+
+	_carousel_row = HBoxContainer.new()
+	_carousel_clip.add_child(_carousel_row)
+	# Click-and-drag to browse — a quick click still reaches each GameCard's
+	# own `pressed` first (its mouse_filter is PASS, not the default STOP,
+	# specifically so this signal still fires for a press that started on a
+	# card), this only sees the drag itself.
+	_carousel_clip.gui_input.connect(_on_carousel_gui_input)
+
+	_info_name = Label.new()
+	_info_name.add_theme_font_override("font", load(FONT_DISPLAY))
+	_title_labels.append(_info_name)
+	_info_description = Label.new()
+	_info_description.add_theme_font_override("font", load(FONT_BODY))
+	_info_description.autowrap_mode = TextServer.AUTOWRAP_WORD
+	_body_labels.append(_info_description)
+	add_child(_glass_panel(Control.PRESET_LEFT_WIDE, [_info_name, _info_description]))
+
+	_gallery = ScreenshotGallery.new()
+	_gallery.thumbnail_activated.connect(_open_viewer)
+	add_child(_glass_panel(Control.PRESET_RIGHT_WIDE, [_gallery]))
+
+	# Bottom-center action bar, horizontal — found live-testing with the
+	# user: stacked vertically inside the side panel, the four action rows
+	# crowded the gallery above them and read too large/prominent. A single
+	# row across the bottom of the whole screen (not just the side panel)
+	# reads more like a real game's button-prompt bar, and leaves the
+	# gallery its full height to work with.
+	_action_launch = _action_hint(ICON_LAUNCH, "Launch")
+	_action_add_to_steam = _action_hint(ICON_ADD_TO_STEAM, "Cartucho")
+	# Keyboard M + RB/R1, same pairing as the other three actions.
+	_action_automount = _action_hint(ICON_AUTOMOUNT, "Auto-montaje")
+	_action_automount.visible = OS.get_name() != "Windows"
+	_action_gallery = _action_hint(ICON_GALLERY, "Gallery")
+	_action_close = _action_hint(ICON_CLOSE, "Close")
+	_action_bar = HBoxContainer.new()
+	_action_bar.alignment = BoxContainer.ALIGNMENT_CENTER
+	for action in [_action_launch, _action_add_to_steam, _action_automount, _action_gallery, _action_close]:
+		_action_bar.add_child(action)
+
+	# Frosted-glass background, same shader + structure the side panels
+	# already use (glass ColorRect -> MarginContainer -> content), just a
+	# bottom-anchored strip instead of a full-height side one. Live-reported
+	# (2026-08-31): the bar had no background at all before this, and its
+	# white icons/text vanished against a bright background image.
+	_action_bar_glass = ColorRect.new()
+	_action_bar_glass.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	_action_bar_glass.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	_action_bar_glass.material = ShaderMaterial.new()
+	_action_bar_glass.material.shader = load("res://shaders/glass_panel.gdshader")
+	# Added before the screenshot viewer and the launch overlay below, both
+	# of which cover the whole screen — without a z_index they'd draw over
+	# this bar instead of under it, hiding the input prompts (live-tested).
+	_action_bar_glass.z_index = 100
+	_action_bar_margin = MarginContainer.new()
+	_action_bar_margin.set_anchors_preset(Control.PRESET_FULL_RECT)
+	# Centers the row inside the glass strip on BOTH axes — a MarginContainer
+	# alone only insets the child by the margins below, it doesn't center it
+	# if the strip ends up taller than the row's own natural height.
+	var bar_center := CenterContainer.new()
+	bar_center.add_child(_action_bar)
+	_action_bar_margin.add_child(bar_center)
+	_action_bar_glass.add_child(_action_bar_margin)
+	add_child(_action_bar_glass)
+
+	_empty_state = Label.new()
+	_empty_state.text = "No hay juegos instalados en este cartucho."
+	_empty_state.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_empty_state.set_anchors_preset(Control.PRESET_CENTER)
+	add_child(_empty_state)
+
+	# Full-screen modal, built last so it draws on top of everything else —
+	# hidden until a screenshot is activated.
+	_viewer = ColorRect.new()
+	_viewer.color = Color(0, 0, 0, 0.85)
+	_viewer.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_viewer.visible = false
+	_viewer_image = TextureRect.new()
+	_viewer_image.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_viewer_image.offset_left = 80
+	_viewer_image.offset_top = 80
+	_viewer_image.offset_right = -80
+	_viewer_image.offset_bottom = -80
+	_viewer_image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	_viewer.add_child(_viewer_image)
+	add_child(_viewer)
+
+	# Launching (#206) shells out and waits on `_ensure_linux_runtime_deployed`
+	# extracting ~700MB the first time — with zero UI feedback that used to
+	# look identical to the launcher having hung. Built last, same as the
+	# viewer above, so it draws on top of everything.
+	_action_overlay = ColorRect.new()
+	_action_overlay.color = Color(0, 0, 0, 0.75)
+	_action_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_action_overlay.visible = false
+	_action_status = Label.new()
+	_action_status.add_theme_font_override("font", load(FONT_DISPLAY))
+	_action_status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_action_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_title_labels.append(_action_status)
+
+	# Only visible during a local-disk copy (#300) — every other use of this
+	# overlay (launching, registering the cartridge in Steam) is status text
+	# alone, same as before.
+	_action_progress = ProgressBar.new()
+	_action_progress.min_value = 0
+	_action_progress.max_value = 100
+	_action_progress.show_percentage = true
+	_action_progress.custom_minimum_size = Vector2(480, 28)
+	_action_progress.visible = false
+
+	_action_warning = Label.new()
+	_action_warning.add_theme_font_override("font", load(FONT_BODY))
+	_action_warning.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_action_warning.modulate = Color(1.0, 0.65, 0.4)
+	_action_warning.visible = false
+	_body_labels.append(_action_warning)
+
+	# CenterContainer, not a VBoxContainer with a one-shot PRESET_CENTER: the
+	# latter only computes its centering offsets once, against whatever
+	# _action_status's size happened to be at that moment — a longer status
+	# string set later doesn't recenter against that frozen offset (live-
+	# reported, 2026-09-17: text ran off both screen edges, uncentered).
+	# CenterContainer recenters its child from its OWN current minimum size
+	# on every layout pass instead, so it tracks changes.
+	var overlay_center := CenterContainer.new()
+	overlay_center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	var overlay_box := VBoxContainer.new()
+	overlay_box.alignment = BoxContainer.ALIGNMENT_CENTER
+	overlay_box.add_theme_constant_override("separation", 16)
+	for child in [_action_status, _action_progress, _action_warning]:
+		child.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		overlay_box.add_child(child)
+	overlay_center.add_child(overlay_box)
+	_action_overlay.add_child(overlay_center)
+	add_child(_action_overlay)
+
+	# S/X's choice screen (#300) — built empty here, labels filled in per
+	# selected card by _open_source_menu().
+	_source_menu = ColorRect.new()
+	_source_menu.color = Color(0, 0, 0, 0.85)
+	_source_menu.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_source_menu.visible = false
+	var menu_box := VBoxContainer.new()
+	menu_box.alignment = BoxContainer.ALIGNMENT_CENTER
+	menu_box.add_theme_constant_override("separation", 12)
+	menu_box.set_anchors_preset(Control.PRESET_CENTER)
+	for i in 3:
+		var option := Label.new()
+		option.add_theme_font_override("font", load(FONT_BODY))
+		option.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		option.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		_body_labels.append(option)
+		_source_menu_options.append(option)
+		menu_box.add_child(option)
+	_source_menu.add_child(menu_box)
+
+	# #351: same shape as _source_menu above, static text since it only
+	# ever asks one yes/no question — no per-selected-card text to fill in.
+	_mount_prompt = ColorRect.new()
+	_mount_prompt.color = Color(0, 0, 0, 0.85)
+	_mount_prompt.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_mount_prompt.visible = false
+	var mount_center := CenterContainer.new()
+	mount_center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	var mount_box := VBoxContainer.new()
+	mount_box.alignment = BoxContainer.ALIGNMENT_CENTER
+	mount_box.add_theme_constant_override("separation", 12)
+	_mount_prompt_text = Label.new()
+	_mount_prompt_text.text = "Este cartucho no se monta solo en esta PC.\nTatu puede configurar una excepción para que se monte\nautomáticamente la próxima vez (pedirá tu contraseña de administrador).\n¿Configurar ahora?"
+	_mount_prompt_text.add_theme_font_override("font", load(FONT_BODY))
+	_mount_prompt_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_mount_prompt_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_mount_prompt_text.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	_body_labels.append(_mount_prompt_text)
+	mount_box.add_child(_mount_prompt_text)
+	for mount_option_text in ["Sí, configurar", "No, ahora no"]:
+		var mount_option := Label.new()
+		mount_option.text = mount_option_text
+		mount_option.add_theme_font_override("font", load(FONT_BODY))
+		mount_option.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		mount_option.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		_body_labels.append(mount_option)
+		_mount_prompt_options.append(mount_option)
+		mount_box.add_child(mount_option)
+	mount_center.add_child(mount_box)
+	_mount_prompt.add_child(mount_center)
+	add_child(_mount_prompt)
+
+	# #335: lets "Copiar a carpeta local"/"Copiar a carpeta de Steam" target
+	# a disk other than the hardcoded default, for when that one's full.
+	_folder_dialog = FileDialog.new()
+	_folder_dialog.file_mode = FileDialog.FILE_MODE_OPEN_DIR
+	_folder_dialog.access = FileDialog.ACCESS_FILESYSTEM
+	_folder_dialog.size = Vector2i(900, 600)
+	_folder_dialog.title = "Elegí dónde instalar"
+	add_child(_folder_dialog)
+	add_child(_source_menu)
+
+	# Shown while _update_background's read is still going — a slow USB/NTFS
+	# drive made switching selection feel frozen with no feedback at all
+	# (#254). Built here, not next to the background TextureRect/VideoPlayer
+	# above: an earlier version added it right after those and it rendered
+	# invisible, hidden behind the carousel and side panels drawn later in
+	# the tree (#258) — Control siblings paint back-to-front by add order.
+	_background_loading = Label.new()
+	_background_loading.text = "Cargando..."
+	_background_loading.set_anchors_preset(Control.PRESET_CENTER)
+	_background_loading.add_theme_font_override("font", load(FONT_BODY))
+	_background_loading.visible = false
+	add_child(_background_loading)
+
+	add_child(_build_info_label())
+
+## Small, dim corner label showing exactly which build is on screen —
+## `<version>+g<commit>[-dirty]`, written by `launcher/export.sh` into
+## `build_info.txt` right before each export. Added after repeatedly
+## confusing a stale cached binary for a just-fixed one during live
+## testing with no way to tell them apart on screen. Missing file (a
+## debug run straight from the editor, not an exported build) just shows
+## nothing rather than an error — this is diagnostic, never load-bearing.
+func _build_info_label() -> Label:
+	var label := Label.new()
+	label.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	label.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	label.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	label.offset_left = -160
+	label.offset_top = -24
+	label.modulate = Color(1, 1, 1, 0.35)
+	label.add_theme_font_size_override("font_size", 12)
+	var path := "res://build_info.txt"
+	label.text = FileAccess.get_file_as_string(path).strip_edges() if FileAccess.file_exists(path) else ""
+	return label
+
+## A strip pinned to the given edge (PRESET_LEFT_WIDE or PRESET_RIGHT_WIDE),
+## rendering whatever is already on screen behind it — blurred and tinted —
+## via glass_panel.gdshader, added AFTER the carousel so that shader's
+## SCREEN_TEXTURE capture actually includes the cards. Width and margin are
+## set once here and rewritten by _resize_layout() on every resize.
+func _glass_panel(preset: LayoutPreset, children: Array, vbox_alignment := BoxContainer.ALIGNMENT_CENTER) -> Control:
+	var glass := ColorRect.new()
+	glass.set_anchors_preset(preset)
+	glass.material = ShaderMaterial.new()
+	glass.material.shader = load("res://shaders/glass_panel.gdshader")
+
+	var margin := MarginContainer.new()
+	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
+	glass.add_child(margin)
+
+	if preset == Control.PRESET_LEFT_WIDE:
+		_left_glass = glass
+		_left_margin = margin
+	else:
+		_right_glass = glass
+		_right_margin = margin
+
+	var panel := VBoxContainer.new()
+	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	panel.alignment = vbox_alignment
+	panel.add_theme_constant_override("separation", 12)
+	for child: Control in children:
+		panel.add_child(child)
+
+	margin.add_child(panel)
+	return glass
+
+## A row of input-prompt icons (keyboard key + gamepad button) followed by
+## the action's label — real icons instead of a "[A] / Enter —" text hint.
+func _action_hint(icon_paths: Array[String], text: String) -> Control:
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_CENTER
+	row.add_theme_constant_override("separation", 8)
+	for path in icon_paths:
+		var icon := TextureRect.new()
+		icon.texture = load(path)
+		icon.custom_minimum_size = Vector2(28, 28)
+		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		row.add_child(icon)
+		_hint_icons.append(icon)
+	var label := Label.new()
+	label.text = text
+	label.add_theme_font_override("font", load(FONT_BODY))
+	# No autowrap/EXPAND_FILL here — this used to be a wide row inside the
+	# vertical side-panel stack, but now sits as one of four fixed-size
+	# groups in the horizontal bottom bar. Wrapping mid-word ("Add to
+	# Steam" over 3 lines) was the visible result of the old assumption.
+	_hint_labels.append(label)
+	row.add_child(label)
+	return row
+
+func _on_carousel_gui_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		if event.pressed:
+			_dragging = true
+			_drag_start_mouse_x = event.position.x
+			_drag_start_row_x = _carousel_row.position.x
+			if _scroll_tween:
+				_scroll_tween.kill()
+		elif _dragging:
+			_dragging = false
+			_snap_to_nearest_card()
+	elif _dragging and event is InputEventMouseMotion:
+		var motion := event as InputEventMouseMotion
+		var delta := motion.position.x - _drag_start_mouse_x
+		_carousel_row.position.x = _drag_start_row_x + delta
+
+## Whichever card ends up closest to the viewport's center when the drag is
+## released becomes the new selection — the same centering tween in
+## _update_selection then finishes the motion from wherever the drag left it.
+func _snap_to_nearest_card() -> void:
+	var viewport_center := _carousel_clip.size.x / 2.0
+	var best_index := _selected_index
+	var best_distance := INF
+	for i in _cards.size():
+		var card_center := _carousel_row.position.x + _cards[i].position.x + _cards[i].size.x / 2.0
+		var distance := absf(card_center - viewport_center)
+		if distance < best_distance:
+			best_distance = distance
+			best_index = i
+	_selected_index = best_index
+	_update_selection(true)
+
+func _cartridge_root() -> String:
+	# Dev-only escape hatch: point the editor-flavored binary at a REAL
+	# cartridge mount point (e.g. `--cartridge-root=/run/media/.../CART`)
+	# instead of the fixture below — lets #206/#207's execution paths be
+	# smoke-tested against real Steam data without needing an exported
+	# build + export templates just to flip OS.has_feature("editor") off.
+	# Never reachable on a real exported binary (no matching arg exists).
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--cartridge-root="):
+			return arg.trim_prefix("--cartridge-root=")
+
+	# Hitting Play in the editor runs the Godot editor binary itself, which
+	# never has a real cartridge next to it — the empty state would be the
+	# ONLY reachable outcome otherwise. test_cartridge/ is a fixture for
+	# iterating on the carousel; an exported build never takes this branch,
+	# OS.has_feature("editor") is false there.
+	if OS.has_feature("editor"):
+		return ProjectSettings.globalize_path("res://test_cartridge")
+	return OS.get_executable_path().get_base_dir()
+
+func _load_apps() -> Array:
+	var marker_path := _cartridge_root().path_join(MARKER_FILENAME)
+	if not FileAccess.file_exists(marker_path):
+		push_warning("No cartridge marker at %s" % marker_path)
+		return []
+
+	var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(marker_path))
+	if typeof(parsed) != TYPE_DICTIONARY or not parsed.has("apps"):
+		push_warning("Cartridge marker at %s is not valid JSON" % marker_path)
+		return []
+
+	return parsed["apps"]
+
+func _add_card(i: int, app: Dictionary) -> void:
+	var app_id := int(app.get("app_id", 0))
+	var card := GameCard.new()
+	_carousel_row.add_child(card)
+	card.setup(i, String(app.get("name", "?")))
+	card.clicked.connect(_on_card_clicked)
+	_cards.append(card)
+	_pending_art.append({"card": card, "path": _grid_art_path(app_id)})
+
+## Decodes queued cover art a few milliseconds at a time instead of all at
+## once — the first card (already selected/visible) is always the first
+## one processed, so the one art the user sees immediately never waits
+## behind the rest of the library.
+func _process(_delta: float) -> void:
+	if _pending_art.is_empty():
+		set_process(false)
+		return
+	var deadline := Time.get_ticks_msec() + ART_LOAD_BUDGET_MS
+	while not _pending_art.is_empty() and Time.get_ticks_msec() < deadline:
+		var item: Dictionary = _pending_art.pop_front()
+		(item["card"] as GameCard).load_art(item["path"])
+
+func _on_card_clicked(index: int) -> void:
+	_selected_index = index
+	_update_selection(true)
+
+## `card.<ext>` is the launcher-safe copy Tatu writes next to a manual
+## SteamGridDB pick (Preparar launcher, #328/#236) whenever that pick is
+## animated — this decoder can't play video/animated WebP, unlike Steam's
+## own client, which is why the raw pick itself (`grid.<ext>`, kept for
+## #329's still-unbuilt Steam shortcut registration) is never read here
+## directly. Checked first; `grid.<ext>` is the only file that exists at
+## all for a Steam/GOG app's own auto-picked cover, which is already a
+## single static image with nothing to substitute.
+func _grid_art_path(app_id: int) -> String:
+	var dir := _cartridge_root().path_join("assets").path_join(str(app_id))
+	for ext in IMAGE_EXTENSIONS:
+		var candidate := dir.path_join("card.%s" % ext)
+		if FileAccess.file_exists(candidate):
+			return candidate
+	for ext in IMAGE_EXTENSIONS:
+		var candidate := dir.path_join("grid.%s" % ext)
+		if FileAccess.file_exists(candidate):
+			return candidate
+	return ""
+
+## #213's screenshots (Tatu-side pipeline not built yet — this reads
+## whatever the fixture/cartridge already has under screenshots/, same as
+## _grid_art_path already does for grid.*). Sorted by filename so the
+## gallery order is stable across relaunches.
+func _screenshot_paths(app_id: int) -> Array[String]:
+	var paths: Array[String] = []
+	var dir_path := _cartridge_root().path_join("assets").path_join(str(app_id)).path_join("screenshots")
+	var dir := DirAccess.open(dir_path)
+	if dir == null:
+		return paths
+	dir.list_dir_begin()
+	var file_name := dir.get_next()
+	while file_name != "":
+		if not dir.current_is_dir() and file_name.get_extension().to_lower() in IMAGE_EXTENSIONS:
+			paths.append(dir_path.path_join(file_name))
+		file_name = dir.get_next()
+	dir.list_dir_end()
+	paths.sort()
+	return paths
+
+func _open_viewer(path: String) -> void:
+	if path.is_empty():
+		return
+	var image := Image.new()
+	if image.load(path) != OK:
+		push_warning("Cannot load screenshot at %s" % path)
+		return
+	_viewer_image.texture = ImageTexture.create_from_image(image)
+	_viewer.visible = true
+
+func _close_viewer() -> void:
+	_viewer.visible = false
+
+func _description_of(app_id: int) -> String:
+	var path := _cartridge_root().path_join("assets").path_join(str(app_id)).path_join("description.txt")
+	if not FileAccess.file_exists(path):
+		return ""
+	return FileAccess.get_file_as_string(path)
+
+func _update_selection(animate: bool) -> void:
+	if _apps.is_empty():
+		return
+
+	for i in _cards.size():
+		_cards[i].set_selected(i == _selected_index)
+	_center_on_selected(animate)
+
+	var app: Dictionary = _apps[_selected_index]
+	var app_id := int(app.get("app_id", 0))
+	var screenshots := _screenshot_paths(app_id)
+	_info_name.text = String(app.get("name", "?"))
+	_info_description.text = _description_of(app_id)
+	_update_background(app_id, screenshots)
+	_gallery.set_screenshots(screenshots)
+	_gallery.resize(_panel_content_width)
+
+	var standalone := bool(app.get("standalone", false))
+	_action_launch.modulate = Color.WHITE if standalone else Color(1, 1, 1, 0.4)
+
+## Background priority (#212): a cached trailer beats a cached screenshot
+## beats the blurred grid art — closer to actual gameplay each step down,
+## and no tier ever leaves the background blank since grid art (#205) is
+## already required for the card itself to render at all.
+##
+## The actual disk read runs on a worker thread (#254) — a slow USB/NTFS
+## cartridge made every selection change stall the whole UI while a
+## screenshot or trailer read off it, with zero feedback that anything was
+## happening.
+##
+## An earlier version moved the actual read to a WorkerThreadPool task —
+## reverted (2026-08-29, #256) after it crashed live with "double free or
+## corruption": a worker thread calling back into this same script
+## instance's methods raced the main thread running _process()/input
+## handling on that same instance, corrupting GDScript's own heap. Back to
+## fully synchronous; `await get_tree().process_frame` just buys the
+## "Cargando..." label one real frame to draw before the blocking read
+## starts, which is the only part of this that's actually safe to do
+## without a thread.
+func _update_background(app_id: int, screenshots: Array[String]) -> void:
+	_background_load_id += 1
+	var request_id := _background_load_id
+	_background_loading.visible = true
+	await get_tree().process_frame
+	if request_id != _background_load_id:
+		return
+
+	var trailer_path := _trailer_path(app_id)
+	if not trailer_path.is_empty():
+		var stream := VideoStreamTheora.new()
+		stream.set_file(trailer_path)
+		_background_video.stream = stream
+		_background_video.play()
+		_background_video.visible = true
+		_background.visible = false
+		_background_loading.visible = false
+		return
+
+	_background_video.stop()
+	_background_video.visible = false
+	_background.visible = true
+
+	var path := screenshots[0] if not screenshots.is_empty() else _grid_art_path(app_id)
+	if path.is_empty():
+		_background.texture = null
+		_background_loading.visible = false
+		return
+	var image := Image.new()
+	if image.load(path) != OK:
+		_background.texture = null
+		_background_loading.visible = false
+		return
+	_background.texture = ImageTexture.create_from_image(image)
+	_background_loading.visible = false
+
+func _trailer_path(app_id: int) -> String:
+	var path := _cartridge_root().path_join("assets").path_join(str(app_id)).path_join(TRAILER_FILENAME)
+	return path if FileAccess.file_exists(path) else ""
+
+## Moves the whole row so the selected card's center lands on the clip
+## area's center. The row's OWN sizing/spacing comes for free from being a
+## real HBoxContainer — this only ever touches the row's outer position,
+## never an individual card's.
+func _center_on_selected(animate: bool) -> void:
+	var card := _cards[_selected_index]
+	var target_x := _carousel_clip.size.x / 2.0 - (card.position.x + card.size.x / 2.0)
+	var target_y := (_carousel_clip.size.y - _carousel_row.size.y) * CARD_VERTICAL_BIAS_RATIO
+	var target := Vector2(target_x, target_y)
+	if _scroll_tween:
+		_scroll_tween.kill()
+	if not animate:
+		_carousel_row.position = target
+		return
+	# TRANS_CUBIC instead of TRANS_BACK (user request, 2026-08-31): TRANS_BACK
+	# overshoots past the target and springs back — smooth deceleration reads
+	# calmer for a row of cards sliding into place.
+	_scroll_tween = create_tween()
+	_scroll_tween.tween_property(_carousel_row, "position", target, SCROLL_DURATION) \
+		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+
+func _on_launch_requested() -> void:
+	var app: Dictionary = _apps[_selected_index]
+	var app_id := int(app.get("app_id", 0))
+	var app_name := String(app.get("name", "el juego"))
+
+	# Hard/Unknown preservability (real third-party DRM, or not enough data
+	# to tell) never gets Goldberg's standalone patch (#199) — it only ever
+	# plays through a real Steam client, registered first via the dedicated
+	# "Add Cartridge" action (#208) below, not this one.
+	if not bool(app.get("standalone", false)):
+		await _show_status("Usá \"Add Cartridge\" para jugar %s" % app_name, 2.5)
+		return
+
+	var exe_relative := String(app.get("exe_path", ""))
+	if exe_relative.is_empty():
+		push_warning("App %d has no exe_path on the marker — Goldberg injection (#199) never ran" % app_id)
+		return
+
+	if OS.get_name() != "Linux":
+		push_warning("Standalone launch on %s not wired yet (#207)" % OS.get_name())
+		return
+
+	var source := String(app.get("source", "steam"))
+	await _launch_via_proton(app_id, app_name, _resolved_exe_path(exe_relative, source, app_id), source)
+
+## Launch never copies anything itself (#300 moved that to the S/X menu,
+## see _open_source_menu below) — it only ever picks whichever copy of the
+## game already exists. A Steam-sourced game copied to a real Steam library
+## ("Copiar a carpeta de Steam") runs from there; a GOG or non-Steam game
+## copied to a local cache ("Copiar a carpeta local") runs from there —
+## neither has a Steam appmanifest to satisfy, so both use the same
+## "wherever it landed" resolution; anything never copied runs straight off
+## the cartridge, same as before this existed.
+##
+## #335 lets either copy target a user-chosen destination instead of the
+## hardcoded default, so "wherever it landed" now means: for GOG/non-Steam,
+## whatever `LocalInstallRoots` has on file for this app_id (falls back to
+## the old hardcoded default for every copy made before #335 existed); for
+## Steam, ANY library `libraryfolders.vdf` lists — Steam's own file is
+## already the per-machine registry of every destination a #335 pick could
+## have registered, so there's no separate map to keep in sync with it.
+func _resolved_exe_path(exe_relative: String, source: String, app_id: int) -> String:
+	var root_segments := 2 if source in SteamShortcuts.SHORTCUT_SOURCES else 3
+	var install_rel := _install_root_relative(exe_relative, root_segments)
+	if source in SteamShortcuts.SHORTCUT_SOURCES:
+		var local_root := LocalInstallRoots.get_root(app_id, _tatu_local_dir())
+		if FileAccess.file_exists(local_root.path_join(install_rel).path_join(LOCAL_COPY_DONE_FILENAME)):
+			return local_root.path_join(exe_relative)
+	else:
+		for library in _all_steam_libraries():
+			if FileAccess.file_exists(library.path_join(install_rel).path_join(LOCAL_COPY_DONE_FILENAME)):
+				return library.path_join(exe_relative)
+	return _cartridge_root().path_join(exe_relative)
+
+## Shows the action-status overlay with `text` for `seconds`, then hides it —
+## shared by the launch flow below and by Add Cartridge, so every action a
+## player takes gets SOME visible response instead of only a `push_warning`
+## that only ever reached a log file nobody was watching.
+func _show_status(text: String, seconds: float) -> void:
+	_action_status.text = text
+	_action_overlay.visible = true
+	await get_tree().create_timer(seconds).timeout
+	_action_overlay.visible = false
+
+## Opens the folder dialog and waits for either a real choice or a cancel —
+## empty string either way means "the player backed out, don't copy
+## anything" (#335). `current_dir` re-opens wherever they last looked
+## instead of always starting from Godot's own default (usually `res://`
+## on this platform, useless for picking a real disk location).
+##
+## `dir_selected` never fires on cancel — a plain `await` on it alone would
+## hang forever if the player backs out — so both outcomes are raced via
+## one-shot connections instead, whichever fires first ends the wait.
+func _pick_folder(current_dir: String) -> String:
+	if not current_dir.is_empty() and DirAccess.dir_exists_absolute(current_dir):
+		_folder_dialog.current_dir = current_dir
+	_folder_dialog.popup_centered()
+
+	# A plain local bool/String reassigned INSIDE these lambdas would never
+	# be visible out here — GDScript lambdas capture outer locals by value,
+	# not by reference, confirmed live (the lambda's own `print` showed the
+	# right path every time, but the loop below span forever regardless,
+	# since ITS OWN copy of `done` never changed). A Dictionary sidesteps
+	# this: the capture is still by value, but the value is a reference to
+	# the SAME underlying Dictionary object, so mutating a key through it
+	# is visible on both sides.
+	var state := {"chosen": "", "done": false}
+	var on_dir := func(path: String) -> void:
+		state.chosen = path
+		state.done = true
+	var on_cancel := func() -> void:
+		state.done = true
+	_folder_dialog.dir_selected.connect(on_dir, CONNECT_ONE_SHOT)
+	_folder_dialog.canceled.connect(on_cancel, CONNECT_ONE_SHOT)
+	_folder_dialog.close_requested.connect(on_cancel, CONNECT_ONE_SHOT)
+	while not state.done:
+		await get_tree().process_frame
+
+	for pair in [[_folder_dialog.dir_selected, on_dir], [_folder_dialog.canceled, on_cancel], [_folder_dialog.close_requested, on_cancel]]:
+		if pair[0].is_connected(pair[1]):
+			pair[0].disconnect(pair[1])
+	return String(state.chosen)
+
+## Single-quotes `s` for `/bin/sh -c`, escaping any embedded single quote —
+## paths here come from the marker/cartridge layout, not untrusted input,
+## but "Alabaster Dawn"-style spaces make quoting mandatory regardless.
+func _sh_quote(s: String) -> String:
+	return "'" + s.replace("'", "'\\''") + "'"
+
+## The install root a given exe belongs to — NOT just the exe's own
+## immediate folder, which can sit several levels deeper for some games
+## (Unreal Engine titles keep their real binary under
+## `<name>/End/Binaries/Win64/`) while sibling folders at the install root
+## (Content/, Engine/, ...) are just as required to run, but never appear
+## in `exe_relative` at all since they hold no executable of their own.
+##
+## `root_segments` is how many leading path segments make up that root —
+## it differs by source, since each one lays out the cartridge differently:
+## a real Steam app is `steamapps/common/<name>/...` (goldberg.rs), 3
+## segments; GOG (`GOG/<repo.install_directory>/...`, gog_download.rs) and
+## non-Steam (`NON-STEAM/<install_dir>/...`, non_steam.rs) are both just 2.
+## Live-reported: this function defaulted to 3 unconditionally, so a
+## non-Steam/GOG local copy silently cut one level too deep — copying only
+## the subfolder the exe happened to sit in, dropping whatever else the
+## real install root had alongside it (redistributables, extra data), a
+## missing-files bug invisible until someone actually diffed the two
+## folders, which is exactly how this got caught.
+func _install_root_relative(exe_relative: String, root_segments: int) -> String:
+	var parts := exe_relative.split("/")
+	if parts.size() <= root_segments:
+		return exe_relative.get_base_dir()
+	return "/".join(parts.slice(0, root_segments))
+
+## Every exe_path this launcher builds is `<library_root>/steamapps/common/
+## <name>/...`, whether `<library_root>` is the cartridge, a copied real
+## Steam library, or Tatu's own local GOG cache (`_resolved_exe_path`) — so
+## the library root is always whatever sits before the first `steamapps/`.
+func _steam_library_root(path: String) -> String:
+	var idx := path.find("/steamapps/")
+	return path.substr(0, idx) if idx != -1 else ""
+
+func _dir_size_bytes(path: String) -> int:
+	var output := []
+	if OS.execute("du", ["-sb", path], output) != 0 or output.is_empty():
+		return -1
+	var token := String(output[0]).split("\n")[0].split("\t")[0].strip_edges()
+	return int(token) if token.is_valid_int() else -1
+
+func _free_bytes_at(path: String) -> int:
+	var output := []
+	if OS.execute("df", ["--output=avail", "-B1", path], output) != 0 or output.is_empty():
+		return -1
+	var lines := String(output[0]).split("\n")
+	if lines.size() < 2:
+		return -1
+	var token := lines[1].strip_edges()
+	return int(token) if token.is_valid_int() else -1
+
+## `cp -a` preserves the SOURCE's permission bits AND security context —
+## fine for a real Linux filesystem, but the cartridge is NTFS: ntfs-3g has
+## no real per-file Unix permissions to preserve, so it synthesizes a
+## single blanket mode from the mount's own fmask/dmask, unrelated to what
+## the game actually needs. `+X` (capital) only touches directories and
+## anything already executable by someone — can't accidentally strip an
+## existing exec bit, just adds back what traversal always needs.
+##
+## The bigger one, live-confirmed on SELinux-enforcing Anatase: every file
+## copied off the cartridge kept the SOURCE's `fusefs_t` SELinux type
+## (`ls -Z`), instead of the `data_home_t` a real file under `~/.local/
+## share/` should have — a game copied this way ran fine straight off the
+## cartridge (the FUSE mount's own labeling is irrelevant to policy there)
+## but got denied for real once copied, completely independent of the
+## rwx bits above (confirmed both separately: chmod alone didn't fix the
+## actual repro, `restorecon` did). `restorecon` isn't installed outside
+## SELinux distros — best-effort, no error if missing.
+func _fix_copied_permissions(dest_dir: String) -> void:
+	OS.execute("chmod", ["-R", "u+rwX,go+rX", dest_dir])
+	if OS.get_name() != "Windows":
+		OS.execute("restorecon", ["-R", dest_dir])
+
+## Copies a GOG- or non-Steam-sourced game's whole install root from the
+## cartridge onto a local cache (#300/#236/#335, "Copiar a carpeta local" in
+## the source menu below) — neither has a real Steam appmanifest to
+## satisfy, so a plain file copy is the whole feature; running it off a slow
+## USB/SD cartridge as the live storage device can otherwise stutter
+## mid-game. `local_root` is `_tatu_local_dir()` for the plain menu option,
+## or a #335 user-chosen destination (already saved to `LocalInstallRoots`
+## by the caller before this runs) — either way this function itself
+## doesn't care which, it just copies into whatever root it's given.
+## Mirrors the same `steamapps/common/<name>` relative layout under that
+## root, so nothing downstream (install_dir/CWD, Goldberg's
+## steam_appid.txt lookup) needs to know the exe moved. Blocks all input
+## for the whole duration (`_copying`) — a copy interrupted by closing the
+## launcher, unplugging the cartridge, or suspending the PC leaves a
+## truncated install behind. Falls back to the cartridge's own copy —
+## slower, but still playable — if there isn't enough local disk space or
+## the copy itself fails.
+func _ensure_local_copy(exe_relative: String, app_name: String, local_root: String) -> String:
+	var cartridge_exe := _cartridge_root().path_join(exe_relative)
+	# Only ever called for GOG/non-Steam (see _confirm_source_menu below) —
+	# both lay out as `<GOG|NON-STEAM>/<name>/...`, always 2 root segments.
+	var install_rel := _install_root_relative(exe_relative, 2)
+	var source_dir := _cartridge_root().path_join(install_rel)
+	var dest_dir := local_root.path_join(install_rel)
+	var local_exe := local_root.path_join(exe_relative)
+	var done_marker := dest_dir.path_join(LOCAL_COPY_DONE_FILENAME)
+	if FileAccess.file_exists(done_marker):
+		return local_exe
+
+	_copying = true
+	_action_status.text = "Preparando copia de %s al disco local..." % app_name
+	_action_progress.value = 0
+	_action_progress.visible = true
+	_action_warning.text = "No desconectes el cartucho ni apagues o suspendas la PC hasta que termine la copia."
+	_action_warning.visible = true
+	_action_overlay.visible = true
+	# Two frames, not one — the overlay's own visibility change needs a full
+	# draw before the blocking `du`/`rm` calls right below freeze the thread,
+	# same reasoning _launch_via_proton's opening comment already documents.
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	# Leftover from a copy that never finished (crash, cartridge pulled
+	# mid-copy) has no sentinel — never resumed, always wiped and redone from
+	# scratch: a truncated file left half-written is worse than the extra
+	# time a full recopy costs.
+	if DirAccess.dir_exists_absolute(dest_dir):
+		OS.execute("rm", ["-rf", dest_dir])
+
+	var total_bytes := _dir_size_bytes(source_dir)
+	var free_bytes := _free_bytes_at(local_root)
+	if total_bytes > 0 and free_bytes >= 0 and free_bytes < total_bytes:
+		push_warning(
+			"Not enough local disk space to copy %s (%d needed, %d free) — playing from the cartridge instead" \
+			% [app_name, total_bytes, free_bytes]
+		)
+		_copying = false
+		_action_progress.visible = false
+		_action_warning.visible = false
+		await _show_status(
+			"No hay espacio suficiente en disco para copiar %s — se juega directo desde el cartucho" % app_name,
+			3.0
+		)
+		return cartridge_exe
+
+	DirAccess.make_dir_recursive_absolute(dest_dir)
+
+	# Runs as its own process rather than this launcher blocking, so the
+	# status/progress bar can keep polling real numbers while it works. A
+	# WorkerThreadPool task calling back into this same script instance
+	# already crashed once with heap corruption (#256) — never repeating
+	# that for something this much longer-running.
+	var pid := OS.create_process("cp", ["-a", source_dir + "/.", dest_dir])
+	if pid <= 0:
+		push_warning("Failed to start cp for %s — playing from the cartridge instead" % app_name)
+		_copying = false
+		_action_progress.visible = false
+		_action_warning.visible = false
+		return cartridge_exe
+
+	while OS.is_process_running(pid):
+		if total_bytes > 0:
+			var done := _dir_size_bytes(dest_dir)
+			var pct := clampi(int(100.0 * float(done) / float(total_bytes)), 0, 99)
+			_action_progress.value = pct
+			_action_status.text = "Copiando %s al disco local (%d%%)..." % [app_name, pct]
+		else:
+			_action_status.text = "Copiando %s al disco local..." % app_name
+		await get_tree().create_timer(LOCAL_COPY_POLL_INTERVAL_SEC).timeout
+
+	_copying = false
+	_action_progress.visible = false
+	_action_warning.visible = false
+
+	if OS.get_process_exit_code(pid) != 0:
+		push_warning("Copy of %s to local disk failed — playing from the cartridge instead" % app_name)
+		OS.execute("rm", ["-rf", dest_dir])
+		return cartridge_exe
+
+	_fix_copied_permissions(dest_dir)
+	_action_progress.value = 100
+	var marker := FileAccess.open(done_marker, FileAccess.WRITE)
+	marker.close()
+	return local_exe
+
+## Copies a Steam-sourced game's install root, AND its real
+## `appmanifest_<app_id>.acf` (#300, "Copiar a carpeta de Steam" in the
+## source menu below), into a Steam library — never fabricated: Steam
+## itself already wrote that exact .acf (real depot IDs, buildid,
+## SizeOnDisk) the moment this game was installed onto the cartridge, so
+## copying it byte-for-byte alongside the files is what makes the real
+## Steam client recognize the copy as already installed and verified, no
+## re-download or "verify integrity" needed. A no-op appmanifest invented
+## from scratch instead would risk Steam flagging it corrupt and
+## overwriting/deleting these very files. `dest_root` is Steam's own
+## default install dir for the plain menu option, or a #335 user-chosen
+## folder — if it's not already a registered library, this registers it
+## (same mechanism `_launch_via_steam` uses for the cartridge itself) as
+## part of the same restart already needed for Steam to notice the new
+## install. Same input-blocking/progress-bar mechanics as
+## `_ensure_local_copy` above.
+func _copy_to_real_steam_library(app_id: int, app_name: String, exe_relative: String, dest_root: String) -> void:
+	var steam_dir := _steam_install_dir()
+	if steam_dir.is_empty():
+		await _show_status("No se encontró una instalación de Steam en esta máquina", 2.5)
+		return
+
+	# Only ever called for real Steam apps (see _confirm_source_menu below) —
+	# `steamapps/common/<name>/...`, always 3 root segments.
+	var install_rel := _install_root_relative(exe_relative, 3)
+	var source_dir := _cartridge_root().path_join(install_rel)
+	var dest_dir := dest_root.path_join(install_rel)
+	var manifest_name := "appmanifest_%d.acf" % app_id
+	var manifest_src := _cartridge_root().path_join("steamapps").path_join(manifest_name)
+	var manifest_dst := dest_root.path_join("steamapps").path_join(manifest_name)
+	var done_marker := dest_dir.path_join(LOCAL_COPY_DONE_FILENAME)
+
+	if not FileAccess.file_exists(manifest_src):
+		await _show_status(
+			"Este juego no tiene un appmanifest real en el cartucho — no se puede copiar como instalación de Steam",
+			3.0
+		)
+		return
+	if FileAccess.file_exists(done_marker):
+		await _show_status("%s ya está copiado en tu library de Steam" % app_name, 2.0)
+		return
+
+	_copying = true
+	_action_status.text = "Preparando copia de %s a tu library de Steam..." % app_name
+	_action_progress.value = 0
+	_action_progress.visible = true
+	_action_warning.text = "No desconectes el cartucho ni apagues o suspendas la PC hasta que termine la copia."
+	_action_warning.visible = true
+	_action_overlay.visible = true
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	if DirAccess.dir_exists_absolute(dest_dir):
+		OS.execute("rm", ["-rf", dest_dir])
+
+	var total_bytes := _dir_size_bytes(source_dir)
+	var free_bytes := _free_bytes_at(dest_root)
+	if total_bytes > 0 and free_bytes >= 0 and free_bytes < total_bytes:
+		_copying = false
+		_action_progress.visible = false
+		_action_warning.visible = false
+		await _show_status(
+			"No hay espacio suficiente en tu library de Steam para copiar %s" % app_name, 3.0
+		)
+		return
+
+	DirAccess.make_dir_recursive_absolute(dest_dir)
+
+	var pid := OS.create_process("cp", ["-a", source_dir + "/.", dest_dir])
+	if pid <= 0:
+		_copying = false
+		_action_progress.visible = false
+		_action_warning.visible = false
+		await _show_status("No se pudo copiar %s" % app_name, 2.5)
+		return
+
+	while OS.is_process_running(pid):
+		if total_bytes > 0:
+			var done := _dir_size_bytes(dest_dir)
+			var pct := clampi(int(100.0 * float(done) / float(total_bytes)), 0, 99)
+			_action_progress.value = pct
+			_action_status.text = "Copiando %s a tu library de Steam (%d%%)..." % [app_name, pct]
+		await get_tree().create_timer(LOCAL_COPY_POLL_INTERVAL_SEC).timeout
+
+	_copying = false
+	_action_progress.visible = false
+	_action_warning.visible = false
+
+	if OS.get_process_exit_code(pid) != 0:
+		push_warning("Copy of %s to the real Steam library failed" % app_name)
+		OS.execute("rm", ["-rf", dest_dir])
+		await _show_status("No se pudo copiar %s" % app_name, 2.5)
+		return
+
+	_fix_copied_permissions(dest_dir)
+	DirAccess.copy_absolute(manifest_src, manifest_dst)
+	var marker2 := FileAccess.open(done_marker, FileAccess.WRITE)
+	marker2.close()
+
+	_action_status.text = "Reiniciando Steam para que reconozca la copia..."
+	_action_overlay.visible = true
+	await get_tree().process_frame
+	await _stop_steam(steam_dir)
+	if dest_root != steam_dir:
+		_register_steam_library(steam_dir, dest_root)
+	_start_steam(steam_dir)
+	await _show_status("%s copiado — Steam debería reconocerlo como instalado" % app_name, 3.0)
+
+## Runs a Goldberg-patched exe through umu-run (#206) — adopted rather than
+## hand-rolling a Proton invocation: it replicates Steam's own runtime
+## container so the game behaves the same as it would through Steam,
+## without needing Steam installed. See runtime.rs on the Tatu side for why
+## this specific tool and the exact files it bundles onto the cartridge.
+func _launch_via_proton(app_id: int, app_name: String, exe_path: String, source: String = "steam") -> void:
+	_action_status.text = "Lanzando %s..." % app_name
+	_action_overlay.visible = true
+	# The first launch on a cartridge extracts ~700MB synchronously below —
+	# without yielding a couple frames first, the overlay's own visibility
+	# change would never actually get drawn before that freezes the thread,
+	# so this would look exactly like the hang it's meant to explain away.
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	if not _ensure_linux_runtime_deployed():
+		await _show_status("No se pudo preparar el runtime de Linux para %s" % app_name, 2.5)
+		return
+
+	# A save file's own path is often keyed by the account's SteamID64 (e.g.
+	# "Documents/My Games/<Game>/Steam/<steamid>/..."), which Goldberg writes
+	# using whatever `account_steamid` inject_goldberg configured (see
+	# goldberg.rs). That alone isn't enough for Steam Cloud to ever see a
+	# standalone-made save, though: a private Tatu-only wineprefix keeps it
+	# on a completely different filesystem tree from the one Steam's own
+	# client watches. Reusing the SAME prefix Steam already created for this
+	# app puts the save in the exact folder Steam Cloud syncs, with no swap
+	# or passthrough needed — a standalone play session becomes
+	# indistinguishable, on disk, from one Steam itself launched.
+	#
+	# That real prefix isn't always on the cartridge itself, though: Steam
+	# scopes `compatdata` per LIBRARY FOLDER, not per account — a game
+	# installed for real on the user's main library for years, then also
+	# copied onto this cartridge, has its actual save-bearing prefix sitting
+	# on that OTHER library, while the cartridge's own `compatdata/<app_id>`
+	# is either missing or an empty stub Steam pre-creates just from seeing
+	# the manifest (live-caught, 2026-09-05: FINAL FANTASY XVI had a 755MB
+	# real prefix on `/var/mnt/DATA/SteamLibrary`, while the cartridge's own
+	# copy had no `system.reg` at all — Wine never even booted there once).
+	# `_find_real_prefix` below checks every library Steam knows about
+	# (`libraryfolders.vdf`, the same file `_launch_via_steam` already
+	# parses for #208) before ever falling back to a fresh prefix.
+	var steam_prefix := _cartridge_root().path_join("steamapps").path_join("compatdata").path_join(str(app_id)).path_join("pfx")
+	var wineprefix := steam_prefix
+	if not _is_real_prefix(steam_prefix):
+		var external_prefix := _find_real_prefix(app_id)
+		if not external_prefix.is_empty():
+			wineprefix = external_prefix
+		else:
+			wineprefix = _tatu_local_dir().path_join("wineprefix").path_join(str(app_id))
+	DirAccess.make_dir_recursive_absolute(wineprefix)
+
+	# A real appid + store (not "umu-default"/"none") is what lets umu's own
+	# protonfixes apply a per-game fix automatically — the exact same fixes
+	# a real Steam-launched Proton run gets for free. Silently skipped
+	# before this: confirmed a fix genuinely exists for FINAL FANTASY IX
+	# (appid 377840, protonfixes/gamefixes-steam/377840.py) that a
+	# standalone launch never picked up.
+	OS.set_environment("GAMEID", str(app_id))
+	OS.set_environment("STORE", source)
+	OS.set_environment("PROTONPATH", _umu_compat_dir().path_join(PROTON_DIRNAME))
+	OS.set_environment("WINEPREFIX", wineprefix)
+	# `create_process` has no working_directory parameter (Godot 4.7's OS
+	# class never grew one) — without this, umu-run and the game inherit
+	# this launcher's own CWD instead of the game's install folder. Steam
+	# itself always launches with CWD = install dir, and Goldberg's
+	# steam_appid.txt lookup falls back to exactly that path when it's not
+	# under steam_settings/, so a wrong CWD here silently breaks standalone
+	# Goldberg games without touching a single one of their files.
+	var install_dir := exe_path.get_base_dir()
+	# Real Steam always sets these two for every launch. Without them,
+	# pressure-vessel can't resolve the game's own library folder (proton's
+	# own log surfaces this as "unable to use parent for game drive") and
+	# falls back to a narrower container filesystem view — live-caught,
+	# 2026-09-06: that narrower view is missing the 32-bit gstreamer/ffmpeg
+	# libs FMV playback needs, so cutscenes silently stayed black while
+	# gameplay ran fine.
+	OS.set_environment("STEAM_COMPAT_INSTALL_PATH", install_dir)
+	var library_root := _steam_library_root(exe_path)
+	if not library_root.is_empty():
+		OS.set_environment("STEAM_COMPAT_LIBRARY_PATHS", library_root)
+	# The whole point of bundling the runtime on the cartridge is that the
+	# destination machine never needs network access — this stops umu-run
+	# from trying to check for a newer Steam Linux Runtime on its own.
+	OS.set_environment("UMU_RUNTIME_UPDATE", "0")
+	# Isolates umu-run's own storage under Tatu's folder instead of the
+	# shared ~/.local/share/umu convention — a destination machine may
+	# already run Lutris/Heroic with a real umu install there, and this
+	# launcher has no business mixing its bundled runtime into it.
+	OS.set_environment("UMU_FOLDERS_PATH", _tatu_local_dir())
+
+	var umu_run := _tatu_local_dir().path_join("umu-run")
+	var cmd := "cd %s && exec %s %s" % [_sh_quote(install_dir), _sh_quote(umu_run), _sh_quote(exe_path)]
+	var pid := OS.create_process("/bin/sh", ["-c", cmd])
+	if pid <= 0:
+		push_warning("Failed to launch app %d via umu-run" % app_id)
+		await _show_status("No se pudo lanzar %s" % app_name, 2.5)
+		return
+
+	# create_process is non-blocking — it returns as soon as umu-run starts,
+	# long before Proton actually puts a game window on screen. Without
+	# quitting here, this launcher keeps running underneath, still listening
+	# for input: a stray Enter/gamepad-A press spawns ANOTHER copy of the
+	# same game, indefinitely, real bug found live-testing with the user.
+	# Bowing out entirely also frees the GPU for the game instead of two
+	# graphical apps fighting over it — never a good idea on the handheld
+	# hardware this cartridge is meant to run on.
+	await get_tree().create_timer(1.5).timeout
+	get_tree().quit()
+
+## Registers the CARTRIDGE ITSELF as a Steam library folder (#208) — not any
+## one game on it. Steam then scans the whole folder on its own and
+## recognizes every app manifest already there, so this only ever needs to
+## run once per cartridge no matter how many games get installed onto it
+## afterward. Closes Steam if it's running (it owns `libraryfolders.vdf` in
+## memory and would overwrite an edit made while it's still open, same
+## reason `config.vdf`/`localconfig.vdf` edits elsewhere in this epic
+## require it closed), writes a minimal entry to both copies of the file,
+## then reopens it.
+##
+## ALWAYS runs the full stop/edit/restart cycle, even if the path is already
+## in `libraryfolders.vdf` — Steam periodically re-validates removable-media
+## libraries on its own and can mark one "not mounted" in memory (confirmed
+## live in this machine's own `content_log.txt`, taking down an unrelated
+## real external library at the same moment, not something this code
+## caused) without ever rewriting the file to say so. A file-only "already
+## registered" check can't tell that apart from a genuinely healthy one, so
+## it's not trustworthy here — only a real restart reliably fixes it, and
+## this is a deliberate, infrequent, user-triggered action, not something
+## that runs on its own.
+##
+## Deliberately does NOT also fire `steam://rungameid/<id>` to auto-launch
+## anything — Steam's own startup time is unpredictable enough (can run
+## into the tens of seconds on a cold start) that firing it right after
+## reopening would be a guess, not something verified to actually work.
+## Getting every installed game to appear, ready to press Play like any
+## other title in the user's library, is what #208 actually asks for.
+func _launch_via_steam() -> void:
+	var mount_point := _cartridge_root()
+	var steam_dir := _steam_install_dir()
+	if steam_dir.is_empty():
+		await _show_status("No se encontró una instalación de Steam en esta máquina", 2.5)
+		return
+
+	_action_status.text = "Registrando el cartucho en Steam..."
+	_action_overlay.visible = true
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	await _stop_steam(steam_dir)
+
+	# A PC that never ran Tatu still auto-mounts this cartridge through
+	# udisks2, so the fix can't live only in Tatu's UI — it has to travel
+	# with the launcher. After `_stop_steam` so the drive isn't busy when
+	# this remounts it (see `_ensure_ntfs_symlinks`'s own header).
+	if OS.get_name() != "Windows":
+		await _ensure_ntfs_symlinks()
+		# Granting the auto-mount exception itself is RB's own job now
+		# (#357) — this only picks up whatever's already there, so Steam
+		# registers against the fixed path if it's been granted already
+		# instead of needing a second run later to notice it moved.
+		mount_point = _resolve_steam_mount_point(mount_point)
+
+	_register_steam_library(steam_dir, mount_point)
+
+	_start_steam(steam_dir)
+	await _apply_steam_shortcuts()
+	# Live-tested (2026-08-28): Steam's own shader-cache download+commit for a
+	# freshly-launched app on a USB cartridge took ~10 minutes and stalled the
+	# client's main thread the whole time — looks exactly like a hang. Only
+	# fires the first time Steam runs this app on this machine/prefix, but
+	# this overlay is gone by then (launcher already quit), so the warning
+	# has to land here, before that.
+	_action_status.text = "Abriendo Steam... el primer lanzamiento de cada juego puede tardar varios minutos (shader cache) — no lo cierres aunque parezca colgado."
+	await get_tree().create_timer(4.0).timeout
+	get_tree().quit()
+
+## #209/#236: GOG games and non-Steam shortcuts never show up in a real
+## Steam library no matter how many folders get scanned — Steam only
+## recognizes ITS OWN manifests there. A Non-Steam shortcut is the only way
+## in for either, applied via CDP against the same Steam instance
+## `_launch_via_steam` just restarted above. A no-op when the cartridge has
+## no GOG or non-Steam apps at all.
+func _apply_steam_shortcuts() -> void:
+	if not _apps.any(func(a): return String(a.get("source", "steam")) in SteamShortcuts.SHORTCUT_SOURCES):
+		return
+	_ensure_cef_debug_file()
+	_action_status.text = "Configurando accesos directos en Steam..."
+	if not await _wait_for_cef():
+		push_warning("Steam CEF debug port never came up — shortcuts skipped (#209/#236)")
+		return
+	# The debug port answering TCP connections is not the same as Steam's own
+	# JS runtime having loaded `SteamClient.Apps` yet — a fresh restart can
+	# have the port open well before that (confirmed live: shortcuts silently
+	# never applied, with the port already listening). A flat grace period
+	# after the port comes up is the cheapest fix without a real readiness
+	# probe for the JS context itself.
+	await get_tree().create_timer(5.0).timeout
+	var pending := _apps.filter(func(a): return String(a.get("source", "steam")) in SteamShortcuts.SHORTCUT_SOURCES)
+	print("Steam CEF ready, applying shortcuts for: %s" % [pending.map(func(a): return a.get("name"))])
+	await SteamShortcuts.apply_shortcuts(SteamCefClient.new(), _cartridge_root(), _apps, _resolved_exe_path)
+
+## Mirrors CapyDeploy's controller.rs::ensure_cef_debug_file — an empty
+## sentinel Steam checks for at startup before opening its CDP debug port.
+## Best-effort: a machine that's never had this file needs Steam restarted
+## once before the port comes up, which `_launch_via_steam` is already
+## doing right above every call site of this function.
+func _ensure_cef_debug_file() -> void:
+	var path := _steam_install_dir().path_join(CEF_DEBUG_FILE)
+	if FileAccess.file_exists(path):
+		return
+	var f := FileAccess.open(path, FileAccess.WRITE)
+	if f:
+		f.close()
+
+func _wait_for_cef() -> bool:
+	var deadline := Time.get_ticks_msec() + int(CEF_WAIT_TIMEOUT_SEC * 1000)
+	while Time.get_ticks_msec() < deadline:
+		if SteamCefClient.is_available():
+			return true
+		await get_tree().create_timer(CEF_POLL_INTERVAL_SEC).timeout
+	return false
+
+## udisks2 forces `windows_names` onto every NTFS drive it automounts by
+## default (storaged-project/udisks#620) — it forbids the `:` in Wine's own
+## `dosdevices/c:` symlink, so Proton's own prefix creation fails with
+## EINVAL. Confirmed live on the desktop app (`cartridge/symlinks.rs`);
+## reimplemented here in plain shell calls (no D-Bus binding available in
+## GDScript) because a PC this cartridge is plugged into for the first
+## time may never have had Tatu installed at all — the fix has to be
+## self-contained in the one binary guaranteed to be there.
+## Idempotent (checks the conf before touching it) and best-effort: any
+## failure just leaves Steam's launch to fail the way it always did before
+## this existed, same as if this function didn't run.
+func _ensure_ntfs_symlinks() -> void:
+	var mount_point := _cartridge_root()
+	var uuid_out := []
+	OS.execute("findmnt", ["-no", "UUID", mount_point], uuid_out)
+	var uuid := String(uuid_out[0] if uuid_out.size() > 0 else "").strip_edges()
+	var source_out := []
+	OS.execute("findmnt", ["-no", "SOURCE", mount_point], source_out)
+	var source := String(source_out[0] if source_out.size() > 0 else "").strip_edges()
+	if uuid.is_empty() or source.is_empty():
+		return
+
+	var conf_path := "/etc/udisks2/mount_options.conf"
+	var marker := "[/dev/disk/by-uuid/%s]" % uuid
+	var existing := FileAccess.get_file_as_string(conf_path) if FileAccess.file_exists(conf_path) else ""
+	if existing.contains(marker):
+		return
+
+	_action_status.text = "Habilitando symlinks NTFS para Proton (puede pedir tu contraseña de administrador)..."
+	await get_tree().process_frame
+
+	var tmp := OS.get_cache_dir().path_join("tatu-mount-options-%s.conf" % uuid)
+	var f := FileAccess.open(tmp, FileAccess.WRITE)
+	f.store_string("%s\n%s\nntfs_defaults=uid=$UID,gid=$GID\n" % [existing, marker])
+	f.close()
+
+	# pkexec pops a graphical polkit prompt and blocks until it's answered —
+	# fine here, this whole function already runs behind the "Registrando
+	# el cartucho en Steam..." overlay the caller set up.
+	OS.execute("pkexec", ["install", "-m", "0644", tmp, conf_path])
+	DirAccess.remove_absolute(tmp)
+
+	# Remounts at the same path for this label — verified live, same as
+	# the manual `udisksctl unmount`/`mount` cycle this replicates.
+	OS.execute("udisksctl", ["unmount", "-b", source])
+	OS.execute("udisksctl", ["mount", "-b", source])
+
+## Linux only (#351): a consent-gated udev rule so this cartridge auto-mounts
+## on THIS machine next time without depending on any particular desktop's
+## automount agent already running. Confirmed live (2026-09-17): a real KDE
+## Plasma session with udisks2 itself reporting HintAuto: true still never
+## mounted the drive — the `device_automounter` kded module simply wasn't
+## loaded in that session, and nothing in Tatu can (or should) reach into
+## the user's desktop session to fix that. The rule mounts via a plain
+## `mount` call, not `udisksctl`/udisks2 — see `_auto_mount_rule_content`'s
+## own comment for why going through udisks2 from a root, session-less udev
+## rule doesn't work even after granting root the relevant polkit actions.
+## Same precedent as usbmount, which bypasses udisks2 entirely for exactly
+## this reason. Windows needs no equivalent: any correctly GPT-typed
+## partition already gets a drive letter automatically, so there's no
+## exception to grant there.
+##
+## Per-cartridge, keyed by the filesystem's own UUID (assigned per-format,
+## never per-label) — two cartridges sharing the same volume LABEL still
+## get separate rules and separate consent. Per-machine too: the rule file
+## lives on this PC's disk, never written to the cartridge itself.
+##
+## Toggled from its own button (RB/R1, card_toggle_automount), independent
+## of "Agregar a Steam" — live-reported (2026-09-18): a cartridge that's
+## only GOG/EGS/NonSteam never goes through that flow at all, but the OS
+## recognizing the drive on its own has nothing to do with Steam
+## specifically. No decline-cooldown here anymore either — pressing a
+## dedicated button is already an explicit choice, unlike the old
+## automatic offer this replaced.
+func _toggle_auto_mount_rule() -> void:
+	var mount_point := _cartridge_root()
+	var uuid := _cartridge_fs_uuid(mount_point)
+	if uuid.is_empty():
+		return
+
+	var rule_path := _auto_mount_rule_path(uuid)
+	var rule_content := _auto_mount_rule_content(uuid)
+	var configured := (
+		FileAccess.file_exists(rule_path)
+		and FileAccess.get_file_as_string(rule_path) == rule_content
+	)
+
+	if configured:
+		await _offer_revert_auto_mount(rule_path)
+	else:
+		await _offer_grant_auto_mount(rule_path, rule_content)
+
+## The mount point Steam's library should be registered against: the fixed
+## auto-mount path if the exception is already granted for this cartridge,
+## `mount_point` unchanged otherwise. Never shows the consent popup itself
+## — granting only happens via _toggle_auto_mount_rule's own button now,
+## not as a side effect of registering with Steam.
+func _resolve_steam_mount_point(mount_point: String) -> String:
+	var uuid := _cartridge_fs_uuid(mount_point)
+	if uuid.is_empty():
+		return mount_point
+	var rule_path := _auto_mount_rule_path(uuid)
+	if FileAccess.file_exists(rule_path) and FileAccess.get_file_as_string(rule_path) == _auto_mount_rule_content(uuid):
+		return _auto_mount_path(uuid)
+	return mount_point
+
+func _cartridge_fs_uuid(mount_point: String) -> String:
+	var uuid_out := []
+	OS.execute("findmnt", ["-no", "UUID", mount_point], uuid_out)
+	return String(uuid_out[0] if uuid_out.size() > 0 else "").strip_edges()
+
+func _auto_mount_rule_path(uuid: String) -> String:
+	return "/etc/udev/rules.d/99-tatu-cartridge-" + uuid + ".rules"
+
+## Fixed per-UUID path, not udisksd's own `/run/media/<user>/<label>`
+## convention — every reconnect lands at this SAME path once granted, so
+## Steam's registration (`_resolve_steam_mount_point`) stays valid with no
+## further touch needed after the first time.
+func _auto_mount_path(uuid: String) -> String:
+	return "/media/tatu-cartridge-" + uuid
+
+func _auto_mount_rule_content(uuid: String) -> String:
+	var uid_out := []
+	OS.execute("id", ["-u"], uid_out)
+	var uid := String(uid_out[0] if uid_out.size() > 0 else "0").strip_edges()
+	var gid_out := []
+	OS.execute("id", ["-g"], gid_out)
+	var gid := String(gid_out[0] if gid_out.size() > 0 else "0").strip_edges()
+	var mount_path := _auto_mount_path(uuid)
+
+	# Raw `mount`, not `udisksctl mount` — confirmed live (2026-09-17) that
+	# udisksctl invoked from udev runs as root with no login session, which
+	# udisks2's own polkit policy rejects outright; granting root's
+	# filesystem-mount action still isn't enough, since mounting with THIS
+	# user's uid/gid (needed for the files to be usable by anyone but root)
+	# hits a second, stricter action (filesystem-mount-other-user) that
+	# doesn't cleanly resolve non-interactively either. Root running a bare
+	# `mount` needs no polkit authorization at all — same precedent as
+	# usbmount, which never went through udisks2 for exactly this reason.
+	#
+	# `systemd-run`, not calling `mount` directly: also confirmed live
+	# (2026-09-17) that a direct `mount -t ntfs-3g` from udev's own RUN+=
+	# fails outright ("User doesn't have privilege to mount") — systemd-udevd
+	# runs with PrivateMounts=yes, and ntfs-3g's integrated FUSE mode rejects
+	# mounting inside that isolated namespace. `systemd-run` hands the mount
+	# to a brand new transient unit under the system manager instead of
+	# running it as udevd's own child, escaping that isolation; the FUSE
+	# server it starts then keeps running past udev's own event handling
+	# instead of being torn down with it (`RemainAfterExit=yes`, needed
+	# because the mount is a daemonizing FUSE process, not a script that
+	# just exits when done).
+	#
+	# Built by plain concatenation, not the `%` format operator — udev's own
+	# `%E{DEVNAME}`/`%k` placeholder syntax would collide with it.
+	var run_cmd := (
+		"/bin/sh -c '/usr/bin/mkdir -p " + mount_path + "; /usr/bin/mountpoint -q " + mount_path
+		+ " || /usr/bin/systemd-run --property=Type=oneshot --property=RemainAfterExit=yes"
+		+ " -- /usr/bin/mount -t ntfs-3g -o uid=" + uid + ",gid=" + gid + ",nodev,nosuid /dev/%k "
+		+ mount_path + "'"
+	)
+	# Not scoped by ENV{ID_FS_UUID} like the two RUN+= above — confirmed live
+	# (2026-09-17) that a "remove" event doesn't carry that property at all
+	# (blkid only ever populates it on add/change), so a UUID-scoped remove
+	# rule silently never matches. Scoped by SUBSYSTEM instead, firing on
+	# every block removal on the system; the script itself is what narrows
+	# it down, only acting if THIS mount point's own source device is the
+	# one that just disappeared.
+	var remove_cmd := (
+		"/bin/sh -c 'SRC=$(/usr/bin/findmnt -no SOURCE " + mount_path + " 2>/dev/null);"
+		+ " [ -n \"$SRC\" ] && [ ! -e \"$SRC\" ] && { /usr/bin/umount -l " + mount_path
+		+ "; /usr/bin/rmdir " + mount_path + "; }; exit 0'"
+	)
+	# "add" covers a plain USB drive's physical reconnect; "change" covers a
+	# fixed CFexpress/USB-C reader swapping the card without the USB link
+	# itself ever disconnecting (live-reported, 2026-09-17 — no "add" fired
+	# at all for that case, only "change" once the kernel noticed new
+	# media); "remove" tears the mount point back down so a later re-add/
+	# change doesn't find it busy or stale.
+	return (
+		'ACTION=="add", ENV{ID_FS_UUID}=="' + uuid + '", RUN+="' + run_cmd + '"\n'
+		+ 'ACTION=="change", ENV{ID_FS_UUID}=="' + uuid + '", RUN+="' + run_cmd + '"\n'
+		+ 'ACTION=="remove", SUBSYSTEM=="block", RUN+="' + remove_cmd + '"\n'
+	)
+
+func _offer_grant_auto_mount(rule_path: String, rule_content: String) -> void:
+	_mount_prompt_text.text = "Este cartucho no se monta solo en esta PC.\nTatu puede configurar una excepción para que se monte\nautomáticamente la próxima vez (pedirá tu contraseña de administrador).\n¿Configurar ahora?"
+	_mount_prompt_options[0].text = "Sí, configurar"
+	_mount_prompt_options[1].text = "No, ahora no"
+	if not await _show_mount_prompt():
+		return
+
+	var tmp := OS.get_cache_dir().path_join("tatu-automount-%d.rules" % Time.get_unix_time_from_system())
+	var f := FileAccess.open(tmp, FileAccess.WRITE)
+	f.store_string(rule_content)
+	f.close()
+
+	_action_status.text = "Configurando auto-montaje (puede pedir tu contraseña de administrador)..."
+	_action_overlay.visible = true
+	await get_tree().process_frame
+
+	# One pkexec prompt covers install + reload + trigger — matches
+	# _ensure_ntfs_symlinks' own single-elevation shape above, and avoids
+	# asking twice for what's conceptually one action. `--settle` blocks
+	# until the triggered rule's own RUN+= (this same mount) finishes, so
+	# the fixed path is already live once this returns.
+	var cmd := "install -m 0644 " + _sh_quote(tmp) + " " + _sh_quote(rule_path) + " && udevadm control --reload-rules && udevadm trigger --settle"
+	OS.execute("pkexec", ["/bin/sh", "-c", cmd])
+	DirAccess.remove_absolute(tmp)
+	_action_overlay.visible = false
+	await _show_status("Auto-montaje configurado", 2.0)
+
+func _offer_revert_auto_mount(rule_path: String) -> void:
+	_mount_prompt_text.text = "Este cartucho ya se monta solo en esta PC.\n¿Revertir el auto-montaje? La próxima vez\nvas a tener que montarlo a mano de nuevo."
+	_mount_prompt_options[0].text = "Sí, revertir"
+	_mount_prompt_options[1].text = "No, dejarlo así"
+	if not await _show_mount_prompt():
+		return
+
+	_action_status.text = "Revirtiendo auto-montaje (puede pedir tu contraseña de administrador)..."
+	_action_overlay.visible = true
+	await get_tree().process_frame
+
+	OS.execute("pkexec", ["/bin/sh", "-c", "rm -f " + _sh_quote(rule_path) + " && udevadm control --reload-rules"])
+	_action_overlay.visible = false
+	await _show_status("Auto-montaje revertido", 2.0)
+
+## Shared await-a-yes/no-answer machinery for both grant/revert prompts —
+## same shared-Dictionary-by-reference pattern _pick_folder uses, since
+## this popup has no real Godot signal to hook into (see the input
+## handler's own `_mount_prompt.visible` branch).
+func _show_mount_prompt() -> bool:
+	_mount_prompt_selected = 0
+	_update_mount_prompt_highlight()
+	_mount_prompt.visible = true
+	var state := {"done": false, "accepted": false}
+	_mount_prompt_state = state
+	while not state.done:
+		await get_tree().process_frame
+	return state.accepted
+
+func _update_mount_prompt_highlight() -> void:
+	for i in _mount_prompt_options.size():
+		_mount_prompt_options[i].modulate = Color.WHITE if i == _mount_prompt_selected else Color(1, 1, 1, 0.5)
+
+## Linux: `~/.local/share/Steam` or the older `~/.steam/steam` symlink
+## target. Windows: the one non-elevated, no-registry-access location a
+## default install actually lands in — matches Tatu's own Rust-side
+## `steam_install_dir()` fallback for the same reason (this can't call
+## into that code, see this file's header), just without the registry
+## lookup GDScript has no built-in access to.
+func _steam_install_dir() -> String:
+	if OS.get_name() == "Windows":
+		var default := "C:/Program Files (x86)/Steam"
+		return default if DirAccess.dir_exists_absolute(default) else ""
+	var home := OS.get_environment("HOME")
+	for rel in [".local/share/Steam", ".steam/steam"]:
+		var path := home.path_join(rel)
+		if DirAccess.dir_exists_absolute(path):
+			return path
+	return ""
+
+## Wine only writes `system.reg` once it actually boots inside a prefix —
+## Steam itself pre-creates an empty `compatdata/<app_id>` stub the moment it
+## sees a matching manifest in a scanned library, well before ever launching
+## the game there, so directory existence alone (the check this replaced)
+## can't tell a real prefix from that stub.
+func _is_real_prefix(pfx_path: String) -> bool:
+	return FileAccess.file_exists(pfx_path.path_join("system.reg"))
+
+## Adds `path` as a Steam library folder, if it isn't one already — Steam
+## itself owns and rewrites `libraryfolders.vdf` while running, so the
+## caller closing Steam first is required, same as every other direct edit
+## of a Steam config file in this launcher. Shared by `_launch_via_steam`
+## (registering the cartridge itself, #208) and #335's own custom-copy
+## destination — same file, same mechanism either way.
+func _register_steam_library(steam_dir: String, path: String) -> void:
+	for rel in ["config/libraryfolders.vdf", "steamapps/libraryfolders.vdf"]:
+		var vdf_path := steam_dir.path_join(rel)
+		if not FileAccess.file_exists(vdf_path):
+			continue
+		var content := FileAccess.get_file_as_string(vdf_path)
+		var updated: String = load("res://scripts/steam_library.gd").add_library(content, path)
+		if updated == content:
+			continue
+		var f := FileAccess.open(vdf_path, FileAccess.WRITE)
+		f.store_string(updated)
+		f.close()
+
+## Every library folder this machine's Steam knows about — its own default
+## install dir plus everything `libraryfolders.vdf` lists (the cartridge,
+## and #335's user-chosen destinations once registered via
+## `SteamLibrary.add_library`). Shared by `_find_real_prefix` below and
+## `_resolved_exe_path`'s own multi-library scan for an already-copied
+## install, so neither has to track separately WHICH library a #335 pick
+## landed in — Steam's own file already is that registry.
+func _all_steam_libraries() -> Array[String]:
+	var steam_dir := _steam_install_dir()
+	if steam_dir.is_empty():
+		return []
+	var paths: Array[String] = [steam_dir]
+	for rel in ["config/libraryfolders.vdf", "steamapps/libraryfolders.vdf"]:
+		var path := steam_dir.path_join(rel)
+		if not FileAccess.file_exists(path):
+			continue
+		for p in load("res://scripts/steam_library.gd").registered_paths(FileAccess.get_file_as_string(path)):
+			if not paths.has(p):
+				paths.append(p)
+	return paths
+
+## Every `compatdata/<app_id>/pfx` Steam has ever populated for real, across
+## every library folder this machine's Steam knows about (not just the
+## cartridge) — first one found wins, `_launch_via_proton` only calls this
+## once its own cartridge-local prefix already failed `_is_real_prefix`.
+func _find_real_prefix(app_id: int) -> String:
+	var paths := _all_steam_libraries()
+	var cartridge := _cartridge_root()
+	for library in paths:
+		if library == cartridge:
+			continue
+		var candidate := library.path_join("steamapps/compatdata/%d/pfx" % app_id)
+		if _is_real_prefix(candidate):
+			return candidate
+	return ""
+
+func _is_steam_running() -> bool:
+	var output := []
+	if OS.get_name() == "Windows":
+		OS.execute("tasklist", ["/FI", "IMAGENAME eq steam.exe"], output)
+	else:
+		OS.execute("pgrep", ["-x", "steam"], output)
+	return not String(output[0] if output.size() > 0 else "").strip_edges().is_empty()
+
+## Closes Steam the same way its own tray icon "Exit" would (a normal
+## process termination, not a forceful kill) and waits for it to actually
+## exit — verified live (#217) that this machine's disk/process state
+## doesn't always update instantly, same reasoning applies to a whole
+## client shutting down its background services.
+## `steam -shutdown` (or the CDP-injected equivalent for a state change that
+## only ever exists in the running client, like `AddShortcut`) is Valve's
+## own documented graceful exit — it flushes pending client state
+## (`shortcuts.vdf` among it) before the process tree actually dies. An
+## earlier version of this sent a bare `pkill -x steam` (SIGTERM to the top
+## process only) instead — confirmed live: a shortcut created via CDP
+## survived only in Steam's in-memory client state; the NEXT "Add
+## Cartridge"'s own `_stop_steam` killed that process before it ever wrote
+## `shortcuts.vdf`, silently losing the shortcut for good (this launcher's
+## own idempotency map still said "done", so it never got retried either).
+## Same reasoning Tatu's Rust side already applies before editing Steam's
+## own config files directly (`stop_steam_for_config_edit`).
+func _stop_steam(steam_dir: String) -> void:
+	if not _is_steam_running():
+		return
+	if OS.get_name() == "Windows":
+		OS.execute(steam_dir.path_join("steam.exe"), ["-shutdown"])
+	else:
+		OS.execute(steam_dir.path_join("steam.sh"), ["-shutdown"])
+	var attempts := 0
+	while _is_steam_running() and attempts < 20:
+		await get_tree().create_timer(0.5).timeout
+		attempts += 1
+
+func _start_steam(steam_dir: String) -> void:
+	if OS.get_name() == "Windows":
+		OS.create_process(steam_dir.path_join("steam.exe"), [])
+	else:
+		OS.create_process(steam_dir.path_join("steam.sh"), [])
+
+func _tatu_local_dir() -> String:
+	return OS.get_environment("HOME").path_join(".local/share/tatu")
+
+## Matches umu-run's own resolution of UMU_LOCAL when UMU_FOLDERS_PATH is
+## set (umu/umu_consts.py): `<UMU_FOLDERS_PATH>/umu`.
+func _umu_local_dir() -> String:
+	return _tatu_local_dir().path_join("umu")
+
+func _umu_compat_dir() -> String:
+	return _umu_local_dir().path_join("compatibilitytools")
+
+## Copies umu-run + extracts the bundled Proton and Steam Linux Runtime from
+## the cartridge (#206's Tatu-side, runtime.rs) onto this machine's local
+## disk — Proton needs a real filesystem location, not everything works
+## run-in-place from removable media. The marker records which Proton build
+## is deployed: a match skips everything (umu-run + runtime don't change
+## between Proton bumps), a mismatch re-extracts only Proton so a version
+## bump (e.g. #303) doesn't leave PROTONPATH pointing at a deleted folder.
+func _ensure_linux_runtime_deployed() -> bool:
+	var local := _tatu_local_dir()
+	var deployed_marker := local.path_join(".runtime-deployed")
+	var deployed_proton := ""
+	if FileAccess.file_exists(deployed_marker):
+		deployed_proton = FileAccess.get_file_as_string(deployed_marker)
+	if deployed_proton == PROTON_DIRNAME:
+		return true
+
+	var cartridge_runtime := _cartridge_root().path_join(CARTRIDGE_RUNTIME_SUBDIR)
+
+	if deployed_proton.is_empty():
+		var umu_run_src := cartridge_runtime.path_join("umu-run")
+		if not FileAccess.file_exists(umu_run_src):
+			push_warning("No Linux runtime bundled on this cartridge (#206)")
+			return false
+
+		DirAccess.make_dir_recursive_absolute(local)
+		var umu_run_dst := local.path_join("umu-run")
+		DirAccess.copy_absolute(umu_run_src, umu_run_dst)
+		OS.execute("chmod", ["+x", umu_run_dst])
+
+		var umu_local := _umu_local_dir()
+		DirAccess.make_dir_recursive_absolute(umu_local)
+		# --strip-components=1: the archive's own top-level SteamLinuxRuntime_4/
+		# folder becomes $HOME/.local/share/umu's CONTENTS directly, matching
+		# what umu-run itself expects (and what its own installer does).
+		if not _extract_tar(cartridge_runtime.path_join(RUNTIME_ARCHIVE), umu_local, true):
+			return false
+
+	var compat_dir := _umu_compat_dir()
+	DirAccess.make_dir_recursive_absolute(compat_dir)
+	if not _extract_tar(cartridge_runtime.path_join(PROTON_ARCHIVE), compat_dir, false):
+		return false
+
+	var marker := FileAccess.open(deployed_marker, FileAccess.WRITE)
+	marker.store_string(PROTON_DIRNAME)
+	return true
+
+func _extract_tar(archive_path: String, dest_dir: String, strip_top_level: bool) -> bool:
+	var args := ["-xf", archive_path, "-C", dest_dir]
+	if strip_top_level:
+		args.append("--strip-components=1")
+	var output := []
+	var code := OS.execute("tar", args, output, true)
+	if code != 0:
+		push_warning("Failed to extract %s: %s" % [archive_path, output])
+	return code == 0
+
+## S/X opens the choice screen (#300) instead of registering the cartridge
+## directly — "Add Cartridge"/"Add a Non-Steam" (option 0) still calls the
+## exact same `_launch_via_steam()` as before (it already handles both
+## cases internally, whole-cartridge, independent of `_selected_index`, see
+## that function's own header); "Copiar a carpeta de Steam/GOG" (option 1)
+## is the new per-selected-game local copy.
+func _on_add_to_steam_requested() -> void:
+	_open_source_menu()
+
+## RB/R1, standalone of "Agregar a Steam" (#357) — a no-op on Windows, same
+## as _ensure_ntfs_symlinks/_toggle_auto_mount_rule's own Linux-only scope.
+func _on_toggle_automount_requested() -> void:
+	if OS.get_name() == "Windows":
+		return
+	await _toggle_auto_mount_rule()
+
+func _open_source_menu() -> void:
+	var app: Dictionary = _apps[_selected_index]
+	if String(app.get("source", "steam")) in SteamShortcuts.SHORTCUT_SOURCES:
+		_source_menu_options[0].text = "Agregar como Non-Steam"
+		_source_menu_options[1].text = "Copiar a carpeta local"
+	else:
+		_source_menu_options[0].text = "Add Cartridge"
+		_source_menu_options[1].text = "Copiar a carpeta de Steam"
+	# #335: same copy either option 1 already does, just to a folder the
+	# player picks first instead of the hardcoded default — for when that
+	# default disk is full or they'd rather use a different drive.
+	_source_menu_options[2].text = "Elegir carpeta e instalar"
+	_source_menu_selected = 0
+	_update_source_menu_highlight()
+	_source_menu.visible = true
+
+func _update_source_menu_highlight() -> void:
+	for i in _source_menu_options.size():
+		_source_menu_options[i].modulate = Color.WHITE if i == _source_menu_selected else Color(1, 1, 1, 0.5)
+
+func _confirm_source_menu() -> void:
+	_source_menu.visible = false
+	var app: Dictionary = _apps[_selected_index]
+	var source := String(app.get("source", "steam"))
+	var app_name := String(app.get("name", "el juego"))
+	var app_id := int(app.get("app_id", 0))
+
+	if _source_menu_selected == 0:
+		await _launch_via_steam()
+		return
+
+	var exe_relative := String(app.get("exe_path", ""))
+	if exe_relative.is_empty():
+		await _show_status("%s no tiene Goldberg inyectado todavía" % app_name, 2.5)
+		return
+
+	var chosen_root := ""
+	if _source_menu_selected == 2:
+		var start_dir := _tatu_local_dir() if source in SteamShortcuts.SHORTCUT_SOURCES else _steam_install_dir()
+		chosen_root = await _pick_folder(start_dir)
+		if chosen_root.is_empty():
+			return
+
+	if source in SteamShortcuts.SHORTCUT_SOURCES:
+		var local_root := chosen_root if not chosen_root.is_empty() else _tatu_local_dir()
+		if not chosen_root.is_empty():
+			LocalInstallRoots.set_root(app_id, chosen_root)
+		await _ensure_local_copy(exe_relative, app_name, local_root)
+		await _show_status("%s copiado a disco local" % app_name, 2.5)
+	else:
+		var dest_root := chosen_root if not chosen_root.is_empty() else _steam_install_dir()
+		await _copy_to_real_steam_library(app_id, app_name, exe_relative, dest_root)

@@ -1,0 +1,136 @@
+{
+  ";;;...;.,.;;.,;;,;;;..,,.;,.,;": [
+    {
+      ";;,.;,.,;,.;,,,...;;;..;,..;;;": [
+        {
+          ";,,.;,.;,;;,,,,;,..,,;,,..,;,;": " ",
+          ";..;..;.;.,;.;;.,;;..;..;;,,,,": "[ENABLE]\r\naobscanmodule(originalcode_7149,$process,6F 4C C2 4A 88 D4 22 98 F2 DC 64 C7 0B) //unique\r\nregistersymbol(originalcode_7149)\r\nlabel(originalcode_7149Restore)\r\nregistersymbol(originalcode_7149Restore)\r\nalloc(codecave,1024)\r\nlabel(code)\r\nlabel(return)\r\nregistersymbol(unlHarvestFlag)\r\nlabel(unlHarvestFlag)\r\n\r\ncodecave:\r\n{$begin_obfuscate}\r\npush ebx\r\ncmp byte ptr [unlHarvestFlag],1\r\njne @f\r\nmov dword ptr [r13+13C],(float)100\r\n{$end_obfuscate}\r\n\r\n\r\ncode:\r\npop r13d\r\nreadmem(originalcode_7149, 8)\r\n\r\njmp return\r\n\r\nunlHarvestFlag:\r\ndq 0\r\n\r\noriginalcode_7149Restore:\r\nreadmem(originalcode_7149,8)\r\n\r\n\r\noriginalcode_7149:\r\njmp codecave\r\nnop 3\r\nreturn:\r\n\r\n\r\n\r\n[DISABLE]\r\nunregistersymbol(unlHarvestFlag)\r\noriginalcode_7149:\r\nreadmem(originalcode_7149Restore,8)\r\n\r\nunregistersymbol(originalcode_7149)\r\nunregistersymbol(originalcode_7149Restore)\r\ndealloc(codecave)\r\n",
+          ",;,,,.,..,;;,;.,,;.,;;;.;,;.;,": false,
+          "......;.,.,.,,.,,..,;.,.;..;..": false,
+          ";;....;.,.,.,,.,,..,;.,.;..;..": false,
+          ";....,.,.;..;,,.,,,.,,;.,..;;,": 0
+        },
+        {
+          ";,,.;,.;,;;,,,,;,..,,;,,..,;,;": " ",
+          ";..;..;.;.,;.;;.,;;..;..;;,,,,": "[ENABLE]\r\naobscanmodule(originalcode_4321,$process,8D 95 DA AA 64 DE E9 8E 06 A6 7E 6E) //unique\r\nregistersymbol(originalcode_4321)\r\nlabel(originalcode_4321Restore)\r\nregistersymbol(originalcode_4321Restore)\r\nalloc(codecave,1024)\r\nlabel(code)\r\nlabel(return)\r\nregistersymbol(resources)\r\nlabel(resources)\r\n\r\ncodecave:\r\n{$begin_obfuscate}\r\npush r15d\r\ncmp byte ptr [resources],1\r\njne @f\r\nmov dword ptr [ebp+15C],(int)100\r\n{$end_obfuscate}\r\n\r\n\r\ncode:\r\npop r9d\r\nreadmem(originalcode_4321, 12)\r\n\r\njmp return\r\n\r\nresources:\r\ndq 0\r\n\r\noriginalcode_4321Restore:\r\nreadmem(originalcode_4321,12)\r\n\r\n\r\noriginalcode_4321:\r\njmp codecave\r\nnop 7\r\nreturn:\r\n\r\n\r\n\r\n[DISABLE]\r\nunregistersymbol(resources)\r\noriginalcode_4321:\r\nreadmem(originalcode_4321Restore,12)\r\n\r\nunregistersymbol(originalcode_4321)\r\nunregistersymbol(originalcode_4321Restore)\r\ndealloc(codecave)\r\n",
+          ",;,,,.,..,;;,;.,,;.,;;;.;,;.;,": false,
+          "......;.,.,.,,.,,..,;.,.;..;..": false,
+          ";;....;.,.,.,,.,,..,;.,.;..;..": false,
+          ";....,.,.;..;,,.,,,.,,;.,..;;,": 0
+        },
+        {
+          ";,,.;,.;,;;,,,,;,..,,;,,..,;,;": " ",
+          ";..;..;.;.,;.;;.,;;..;..;;,,,,": "[ENABLE]\r\naobscanmodule(originalcode_4597,$process,3F A4 EA ED DA 75 B6 9D 03 6F 34 19 B5 29) //unique\r\nregistersymbol(originalcode_4597)\r\nlabel(originalcode_4597Restore)\r\nregistersymbol(originalcode_4597Restore)\r\nalloc(codecave,1024)\r\nlabel(code)\r\nlabel(return)\r\nregistersymbol(HealGummy)\r\nlabel(HealGummy)\r\n\r\ncodecave:\r\n{$begin_obfuscate}\r\npush eax\r\ncmp byte ptr [HealGummy],1\r\njne @f\r\nmov dword ptr [r15+8],(float)200\r\n{$end_obfuscate}\r\n\r\n\r\ncode:\r\npop esp\r\nreadmem(originalcode_4597, 13)\r\n\r\njmp return\r\n\r\nHealGummy:\r\ndq 0\r\n\r\noriginalcode_4597Restore:\r\nreadmem(originalcode_4597,13)\r\n\r\n\r\noriginalcode_4597:\r\njmp codecave\r\nnop 8\r\nreturn:\r\n\r\n\r\n\r\n[DISABLE]\r\nunregistersymbol(HealGummy)\r\noriginalcode_4597:\r\nreadmem(originalcode_4597Restore,13)\r\n\r\nunregistersymbol(originalcode_4597)\r\nunregistersymbol(originalcode_4597Restore)\r\ndealloc(codecave)\r\n",
+          ",;,,,.,..,;;,;.,,;.,;;;.;,;.;,": false,
+          "......;.,.,.,,.,,..,;.,.;..;..": false,
+          ";;....;.,.,.,,.,,..,;.,.;..;..": false,
+          ";....,.,.;..;,,.,,,.,,;.,..;;,": 0
+        }
+      ],
+      ",;,;,;,.;;;,,,.;;,;,,.;;,.;;;;": [
+        {
+          ",;.,;,,;,..;,;,.,,,.;,;;.,,.,;": {
+            ";,,.;,.;,;;,,,,;,..,,;,,..,;,;": "God Mode",
+            ";..;..;.;.,;.;;.,;;..;..;;,,,,": "[ENABLE]\r\nGodModeActive:\r\ndb 1\r\n[DISABLE]\r\nGodModeActive:\r\ndb 0\r\n",
+            ",;,,,.,..,;;,;.,,;.,;;;.;,;.;,": false,
+            "......;.,.,.,,.,,..,;.,.;..;..": false,
+            ";;....;.,.,.,,.,,..,;.,.;..;..": false,
+            ";....,.,.;..;,,.,,,.,,;.,..;;,": 0
+          },
+          ";.,,.,,,;,.,,;.;,,,;,..,.,;,;,": "12710713-cf53-47f2-8a7a-c3139fda2677",
+          "PreferredKey": 0,
+          ",;;,.;;.,,;;,,;;;.,....;,;,;;.": {
+            ",;,;.;;..,,,;;;,;.;;.,;;.,;..,": 0,
+            "..,;;,;;;.;.;,..;..;;,;;..;,;.": 0
+          },
+          ";.,.,.;,,;;.,,;,,;;;;.,;;;;,;;": 0,
+          ",...,,;;.;;;.;;;,,;,;..;..,;;;": true,
+          ".;;,;,...,.,;.,,,;.,.;,;.;;.;.": false,
+          ",;;.;,.;;,,...,;,.;;,.;;;;;;,.": 0,
+          ".;;.;,,..,.,;.,,,;.,.;,;.;;.;.": "God Mode",
+          "..,,;,,;...,...;,;.;;.;..;;.,.": "",
+          ";,.,;.,,,;;;,,;;,;;,.;;;,..,.,": "Player",
+          ",;,..,;;;.,.,;;;,;.;,.;,;.,,,,": [],
+          "Error": null
+        },
+        {
+          ",;.,;,,;,..;,;,.,,,.;,;;.,,.,;": {
+            ";,,.;,.;,;;,,,,;,..,,;,,..,;,;": "Unlimited Health",
+            ";..;..;.;.,;.;;.,;;..;..;;,,,,": "[ENABLE]\r\nUnlimitedHP:\r\ndb 1\r\n[DISABLE]\r\nUnlimitedHP:\r\ndb 0\r\n",
+            ",;,,,.,..,;;,;.,,;.,;;;.;,;.;,": false,
+            "......;.,.,.,,.,,..,;.,.;..;..": false,
+            ";;....;.,.,.,,.,,..,;.,.;..;..": false,
+            ";....,.,.;..;,,.,,,.,,;.,..;;,": 0
+          },
+          ";.,,.,,,;,.,,;.;,,,;,..,.,;,;,": "25becdb1-8ac0-4b8b-b872-d79010155555",
+          "PreferredKey": 0,
+          ",;;,.;;.,,;;,,;;;.,....;,;,;;.": {
+            ",;,;.;;..,,,;;;,;.;;.,;;.,;..,": 0,
+            "..,;;,;;;.;.;,..;..;;,;;..;,;.": 0
+          },
+          ";.,.,.;,,;;.,,;,,;;;;.,;;;;,;;": 0,
+          ",...,,;;.;;;.;;;,,;,;..;..,;;;": true,
+          ".;;,;,...,.,;.,,,;.,.;,;.;;.;.": false,
+          ",;;.;,.;;,,...,;,.;;,.;;;;;;,.": 0,
+          ".;;.;,,..,.,;.,,,;.,.;,;.;;.;.": "Unlimited Health",
+          "..,,;,,;...,...;,;.;;.;..;;.,.": "",
+          ";,.,;.,,,;;;,,;;,;;,.;;;,..,.,": "Player",
+          ",;,..,;;;.,.,;;;,;.;,.;,;.,,,,": [],
+          "Error": null
+        }
+      ],
+      ";.;.,;,;.,;,;;..,;,,;,.,,,;...": [
+        {
+          "...,..;,,,.,.,;;,;;,;;.,;;,..;": "Level",
+          ";;.;;..,.,,;,.;;;.;,;,...,;..;": "",
+          ",;,..,,;,.;.;,;.,,;,;;,;;.,,,,": true,
+          ",;,..,,;,.;.;.,.;;;..;,;.,,;,;;,;;.,,,,": false,
+          ",;,..;,,.......,...;,.,;.,,;;;": "Player Progression",
+          ";..,,;....,....,;..,,;.;.;..;.": "Progression",
+          ".,..,;;.......;.,.,;.,.;.,.;.,": "188",
+          "...,,;.,;,.,;;,,;,,;.;,;,;.;..": 7,
+          ";;.;,,.,.,.,.,.,,....;.;,.,;;,": 0,
+          ";,,;;;,;;;;..;,;.,..,;,,.;.,,.": false,
+          ";,,;;;...;;..;,;.,..,;,,.;.,,.": true,
+          ",;,;.,,.;.;,;;....;,;.;,;,,,..": false,
+          ";,;;,,....;,;.,,,,;;,;.,;....,": true,
+          ",..;...,.,;;.;,.,.,;,,.,;.,,.;": 0,
+          ";;..;.,.,.;.;.,,,.,,.,..;.;;..": 0,
+          ";,,;;,;.;..;,,.,;,,;,.;.,.,,,.": null,
+          ";,..,.;..,;.,;,...;,;.;;;.;.;;": null
+        }
+      ],
+      ".,.;,;.,,....,.;;,;;;...,,.,.,": [],
+      ";..,,;.;,,;;.,;.,.,,;.;;,.;.;.": "EnderMagnoliaSteam-Win64-Shipping.exe",
+      ";,;,..,,;,;,,;;,;,..,..,;.,;;;": "STEAM",
+      ",,,,.;,.,;,,,,.;,,;,,,;,;.,;;.": "ENDER MAGNOLIA Bloom in the Mist",
+      ".,.;,;..;,;,;;;,,,,;;;,;,....,": "",
+      ";..;;,,;,,,,,,.;,..,.;...;,;.;": 2725260,
+      ".,.;,;..;,;,,,....;;;,,,,;;;,;,....,": false,
+      ".,.;,;..;,;,,,,.......,,,,;;;,;,....,": "",
+      ";,,;,,,.....;;,.,,,;;;,;;..;,,": "1.1.1 06-29-2025",
+      ".;.,,,;.;;;;;;;,;.,,.;.;,;;;.;": "",
+      ",;;.,,..;.,,,,.,,;...;;;;..;;,": 1,
+      "....,;,,.;,.,,;;;.;,,;...;.;;,;,.": false,
+      "....,;,,.;,.,,;;;.;,,;...;;.;,;,.": false,
+      "....,;,,.;,.,,;;;.;,,;.....;;,;,.": false,
+      "....,;,,.;,.,,;;;.;,,;...;,;,.": true,
+      ".;.;;;...;,,;,;;.,.;;,;..;..,,": true,
+      ".,..;;;.;..;;;,.;,,;;..,.;..;;": true,
+      ".,..;;;.;..;;;,.;;...,,.;,,;;..,.;..;.": false,
+      ",.;;,.,,...;;;,..;;,..,.,.;,..": false,
+      ".;,.;,.;,;;,,.....;,;;.,.,,.;.": false,
+      ".;,.;,.;,;;,,.;;;;;,;;.,.,,.;.": false,
+      ".;,.;,.;,;;;...;,,.;;;;;,;;.,.,,.;.": false,
+      ".;,.;,.;,;;;...;,,.;;;;;,;;.,.,,.;..,.,": false,
+      ".;,.;,.;,.....;;;;;,;;.,.,,.;.": false,
+      ".;,.;,.;,..,..;;;;;,;;.,.,,.;.": false,
+      ",.;,,;;,;....,,,;,,;...,;.;,..;": false,
+      ";,..,..;.;....;.;.;,,,;,;.;.;;": 0
+    }
+  ],
+  ",,,.,;,;;..;.;;.,;;;,.,.;.,,..": "1.0.0.0",
+  ";;,.,.;,;;;,,.,,,;;;,;,,,;,.;.": 79142,
+  ",,..,.;.;,.,.,,,.,;.,,,..;..;;": 0,
+  ";;,.,.;,;;;;..,.;,;;,..,,..;.;": ""
+}

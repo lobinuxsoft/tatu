@@ -1,0 +1,15 @@
+/* Aggregated stylesheet. Every section lives under styles/; the cascade
+   follows the import order, from most generic to most specific. */
+@import url("styles/base.css");
+@import url("styles/tabs.css");
+@import url("styles/sync.css");
+@import url("styles/stats.css");
+@import url("styles/filters.css");
+@import url("styles/tables.css");
+@import url("styles/tags.css");
+@import url("styles/detail.css");
+@import url("styles/drm_block.css");
+@import url("styles/modal.css");
+@import url("styles/help.css");
+@import url("styles/lightbox.css");
+@import url("styles/misc.css");

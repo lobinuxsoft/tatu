@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<CheatTable CheatEngineTableVersion="45">
+  <CheatEntries>
+    <CheatEntry>
+      <ID>6</ID>
+      <Description>"Mixed {$lua} + {$asm} blocks in ENABLE — Elden Ring pattern"</Description>
+      <VariableType>Auto Assembler Script</VariableType>
+      <AssemblerScript>[ENABLE]
+{$lua}
+local finder = AOBScanModuleUnique("fixture.exe", "AA BB CC DD", "+X")
+if finder then
+  GlobalFlag = finder + 7 + readInteger(finder + 3, true)
+  writeByte(GlobalFlag, 1)
+end
+[DISABLE]
+{$lua}
+if GlobalFlag then
+  writeByte(GlobalFlag, 0)
+end
+
+{$asm}
+// Original-code comment block preserved for documentation.
+// fixture.exe+443BFC: AA BB CC DD - placeholder
+</AssemblerScript>
+    </CheatEntry>
+  </CheatEntries>
+</CheatTable>

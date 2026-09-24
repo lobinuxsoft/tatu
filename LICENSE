@@ -1,0 +1,106 @@
+Tatu Personal & Share-Back License
+Version 1.0, 2026-09-24
+
+Copyright (C) 2025-2026 Matias Galarza (Lobinux)
+
+This is a custom source-available license, not an OSI-approved open source
+license. It is based on PolyForm Noncommercial 1.0.0's noncommercial
+restriction, with an added mandatory share-back obligation and an
+explicit AI/text-and-data-mining reservation.
+
+## 1. Acceptance
+
+By using, copying, modifying, or distributing Tatu (the "Software"), you
+agree to all of the terms and conditions below. If you do not agree, you
+have no rights to the Software under this license.
+
+## 2. Permitted personal use
+
+Subject to Sections 3 and 4 below, the Licensor grants you a
+non-exclusive, worldwide, non-transferable license to use, copy, and run
+the Software for any purpose other than a Commercial Use, including
+evaluation, personal use, learning, and research.
+
+## 3. Derivatives and mandatory share-back
+
+You may modify the Software and create derivative works for noncommercial
+use under Section 2, provided that, for any modification you deploy, run
+for longer than personal/local testing, or distribute to any other
+person:
+
+a) You notify the Licensor (contact: the address/handle designated in
+   this repository's README) within 30 days of making the modification,
+   or before any distribution, whichever happens first.
+
+b) You provide the Licensor the complete corresponding source code of
+   your modification (a diff or a full repository), either through a
+   publicly accessible fork/repository or sent directly through the
+   contact channel the Licensor designates.
+
+c) You keep this same license, unmodified, attached to your derivative
+   work, including this Section 3.
+
+Failure to comply with this Section terminates your rights under this
+license automatically and immediately.
+
+## 4. No commercial use
+
+You may not use the Software, or any derivative of it, for a Commercial
+Use without a separate, signed commercial license from the Licensor.
+
+"Commercial Use" means any use intended for or directed toward commercial
+advantage or monetary compensation, including but not limited to:
+selling or reselling the Software or a derivative; sublicensing it;
+offering it, or any part of it, as a paid product or service (including
+SaaS); or using it in the operation of a for-profit business, whether or
+not that business charges for the Software itself.
+
+## 5. No AI / text-and-data-mining use
+
+The Licensor expressly reserves all rights over the Software for the
+purposes of text and data mining, including under Article 4 of Directive
+(EU) 2019/790, to the fullest extent that reservation is recognized by
+applicable law. This reservation is machine-readable via this license
+file and any `ai.txt` or equivalent notice published alongside the
+Software.
+
+You may not use the Software, in whole or in part, as training,
+fine-tuning, evaluation, or retrieval data for any machine learning or
+artificial intelligence model, nor use any such model to reproduce,
+summarize, or derive substantially similar works from the Software,
+without a separate, signed agreement from the Licensor. This restriction
+applies regardless of whether the use would otherwise qualify as
+noncommercial under Section 2.
+
+## 6. Patents
+
+The Licensor grants you a license, under any patent claims the Licensor
+can license, to make, use, sell, and import the Software, in whole or in
+part, strictly to the extent your use of the Software is permitted under
+this license.
+
+## 7. No trademark rights
+
+This license does not grant you any right to use the Licensor's or
+project's trademarks, logos, or names.
+
+## 8. No warranty
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM THE SOFTWARE OR ITS USE.
+
+## 9. Termination
+
+Any breach of Section 3, 4, or 5 terminates the rights granted by this
+license automatically. Reinstatement is at the Licensor's sole
+discretion.
+
+## 10. Prior releases
+
+Versions of Tatu published before 2026-09-24 were released under the GNU
+Affero General Public License v3 (AGPLv3). Rights already granted under
+that license for those specific versions are not revoked by this change;
+this license governs this and all future versions.
