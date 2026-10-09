@@ -4,6 +4,8 @@ import { startLoading, clearLoadingTasks } from "../loading.js";
 import { loadGameDetails, loadAchievements, loadCards } from "./loaders.js";
 import { loadCheats } from "./cheats_view.js";
 import { artworkTabHtml, installArtworkTabHandlers } from "./artwork_tab.js";
+import { gameNativeTabHtml, installGameNativeTab } from "./gamenative_tab.js";
+import { pcTabHtml, installPcTab } from "./pc_tab.js";
 import { detailHeaderShell, detailTabsShell, installDetailTabSwitcher, loadingPlaceholder } from "./detail_template.js";
 
 // Renders the detail view into `#detailContent`. Since #187 that container
@@ -33,12 +35,16 @@ export function renderDetail(gameId) {
     tabs.push({ key: "cheats", label: "Cheats", initialHtml: loadingPlaceholder("Cargando cheats...") });
   }
   tabs.push({ key: "arte", label: "Arte", initialHtml: artworkTabHtml() });
+  tabs.push({ key: "pc", label: "PC", right: true, initialHtml: pcTabHtml() });
+  tabs.push({ key: "gamenative", label: "GameNative", right: true, initialHtml: gameNativeTabHtml() });
 
   document.getElementById("detailContent").innerHTML =
     detailHeaderShell(g.name, `<span>${h} jugadas</span><span id="dpMetaExtra"></span>`) +
     detailTabsShell(tabs);
   installDetailTabSwitcher();
   installArtworkTabHandlers(g.id, g.name);
+  installGameNativeTab("steam", g.id, g.name);
+  installPcTab("steam", g.id);
 
   // Naming the OS window after the game is the point of having a window:
   // on a second monitor the task bar entry has to say which game it is.

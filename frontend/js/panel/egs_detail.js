@@ -3,6 +3,7 @@ import { state } from "../state.js";
 import { esc, formatBytes } from "../utils.js";
 import { openEgsCartridgeModal } from "../modals/egs_cartridge.js";
 import { artworkTabHtml, installArtworkTabHandlers } from "./artwork_tab.js";
+import { pcTabHtml, installPcTab } from "./pc_tab.js";
 import { loadEgsDrm } from "./loaders.js";
 import {
   detailHeaderShell,
@@ -41,10 +42,12 @@ export function renderEgsDetail(game) {
     detailTabsShell([
       { key: "info", label: "Info", initialHtml: infoHtml },
       { key: "arte", label: "Arte", initialHtml: artworkTabHtml() },
+      { key: "pc", label: "PC", right: true, initialHtml: pcTabHtml() },
     ]);
   installDetailTabSwitcher();
   document.getElementById("egsCartridgeBtn").onclick = () => openEgsCartridgeModal(game.id);
   installArtworkTabHandlers(game.id, game.title);
+  installPcTab("egs", game.id);
 
   getCurrentWindow().setTitle(game.title + " — Tatu").catch(() => {});
 

@@ -5,9 +5,10 @@ mod sources;
 mod types;
 mod vendors;
 
-// find_install_path (steam::exe) that this depends on isn't ported to
-// Windows yet — same story as cartridge::format/symlinks. Windows just
-// keeps relying on the network sources alone until that lands.
+// find_install_path is cross-platform now (steam::install), but the probe
+// itself hasn't been exercised on Windows — same story as
+// cartridge::format/symlinks. Windows keeps relying on the network sources
+// alone until it is.
 #[cfg(unix)]
 mod probe;
 

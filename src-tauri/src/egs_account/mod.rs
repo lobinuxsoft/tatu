@@ -219,10 +219,18 @@ const FAB_SANDBOX_NAME: &str = "fab-listing-live";
 
 pub fn fetch_owned_apps(access_token: &str) -> Result<Vec<EgsLibraryEntry>, String> {
     let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
     let mut cursor: Option<String> = None;
     loop {
+        // `includeMetadata=true` is not optional, despite the name: with
+        // `false` Epic omits the whole `responseMetadata` object (confirmed
+        // live, 2026-09-23), so `nextCursor` is never found and the loop
+        // stops after page one — 419 of 1849 records, everything acquired
+        // after Aug 2019 silently missing. `true` adds nothing to
+        // the records themselves (one extra `country` field), it only turns
+        // pagination back on, which is why `legendary` always sends it.
         let mut url =
-            format!("https://{LIBRARY_HOST}/library/api/public/items?includeMetadata=false");
+            format!("https://{LIBRARY_HOST}/library/api/public/items?includeMetadata=true");
         if let Some(c) = &cursor {
             url.push_str(&format!("&cursor={}", urlencoding::encode(c)));
         }
@@ -253,6 +261,13 @@ pub fn fetch_owned_apps(access_token: &str) -> Result<Vec<EgsLibraryEntry>, Stri
                 r.get("appName").and_then(|v| v.as_str()),
                 r.get("catalogItemId").and_then(|v| v.as_str()),
             ) {
+                // The same product can hold several entitlement records (a
+                // re-grant on a later acquisition date, seen live on Civ VI)
+                // — and `derive_app_id` keys off `catalogItemId`, so these
+                // would be two rows sharing one app id.
+                if !seen.insert(catalog_item_id.to_string()) {
+                    continue;
+                }
                 out.push(EgsLibraryEntry {
                     namespace: namespace.to_string(),
                     catalog_item_id: catalog_item_id.to_string(),
@@ -278,7 +293,7 @@ pub fn fetch_owned_apps(access_token: &str) -> Result<Vec<EgsLibraryEntry>, Stri
 /// `catalogItemId`s into one request (the endpoint supports it, but the
 /// caller reports per-game progress the same way GOG's library sync does,
 /// see `commands::egs_cmd::fetch_egs_library`).
-pub fn resolve_details(access_token: &str, entry: &EgsLibraryEntry) -> EgsOwnedGame {
+pub fn resolve_details(access_token: &str, entry: &EgsLibraryEntry) -> Option<EgsOwnedGame> {
     let id = derive_app_id(&entry.catalog_item_id);
     let fallback = || EgsOwnedGame {
         id,
@@ -298,11 +313,15 @@ pub fn resolve_details(access_token: &str, entry: &EgsLibraryEntry) -> EgsOwnedG
         urlencoding::encode(&entry.catalog_item_id),
     );
     let Some(body) = get_json_retrying(&url, access_token) else {
-        return fallback();
+        return Some(fallback());
     };
     let Some(item) = body.get(&entry.catalog_item_id) else {
-        return fallback();
+        return Some(fallback());
     };
+
+    if is_extra_content(item) {
+        return None;
+    }
 
     let title = item
         .get("title")
@@ -347,7 +366,7 @@ pub fn resolve_details(access_token: &str, entry: &EgsLibraryEntry) -> EgsOwnedG
         .into_iter()
         .collect();
 
-    EgsOwnedGame {
+    Some(EgsOwnedGame {
         id,
         namespace: entry.namespace.clone(),
         catalog_item_id: entry.catalog_item_id.clone(),
@@ -357,7 +376,26 @@ pub fn resolve_details(access_token: &str, entry: &EgsLibraryEntry) -> EgsOwnedG
         background_url,
         description,
         developers,
-    }
+    })
+}
+
+/// DLC rides in the same owned-items list as the game it belongs to — Civ VI
+/// alone contributes 12 records (Aztec Pack, Rise and Fall, ...), each its own
+/// entitlement with its own `catalogItemId`. So do store-page freebies:
+/// artbooks, wallpapers, soundtracks. Epic's own `categories` is the sentinel
+/// for both (`addons`, `digitalextras`); a real game carries `games`.
+/// Excluding those two rather than requiring `games` keeps anything Epic
+/// categorises differently (apps, tools) visible instead of silently dropped —
+/// measured live against a real 1849-record account (2026-09-23): 605 games,
+/// 19 add-ons, 6 digital extras, 2 hidden Fortnite content packs.
+fn is_extra_content(item: &serde_json::Value) -> bool {
+    item.get("categories")
+        .and_then(|v| v.as_array())
+        .is_some_and(|cats| {
+            cats.iter()
+                .filter_map(|c| c.get("path").and_then(|v| v.as_str()))
+                .any(|path| path == "addons" || path == "digitalextras")
+        })
 }
 
 /// Retries a GET+JSON-parse up to 3 times before giving up — same
@@ -449,6 +487,29 @@ mod tests {
     #[test]
     fn rejects_malformed_json() {
         assert_eq!(extract_code("{not json"), None);
+    }
+
+    /// Real shapes from a live `bulk/items` response (2026-09-23):
+    /// "Sid Meier's Civilization VI", "Civilization VI : Rise and Fall",
+    /// "DEATH STRANDING DIRECTOR'S CUT - Artbook", "Tyranny - Gold Edition
+    /// Pack" (a real game despite carrying no `games` category).
+    #[test]
+    fn keeps_games_and_drops_addons_and_extras() {
+        let game = serde_json::json!({
+            "categories": [{"path": "public"}, {"path": "games"}, {"path": "applications"}]
+        });
+        let dlc = serde_json::json!({ "categories": [{"path": "addons"}] });
+        let artbook = serde_json::json!({
+            "categories": [{"path": "digitalextras"}, {"path": "applications"}]
+        });
+        let uncategorised = serde_json::json!({
+            "categories": [{"path": "public"}, {"path": "applications"}]
+        });
+        assert!(!is_extra_content(&game));
+        assert!(is_extra_content(&dlc));
+        assert!(is_extra_content(&artbook));
+        assert!(!is_extra_content(&uncategorised));
+        assert!(!is_extra_content(&serde_json::json!({})));
     }
 
     #[test]

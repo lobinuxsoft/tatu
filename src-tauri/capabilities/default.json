@@ -4,7 +4,8 @@
   "description": "Default capability",
   "windows": [
     "main",
-    "detail"
+    "detail",
+    "perf"
   ],
   "permissions": [
     "core:default",

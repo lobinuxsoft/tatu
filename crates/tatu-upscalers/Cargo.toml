@@ -1,0 +1,30 @@
+[package]
+name = "tatu-upscalers"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "What upscalers a PC game ships (DLSS/FSR/XeSS and their versions), and a reversible way to patch its folder: OptiScaler from its pinned, SHA-256 verified release, and DLL swaps. Every file a patch replaces is backed up first; no Tauri dependency."
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"
+ureq = "3"
+# OptiScaler only ships .7z releases. Pure Rust; decompression only (no
+# encoder, no AES) — the release extracts byte-identical to 7-Zip's own.
+sevenz-rust2 = { version = "0.22.2", default-features = false, features = ["util"] }
+# Free space before copying ~200 MB into a game folder — same version and
+# feature src-tauri already uses for the cartridge — and, on Windows, whether
+# the game is running (by process name).
+sysinfo = { version = "0.39.6", default-features = false, features = ["disk", "system"] }
+
+# The GPUs present (SetupAPI): same crate and version src-tauri already uses.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Devices_DeviceAndDriverInstallation",
+] }
+
+[dev-dependencies]
+tempfile = "3"

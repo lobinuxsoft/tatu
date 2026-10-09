@@ -9,8 +9,16 @@ use crate::egs_account::{self, EgsOwnedGame, EgsTokens};
 use crate::egs_download;
 
 /// Delay between per-game catalog lookups during a library sync — same
-/// politeness convention `gog_cmd`'s bulk sync already uses.
-const EGS_TITLE_LOOKUP_DELAY_MS: u64 = 300;
+/// politeness convention `gog_cmd`'s bulk sync already uses, but shorter:
+/// once pagination was fixed a real account turned out to hold ~630 owned
+/// items, not the ~28 the broken first-page-only sync saw, and 300ms each
+/// was over three minutes of pure sleeping on top of the requests.
+///
+/// ponytail: one sequential request per item, ~5 min for a 600-game library.
+/// If that becomes the complaint, skip items already in `egs_library`
+/// (catalog metadata for an owned game never changes) before reaching for
+/// parallel lookups.
+const EGS_TITLE_LOOKUP_DELAY_MS: u64 = 100;
 
 /// An EGS download's own stop signal — same runtime-only (never persisted)
 /// single-slot design `gog_cmd::GogDownloadCancel` uses, for the same
@@ -100,21 +108,25 @@ pub fn fetch_egs_library(
         let total = entries.len();
         let mut games = Vec::with_capacity(total);
         for (i, entry) in entries.into_iter().enumerate() {
+            // `None` is a DLC entitlement, skipped — still counted in the
+            // progress denominator, which is how many lookups this sync
+            // actually has to make.
             let game = egs_account::resolve_details(&access_token, &entry);
             let _ = app.emit(
                 "egs_library_progress",
                 serde_json::json!({ "current": i + 1, "total": total, "game": game }),
             );
-            games.push(game);
+            games.extend(game);
             std::thread::sleep(std::time::Duration::from_millis(EGS_TITLE_LOOKUP_DELAY_MS));
         }
 
+        let resolved = games.len();
         let state: tauri::State<'_, SharedState> = app.state();
         if let Ok(mut s) = state.lock() {
             s.egs_library = games;
             s.save();
         }
-        let _ = app.emit("egs_library_done", serde_json::json!({ "total": total }));
+        let _ = app.emit("egs_library_done", serde_json::json!({ "total": resolved }));
     });
 
     Ok(())

@@ -2,6 +2,8 @@ import { invoke, getCurrentWindow } from "../tauri.js";
 import { esc } from "../utils.js";
 import { openNonSteamCartridgeModal } from "../modals/non_steam_cartridge.js";
 import { artworkTabHtml, installArtworkTabHandlers } from "./artwork_tab.js";
+import { gameNativeTabHtml, installGameNativeTab } from "./gamenative_tab.js";
+import { pcTabHtml, installPcTab } from "./pc_tab.js";
 import {
   detailHeaderShell,
   headerImg,
@@ -33,10 +35,14 @@ export function renderNonSteamDetail(game) {
     detailTabsShell([
       { key: "info", label: "Info", initialHtml: infoHtml },
       { key: "arte", label: "Arte", initialHtml: artworkTabHtml() },
+      { key: "pc", label: "PC", right: true, initialHtml: pcTabHtml() },
+      { key: "gamenative", label: "GameNative", right: true, initialHtml: gameNativeTabHtml() },
     ]);
   installDetailTabSwitcher();
   document.getElementById("nsCartridgeBtn").onclick = () => openNonSteamCartridgeModal(game.id);
   installArtworkTabHandlers(game.id, game.name);
+  installGameNativeTab("non_steam", game.id, game.name);
+  installPcTab("non_steam", game.id);
   installAppIdHandlers(game);
   installInstallRootHandlers(game);
 

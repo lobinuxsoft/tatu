@@ -200,7 +200,7 @@ function wirePrereqBanner(panel, gameId) {
         });
         const sizeMB = (result.size_bytes / (1024 * 1024)).toFixed(1);
         const tag = result.release_tag || "latest";
-        btn.textContent = `✓ Installed ${prereqLabel(kind)} ${esc(tag)} (${sizeMB} MB)`;
+        btn.textContent = `✓ Installed ${prereqLabel(kind)} ${tag} (${sizeMB} MB)`;
         // Re-render so the banner flips to the success state + runtime
         // section un-dims. Brief delay so the user reads the success
         // text on the button before the panel re-renders.

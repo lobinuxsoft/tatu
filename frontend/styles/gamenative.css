@@ -1,0 +1,16 @@
+/* GameNative tab (js/panel/gamenative_*.js) — the "Mejor configuración"
+   view/edit grid; everything else in the tab reuses the modal/cartridge
+   building blocks. */
+.gn-config-name { font-family: var(--font-display); color: var(--accent); font-weight: 700; font-size: 0.95rem; margin-bottom: 0.4rem; }
+.gn-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 0.5rem 0.8rem; margin: 0.4rem 0 0.7rem; }
+.gn-field { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.72rem; color: var(--fg-muted); }
+.gn-field-wide { grid-column: 1 / -1; margin-bottom: 0.5rem; }
+.gn-check { flex-direction: row; align-items: center; gap: 0.4rem; color: var(--fg); font-size: 0.8rem; }
+.gn-value { color: var(--fg); font-size: 0.85rem; word-break: break-word; }
+.gn-input { background: var(--bg-2); color: var(--fg); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 0.35rem 0.5rem; font-size: 0.82rem; font-family: inherit; }
+.gn-input:focus { outline: none; border-color: var(--accent); }
+.gn-notes { min-height: 6rem; resize: vertical; }
+.gn-notes-view { display: flex; flex-direction: column; gap: 0.2rem; white-space: pre-wrap; color: var(--fg); font-size: 0.85rem; margin-bottom: 0.7rem; }
+.gn-wifi { margin-top: 0.7rem; }
+.gn-wifi > summary { cursor: pointer; color: var(--fg-dim); font-size: 0.8rem; margin-bottom: 0.4rem; }
+.gn-notes-view > span { font-size: 0.72rem; color: var(--fg-muted); white-space: normal; }

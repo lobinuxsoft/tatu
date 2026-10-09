@@ -44,3 +44,18 @@ pub fn scan_sizes(state: State<'_, SharedState>) -> Result<Vec<disk::DiskSize>, 
     s.save();
     Ok(result)
 }
+
+/// Which library games (Steam, GOG, Epic) are installed on this machine
+/// right now, for the "Solo instalados" filter — see `installed.rs`. Not
+/// stored anywhere: the frontend asks again every time the filter is turned
+/// on, so an install/uninstall since the last look is always reflected.
+#[tauri::command]
+pub fn installed_games(
+    state: State<'_, SharedState>,
+) -> Result<crate::installed::InstalledGames, String> {
+    let egs_library = {
+        let s = state.lock().map_err(|e| e.to_string())?;
+        s.egs_library.clone()
+    };
+    Ok(crate::installed::scan(&egs_library))
+}
