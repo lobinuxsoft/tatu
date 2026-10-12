@@ -32,6 +32,15 @@
 .detail-tab { font-family: var(--font-display); padding: 0.5rem 1rem; cursor: pointer; color: var(--fg-dim); font-size: 0.78rem; font-weight: 700; text-transform: var(--display-transform); letter-spacing: var(--display-tracking); border-bottom: 2px solid transparent; margin-bottom: -2px; transition: all var(--t-fast); user-select: none; }
 .detail-tab:hover { color: var(--fg-strong); }
 .detail-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.detail-tab-right { margin-left: auto; }
+/* Only the first right-aligned tab takes the free space; the rest sit next to it. */
+.detail-tab-right + .detail-tab-right { margin-left: 0; }
+/* Five tabs don't fit the narrowest window at full padding: tighten, and wrap
+   rather than cut the last one off. */
+@media (max-width: 520px) {
+  .detail-tabs { flex-wrap: wrap; padding: 0 0.5rem; }
+  .detail-tab { padding: 0.5rem 0.45rem; font-size: 0.72rem; }
+}
 .detail-tab-panel { display: none; padding: 1rem; }
 /* Only the visible tab participates in the layout, so it is the one that gets
    the leftover height. `min-height: 0` is what lets a flex child actually

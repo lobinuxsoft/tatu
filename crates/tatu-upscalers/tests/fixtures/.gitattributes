@@ -1,0 +1,2 @@
+# Byte-for-byte copies of release files (CRLF included): no line-ending conversion.
+*.ini -text

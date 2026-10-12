@@ -24,6 +24,12 @@ export const state = {
   // Set of "source:app_id" keys already installed on some currently-plugged
   // cartridge (#270) — populated on demand, not persisted across sessions.
   cartridgeCache: new Set(),
+  // Ids installed on THIS machine right now, per store ("Solo instalados") —
+  // asked from the backend at startup and again every time the filter is
+  // turned on, never persisted.
+  installed: { steam: new Set(), gog: new Set(), egs: new Set() },
+  // One flag for the Steam/GOG/EGS tabs: turned on in one, on in all three.
+  onlyInstalled: false,
   sortMode: "alpha",
   pf: "all",
   panelOpen: false,

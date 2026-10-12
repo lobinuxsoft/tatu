@@ -8,6 +8,8 @@ pub mod cheat_runtime_cmd;
 #[cfg(unix)]
 pub mod cheat_search_cmd;
 
+pub mod android_cmd;
+pub mod android_perf_cmd;
 pub mod artwork_cmd;
 pub mod cartridge_cmd;
 pub mod collection_cmd;
@@ -18,6 +20,7 @@ pub mod egs_cmd;
 pub mod gog_cmd;
 pub mod misc_cmd;
 pub mod non_steam_cmd;
+pub mod pc_cmd;
 pub mod state_cmd;
 pub mod sync_cmd;
 pub mod window_cmd;

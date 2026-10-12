@@ -1,7 +1,7 @@
 import { state, TL, TC } from "../state.js";
 import { esc, formatBytes, gCat } from "../utils.js";
 import { renderDrmInlineBadge } from "../panel/drm_view.js";
-import { buildGameRow, matchesQuery, renderLetterGroupedList } from "./game_list.js";
+import { buildGameRow, matchesQuery, passesInstalled, renderInstalledToggle, renderLetterGroupedList } from "./game_list.js";
 
 export function renderSteam() {
   const content = document.getElementById("content");
@@ -20,6 +20,7 @@ export function renderSteam() {
   const favCount = state.G.filter(g => state.favorites.has(g.id)).length;
   document.getElementById("cFav").textContent = "(" + favCount + ")";
   document.getElementById("tabSteamCount").textContent = "(" + state.G.length + ")";
+  renderInstalledToggle("steam", state.G);
 
   document.querySelectorAll("#sortRow .sbtn").forEach(b => b.classList.toggle("active", b.dataset.sort === state.sortMode));
 
@@ -33,6 +34,7 @@ export function renderSteam() {
     if (state.sf === "pending" && chk) return;
     if (state.sf === "unplayed" && (g.hours > 0 || chk)) return;
     if (state.sf === "favorites" && !state.favorites.has(g.id)) return;
+    if (!passesInstalled("steam", g.id)) return;
     if (state.pf !== "all") {
       const info = state.drmCache[g.id];
       const k = info && info.preservability ? info.preservability.kind : "unknown";

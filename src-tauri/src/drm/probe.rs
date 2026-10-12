@@ -5,7 +5,7 @@ use goblin::pe::PE;
 
 use super::hints::preservability_hint;
 use super::types::{DrmInfo, DrmStatus, Preservability};
-use crate::steam::exe::find_install_path;
+use crate::steam::find_install_path;
 
 /// When PCGamingWiki and Steam Store both come back inconclusive, inspect
 /// the game's own installed files for concrete signals instead of leaving

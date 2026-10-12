@@ -38,8 +38,17 @@ pub struct DetailTarget(pub Mutex<Option<DetailTargetValue>>);
 
 /// Open the detail window on `app_id` from `source`, or retarget and focus
 /// it if it is already open.
+///
+/// `async` is load-bearing: on Windows, building a webview window from a
+/// synchronous command deadlocks (documented on `WebviewWindowBuilder::new`,
+/// WebView2 needs the main thread the sync command is blocking) — the
+/// window appeared blank and "No responde" forever.
 #[tauri::command]
-pub fn open_detail_window(app: AppHandle, app_id: u64, source: DetailSource) -> Result<(), String> {
+pub async fn open_detail_window(
+    app: AppHandle,
+    app_id: u64,
+    source: DetailSource,
+) -> Result<(), String> {
     let target = DetailTargetValue { app_id, source };
     *app.state::<DetailTarget>().0.lock().unwrap() = Some(target);
 

@@ -12,11 +12,13 @@ import { closeCartridgeModal } from "./js/modals/cartridge.js";
 import { closeGogCartridgeModal } from "./js/modals/gog_cartridge.js";
 import { closeEgsCartridgeModal } from "./js/modals/egs_cartridge.js";
 import { closeNonSteamCartridgeModal } from "./js/modals/non_steam_cartridge.js";
+import { installModalA11y } from "./js/modals/a11y.js";
 
 initTheme();
 installExternalLinks();
 installLightbox();
 installCardTilt();
+installModalA11y();
 
 // Steam's install (trigger-and-poll through Steam itself) and GOG's
 // (Tatu downloads the bytes, #243) are different enough flows to need

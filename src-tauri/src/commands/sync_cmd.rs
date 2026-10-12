@@ -21,8 +21,8 @@ pub fn sync_steam(state: State<'_, SharedState>) -> Result<Vec<Game>, String> {
 
 #[tauri::command]
 pub fn sync_nonsteam(state: State<'_, SharedState>) -> Result<Vec<NonSteamGame>, String> {
-    let mut games = shortcuts::parse_shortcuts()?;
     let mut s = state.lock().map_err(|e| e.to_string())?;
+    let mut games = shortcuts::parse_shortcuts(&s.steam_id)?;
     // `steam_app_id`/`install_root_override` (#328/#236) have no home in
     // `shortcuts.vdf` — a fresh parse would otherwise wipe out whatever the
     // user already corrected in the detail window. Carried over by

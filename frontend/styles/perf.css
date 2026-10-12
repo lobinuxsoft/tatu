@@ -1,0 +1,72 @@
+/* Performance window (perf.html, js/perf/*).
+   Series colors: the validated dark categorical palette (dataviz reference,
+   slots 1–4), checked against every theme's panel surface — all four tatu
+   themes are dark, and all pass (lightness band, chroma, CVD ΔE ≥ 8,
+   normal-vision ≥ 15, contrast ≥ 3:1). 2+ series always get a legend, so
+   identity is never color-alone. */
+:root {
+  --viz-1: #3987e5;
+  --viz-2: #d95926;
+  --viz-3: #199e70;
+  --viz-4: #c98500;
+}
+.perf-window { padding: 1rem 1.2rem; }
+.perf-header { margin-bottom: 0.4rem; }
+.perf-toolbar { display: flex; align-items: center; gap: 0.8rem; margin-bottom: 0.5rem; }
+.perf-rec { color: var(--danger); font-size: 0.8rem; font-weight: 600; }
+.perf-clock { color: var(--fg-dim); font-size: 0.85rem; font-variant-numeric: tabular-nums; }
+.perf-status { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.8rem; }
+.perf-pill { font-size: 0.72rem; padding: 0.15rem 0.5rem; border-radius: var(--r-sm); background: var(--bg-2); color: var(--fg-dim); }
+.perf-pill-ok { color: var(--fg); }
+.perf-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 0.6rem; margin-bottom: 0.9rem; }
+.perf-tile { background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--r); padding: 0.55rem 0.7rem; }
+.perf-tile-label { font-size: 0.7rem; color: var(--fg-muted); }
+.perf-tile-value { font-size: 1.35rem; font-weight: 600; color: var(--fg); line-height: 1.3; }
+.perf-tile-sub { font-size: 0.68rem; color: var(--fg-dim); }
+.perf-charts { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 0.8rem; margin-bottom: 0.8rem; }
+.perf-chart { position: relative; background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--r); padding: 0.55rem 0.7rem 0.3rem; margin-bottom: 0.8rem; }
+.perf-charts .perf-chart { margin-bottom: 0; }
+.perf-chart-title { font-size: 0.78rem; font-weight: 600; color: var(--fg); }
+.perf-chart-unit { color: var(--fg-muted); font-weight: 400; }
+.perf-chart svg { display: block; width: 100%; height: 180px; outline: none; }
+.perf-chart svg:focus-visible { box-shadow: 0 0 0 1px var(--accent); border-radius: var(--r-sm); }
+.perf-legend { display: flex; flex-wrap: wrap; gap: 0.3rem 0.9rem; font-size: 0.7rem; color: var(--fg-dim); margin: 0.2rem 0; }
+.perf-key { display: inline-block; width: 14px; height: 2px; border-radius: 1px; vertical-align: middle; margin-right: 0.3rem; }
+.perf-grid line { stroke: var(--border); stroke-width: 1; shape-rendering: crispEdges; }
+.perf-axis text { fill: var(--fg-muted); font-size: 10px; font-variant-numeric: tabular-nums; }
+.perf-line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.perf-dot { stroke: var(--bg-panel); stroke-width: 2; }
+.perf-cross { stroke: var(--fg-muted); stroke-width: 1; }
+.perf-tip { position: absolute; z-index: 5; pointer-events: none; background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 0.35rem 0.55rem; font-size: 0.72rem; color: var(--fg-dim); white-space: nowrap; }
+.perf-tip-time { color: var(--fg-muted); margin-bottom: 0.15rem; }
+.perf-tip-row { display: flex; align-items: center; gap: 0.35rem; }
+.perf-tip-row b { color: var(--fg); font-variant-numeric: tabular-nums; }
+.perf-tip-row .perf-key { margin-right: 0; }
+.perf-empty { color: var(--fg-muted); font-size: 0.78rem; padding: 2.5rem 0; text-align: center; }
+.perf-details { margin: 0.6rem 0; }
+.perf-details > summary { cursor: pointer; color: var(--fg-dim); font-size: 0.78rem; }
+.perf-raw { max-height: 22rem; overflow: auto; background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 0.5rem; font-size: 0.7rem; color: var(--fg-dim); white-space: pre-wrap; }
+.perf-table-wrap { overflow-x: auto; margin-bottom: 0.8rem; }
+.perf-table { width: 100%; border-collapse: collapse; font-size: 0.76rem; color: var(--fg); }
+.perf-table th, .perf-table td { padding: 0.3rem 0.55rem; border-bottom: 1px solid var(--border); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.perf-table th { color: var(--fg-muted); font-weight: 600; }
+.perf-table th:first-child, .perf-table td:first-child { text-align: left; }
+.perf-sessions td:nth-child(3), .perf-sessions td:nth-child(4), .perf-sessions td:nth-child(5) { text-align: left; white-space: normal; }
+.perf-diffs td { text-align: left; white-space: normal; }
+.perf-best { font-weight: 700; }
+.perf-diff { background: var(--bg-2); }
+.perf-actions { display: flex; gap: 0.3rem; justify-content: flex-end; }
+.perf-view { margin-top: 0.6rem; }
+.perf-view-head { font-size: 0.85rem; color: var(--fg); margin-bottom: 0.6rem; }
+.perf-config, .perf-edit { background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--r); padding: 0.7rem 0.8rem; margin-bottom: 0.8rem; }
+.perf-insight { background: var(--bg-panel); border: 1px solid var(--border); border-left-width: 3px; border-radius: var(--r); padding: 0.55rem 0.75rem; margin-bottom: 0.6rem; font-size: 0.8rem; color: var(--fg); }
+.perf-insight-good { border-left-color: var(--success); }
+.perf-insight-warn { border-left-color: var(--warning); }
+.perf-insight-info { border-left-color: var(--fg-muted); }
+.perf-insight-title { font-weight: 600; margin-bottom: 0.15rem; }
+.perf-insight-evidence { color: var(--fg-dim); margin-bottom: 0.3rem; }
+.perf-insight ul { margin: 0; padding-left: 1.2rem; }
+.perf-insight li { margin: 0.15rem 0; }
+.perf-effects { margin-bottom: 0.8rem; }
+.perf-effect { background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--r); padding: 0.5rem 0.75rem; margin-bottom: 0.5rem; font-size: 0.78rem; color: var(--fg-dim); }
+.perf-effect b { color: var(--fg); }

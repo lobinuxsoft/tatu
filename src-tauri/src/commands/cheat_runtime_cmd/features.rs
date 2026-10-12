@@ -11,7 +11,7 @@ use tauri::State;
 
 use super::{ActiveCheats, purge_stale_cheats};
 use crate::steam::detect_game_exe;
-use crate::steam::exe::find_install_path;
+use crate::steam::find_install_path;
 
 #[derive(Debug, Serialize)]
 pub struct FeatureView {

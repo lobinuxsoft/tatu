@@ -249,3 +249,27 @@ fn round_trips_real_localconfig() {
     assert!(edited.len() > src.len());
     assert!(edited.contains(&src[src.len() - 50..]));
 }
+
+#[test]
+fn read_compat_tool_prefers_the_app_then_the_global_default() {
+    let config = sample_config();
+    assert_eq!(
+        read_compat_tool(&config, "570").unwrap().as_deref(),
+        Some("proton_9")
+    );
+    assert_eq!(read_compat_tool(&config, "3017860").unwrap(), None);
+    let with_default = set_compat_tool(&config, "0", "GE-Proton10-4").unwrap();
+    assert_eq!(
+        read_compat_tool(&with_default, "3017860")
+            .unwrap()
+            .as_deref(),
+        Some("GE-Proton10-4")
+    );
+    assert_eq!(
+        read_compat_tool(&with_default, "570").unwrap().as_deref(),
+        Some("proton_9")
+    );
+    // A config.vdf without any mapping at all just means Steam's default.
+    let bare = "\"InstallConfigStore\"\n{\n}\n";
+    assert_eq!(read_compat_tool(bare, "570").unwrap(), None);
+}

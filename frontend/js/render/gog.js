@@ -1,6 +1,6 @@
 import { state } from "../state.js";
 import { esc } from "../utils.js";
-import { buildGameRow, matchesQuery, renderLetterGroupedList } from "./game_list.js";
+import { buildGameRow, matchesQuery, passesInstalled, renderInstalledToggle, renderLetterGroupedList } from "./game_list.js";
 
 const EMPTY_HTML = '<div class="empty-state">Conectá tu cuenta de GOG en <strong>Settings</strong> y dale a "Actualizar biblioteca".</div>';
 const NO_MATCH_HTML = '<div class="loading" style="color:#8b949e">No hay juegos con estos filtros.</div>';
@@ -11,8 +11,10 @@ const NO_MATCH_HTML = '<div class="loading" style="color:#8b949e">No hay juegos 
 export function renderGog() {
   document.getElementById("tabGogCount").textContent = "(" + state.GOG.length + ")";
 
+  renderInstalledToggle("gog", state.GOG);
+
   const q = state.gogQ;
-  const filtered = state.GOG.filter(g => !q || matchesQuery(g, q));
+  const filtered = state.GOG.filter(g => (!q || matchesQuery(g, q)) && passesInstalled("gog", g.id));
 
   let comp = 0;
   const items = filtered.map(g => {

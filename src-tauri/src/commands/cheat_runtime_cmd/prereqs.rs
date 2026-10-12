@@ -12,7 +12,7 @@ use cheat_runtime::{Prereq, PrereqStatus, detect_reframework, load_manifests_for
 use serde::Serialize;
 
 use crate::prereqs::{install_mono_collector, install_reframework};
-use crate::steam::exe::find_install_path;
+use crate::steam::find_install_path;
 use crate::steam::{LaunchOptOutcome, detect_game_exe, set_winhttp_override};
 
 #[derive(Debug, Serialize)]

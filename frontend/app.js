@@ -6,7 +6,8 @@ import { renderGog } from "./js/render/gog.js";
 import { renderEgs } from "./js/render/egs.js";
 import { installExternalLinks } from "./js/links.js";
 import { openImportModal, closeImportModal } from "./js/modals/import.js";
-import { doSync, doSyncNonSteam, doScanSizes, doFetchAllDrm, doFetchAllDetails, doFetchGogLibrary, doFetchEgsLibrary, doFetchAllEgsDrm, doScanCartridges } from "./js/actions.js";
+import { installModalA11y } from "./js/modals/a11y.js";
+import { doSync, doSyncNonSteam, doScanSizes, doFetchAllDrm, doFetchAllDetails, doFetchGogLibrary, doFetchEgsLibrary, doFetchAllEgsDrm, doScanCartridges, refreshInstalled } from "./js/actions.js";
 import { loadSettingsUI, checkConfigWarning, installSettingsHandlers } from "./js/settings.js";
 import { initTheme, installThemeSwitcher } from "./js/themes.js";
 import { openCartridgeManagePanel } from "./js/panel/cartridge_manage.js";
@@ -39,6 +40,7 @@ async function init() {
     state.EGS = data.egs_library || [];
     state.completedEgs = new Set(data.completed_egs || []);
     state.egsDrmCache = data.egs_drm_cache || {};
+    await refreshInstalled();
 
     loadSettingsUI(
       data.steam_api_key, data.steam_id, data.steamgriddb_api_key,
@@ -150,6 +152,18 @@ document.getElementById("presRow").addEventListener("click", e => {
   document.querySelectorAll("#presRow .pbtn").forEach(x => x.classList.remove("active"));
   b.classList.add("active"); state.pf = b.dataset.p; renderSteam();
 });
+
+// "Solo instalados": one flag for the Steam/GOG/EGS tabs. Asks the backend
+// again every time it's turned on, so an install or uninstall done since
+// startup is never missed.
+document.querySelectorAll(".inst-row").forEach(row => row.addEventListener("click", async e => {
+  if (!e.target.closest(".sbtn")) return;
+  state.onlyInstalled = !state.onlyInstalled;
+  if (state.onlyInstalled) await refreshInstalled();
+  renderSteam();
+  renderGog();
+  renderEgs();
+}));
 
 // --- Completed checkboxes ---
 document.addEventListener("change", async e => {
@@ -284,6 +298,7 @@ listen("library-updated", async () => {
 installSettingsHandlers();
 installThemeSwitcher();
 installExternalLinks();
+installModalA11y();
 
 getVersion().then(v => { document.getElementById("appVersion").textContent = "v" + v; });
 init();
