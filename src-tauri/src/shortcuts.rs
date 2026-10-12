@@ -86,8 +86,10 @@ impl ArtworkSelection {
 }
 
 /// Parse Steam's binary shortcuts.vdf to extract non-Steam game entries.
-pub fn parse_shortcuts() -> Result<Vec<NonSteamGame>, String> {
-    let path = shortcuts_path().ok_or("Could not find shortcuts.vdf")?;
+/// `steam_id` (SteamID64, empty if not configured) picks whose shortcuts —
+/// see `shortcuts_path`.
+pub fn parse_shortcuts(steam_id: &str) -> Result<Vec<NonSteamGame>, String> {
+    let path = shortcuts_path(steam_id).ok_or("Could not find shortcuts.vdf")?;
     let data = std::fs::read(&path).map_err(|e| format!("Failed to read shortcuts.vdf: {e}"))?;
 
     let mut games = Vec::new();
@@ -153,25 +155,46 @@ fn unquote(s: String) -> String {
         .unwrap_or(s)
 }
 
-fn shortcuts_path() -> Option<PathBuf> {
+fn shortcuts_path(steam_id: &str) -> Option<PathBuf> {
     // Was hardcoded to ~/.local/share/Steam; going through the shared
     // resolver is what makes non-Steam shortcuts work on Windows and on the
     // ~/.steam/steam layout alike.
-    let steam_dir = crate::steam::steam_install_dir()?.join("userdata");
-    if !steam_dir.exists() {
-        return None;
-    }
+    let userdata = crate::steam::steam_install_dir()?.join("userdata");
 
-    // Find first user directory containing shortcuts.vdf.
-    if let Ok(entries) = std::fs::read_dir(&steam_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path().join("config/shortcuts.vdf");
-            if path.exists() {
-                return Some(path);
-            }
+    // `userdata/<account id>` belongs to one Steam account each. Taking the
+    // first folder `read_dir` returned used to decide whose shortcuts Tatu
+    // showed — live feedback: an old account's empty shortcuts.vdf
+    // (`1930431060` sorts before `49007254`) hid every real one. The account
+    // Tatu tracks wins; the one logged in most recently if none is set yet.
+    let steam_id = if steam_id.is_empty() {
+        crate::steam::detect_steam_id().unwrap_or_default()
+    } else {
+        steam_id.to_string()
+    };
+    if let Some(account) = account_id(&steam_id) {
+        let path = userdata
+            .join(account.to_string())
+            .join("config/shortcuts.vdf");
+        if path.exists() {
+            return Some(path);
         }
     }
-    None
+
+    // Unknown account (or it has no shortcuts file): the most recently
+    // written one is the account actually being used.
+    std::fs::read_dir(&userdata)
+        .ok()?
+        .flatten()
+        .map(|entry| entry.path().join("config/shortcuts.vdf"))
+        .filter_map(|path| Some((path.metadata().ok()?.modified().ok()?, path)))
+        .max_by_key(|(modified, _)| *modified)
+        .map(|(_, path)| path)
+}
+
+/// A SteamID64's low 32 bits — the account id Steam names `userdata/`
+/// folders after.
+fn account_id(steam_id: &str) -> Option<u64> {
+    steam_id.parse::<u64>().ok().map(|id| id & 0xFFFF_FFFF)
 }
 
 /// Read a null-terminated C string starting at `pos`.
@@ -233,6 +256,12 @@ mod tests {
     #[test]
     fn unquote_leaves_an_unquoted_path_alone() {
         assert_eq!(unquote("/home/x/game.exe".to_string()), "/home/x/game.exe");
+    }
+
+    #[test]
+    fn account_id_is_the_userdata_folder_name() {
+        assert_eq!(account_id("76561198009272982"), Some(49007254));
+        assert_eq!(account_id(""), None);
     }
 
     #[test]

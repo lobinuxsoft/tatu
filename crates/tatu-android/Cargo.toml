@@ -1,0 +1,18 @@
+[package]
+name = "tatu-android"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Sends a locally installed game folder to an Android device over the user's own adb binary (no protocol reimplementation), staged and SHA-256 verified before it appears under its final name. Ported from GameNativeTool's adb-transport; no Tauri dependency."
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+sha2 = "0.10"
+thiserror = "2"
+# `platform_tools::download` — same majors ce-launcher already uses for its
+# own download-and-extract, so no second copy lands in the dep tree.
+ureq = "3"
+zip = "8"
+
+[dev-dependencies]
+tempfile = "3"

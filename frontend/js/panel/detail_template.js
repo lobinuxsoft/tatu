@@ -64,10 +64,12 @@ export function loadingPlaceholder(text) {
 // tabs included — needs to be one template, not just the header). Steam
 // passes 2-4 tabs (Info always, Logros/Cromos/Cheats when the game has
 // that data); GOG passes just Info — the switcher below works the same
-// either way, including the degenerate one-tab case.
+// either way, including the degenerate one-tab case. `right: true` pushes a
+// tab to the far end of the bar — for tabs that aren't about the game's own
+// data (GameNative), so they read as a different kind of thing.
 export function detailTabsShell(tabs) {
   const tabsHtml = tabs
-    .map((t, i) => `<div class="detail-tab${i === 0 ? " active" : ""}" data-dp="${t.key}">${esc(t.label)}</div>`)
+    .map((t, i) => `<div class="detail-tab${i === 0 ? " active" : ""}${t.right ? " detail-tab-right" : ""}" data-dp="${t.key}">${esc(t.label)}</div>`)
     .join("");
   const panelsHtml = tabs
     .map((t, i) => `<div class="detail-tab-panel${i === 0 ? " active" : ""}" id="${panelId(t.key)}">${t.initialHtml || ""}</div>`)

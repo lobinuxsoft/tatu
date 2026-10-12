@@ -275,3 +275,13 @@ export async function doFetchAllEgsDrm() {
     unlisten(); unlistenDone();
   }
 }
+
+// What's installed on this machine right now, per store, for "Solo
+// instalados". A failure just keeps the last answer — the filter still works
+// with whatever was known.
+export async function refreshInstalled() {
+  try {
+    const found = await invoke("installed_games");
+    state.installed = { steam: new Set(found.steam), gog: new Set(found.gog), egs: new Set(found.egs) };
+  } catch (_) {}
+}

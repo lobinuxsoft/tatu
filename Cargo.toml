@@ -7,4 +7,6 @@ members = [
     "crates/cheat-mono-collector",
     "crates/tatu-engine",
     "crates/tatu-mem",
+    "crates/tatu-android",
+    "crates/tatu-upscalers",
 ]

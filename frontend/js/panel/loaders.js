@@ -80,7 +80,8 @@ export async function loadGameDetails(gameId) {
         tab.className = "detail-tab";
         tab.dataset.dp = "cromos";
         tab.textContent = "Cromos";
-        tabsEl.appendChild(tab);
+        // Before any right-aligned tab (GameNative), not after it.
+        tabsEl.insertBefore(tab, tabsEl.querySelector(".detail-tab-right"));
       }
       const panel = document.createElement("div");
       panel.className = "detail-tab-panel";

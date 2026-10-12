@@ -1,5 +1,5 @@
 import { esc, gLetter } from "../utils.js";
-import { AL } from "../state.js";
+import { AL, state } from "../state.js";
 
 // The real list-rendering engine — extracted out of what used to be
 // Steam-only code (render/steam.js) so a second data source (GOG) uses the
@@ -77,4 +77,20 @@ export function renderLetterGroupedList({ items, buildRowHtml, contentEl, navEl,
   if (Object.keys(groups).length === 0 && emptyHtml) {
     contentEl.innerHTML = emptyHtml;
   }
+}
+
+// "Solo instalados" — one flag shared by the Steam/GOG/EGS tabs, one
+// `state.installed[source]` id set per store (filled by `refreshInstalled`).
+export function passesInstalled(source, id) {
+  return !state.onlyInstalled || state.installed[source].has(id);
+}
+
+// The toggle's on-state plus how many of `games` are installed — called by
+// each tab's renderer. Missing in the detail window, which has no list.
+export function renderInstalledToggle(source, games) {
+  const btn = document.querySelector(`.sbtn[data-inst="${source}"]`);
+  if (!btn) return;
+  btn.classList.toggle("active", state.onlyInstalled);
+  const n = games.filter(g => state.installed[source].has(g.id)).length;
+  btn.querySelector(".cnt").textContent = "(" + n + ")";
 }

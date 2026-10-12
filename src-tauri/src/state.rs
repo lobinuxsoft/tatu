@@ -5,12 +5,14 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::achievements::GameAchievements;
+use crate::android::AndroidState;
 use crate::disk::DiskSize;
 use crate::drm::DrmInfo;
 use crate::egs_account::EgsTokens;
 use crate::gog_account::GogTokens;
 use crate::hltb::HltbResult;
 use crate::inventory::GameCards;
+use crate::pc::PcState;
 use crate::shortcuts::{ArtworkSelection, NonSteamGame};
 use crate::steam::Game;
 
@@ -98,6 +100,14 @@ pub struct AppState {
     /// separate times over.
     #[serde(default)]
     pub artwork: HashMap<u64, ArtworkSelection>,
+    /// The GameNative tab's data: adb path, last send destination, and each
+    /// game's saved best configuration (`android::AndroidState`).
+    #[serde(default)]
+    pub android: AndroidState,
+    /// The PC tab's data: folder corrections and the Steam launch options
+    /// Tatu changed for OptiScaler (`pc::PcState`).
+    #[serde(default)]
+    pub pc: PcState,
 }
 
 impl AppState {

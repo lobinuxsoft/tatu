@@ -1,6 +1,6 @@
 import { state } from "../state.js";
 import { esc } from "../utils.js";
-import { buildGameRow, matchesQuery, renderLetterGroupedList } from "./game_list.js";
+import { buildGameRow, matchesQuery, passesInstalled, renderInstalledToggle, renderLetterGroupedList } from "./game_list.js";
 import { renderDrmInlineBadge } from "../panel/drm_view.js";
 
 const EMPTY_HTML = '<div class="empty-state">Conectá tu cuenta de Epic Games en <strong>Settings</strong> y dale a "Actualizar biblioteca".</div>';
@@ -11,8 +11,10 @@ const NO_MATCH_HTML = '<div class="loading" style="color:#8b949e">No hay juegos 
 export function renderEgs() {
   document.getElementById("tabEgsCount").textContent = "(" + state.EGS.length + ")";
 
+  renderInstalledToggle("egs", state.EGS);
+
   const q = state.egsQ;
-  const filtered = state.EGS.filter(g => !q || matchesQuery(g, q));
+  const filtered = state.EGS.filter(g => (!q || matchesQuery(g, q)) && passesInstalled("egs", g.id));
 
   let comp = 0;
   const items = filtered.map(g => {

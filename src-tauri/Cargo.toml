@@ -51,6 +51,14 @@ flate2 = "1.1.10"
 # dependency tree transitively via tauri/plist, pinned directly here rather
 # than duplicating a base64 encoder by hand.
 base64 = "0.22"
+# "Enviar a Android": copies a locally installed game to a phone running
+# GameNative over the user's own adb, staged + SHA-256 verified. Its own
+# crate so the whole Android side stays out of the tracker's modules.
+tatu-android = { path = "../crates/tatu-android" }
+# The PC tab: which upscalers a game ships, OptiScaler from its pinned
+# release, DLSS swaps — every game file a patch replaces backed up inside the
+# game folder so it reverts. Its own crate, same split as tatu-android.
+tatu-upscalers = { path = "../crates/tatu-upscalers" }
 
 # The cheat runtime is the Linux ptrace backend (nix, /proc, ELF symbols).
 # Windows gets the tracker only until tatu-win lands (#181); gating the deps

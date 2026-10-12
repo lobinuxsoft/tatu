@@ -1,4 +1,7 @@
 mod achievements;
+mod android;
+mod android_perf;
+mod android_perf_insights;
 mod cartridge;
 mod commands;
 mod disk;
@@ -8,7 +11,9 @@ mod egs_download;
 mod gog_account;
 mod gog_download;
 mod hltb;
+mod installed;
 mod inventory;
+mod pc;
 mod shortcuts;
 mod state;
 mod steam;
@@ -28,7 +33,7 @@ use cheat_runtime::FreezeRegistry;
 use commands::cheat_runtime_cmd::{ActiveCheats, FrameworkActor};
 
 use state::AppState;
-use tauri::WebviewWindowBuilder;
+use tauri::{Manager, WebviewWindowBuilder};
 use tauri_plugin_opener::OpenerExt;
 
 pub type SharedState = Mutex<AppState>;
@@ -82,6 +87,7 @@ macro_rules! tracker_handler {
             commands::collection_cmd::list_steam_collections,
             commands::collection_cmd::import_completed_from_collection,
             commands::disk_cmd::scan_sizes,
+            commands::disk_cmd::installed_games,
             commands::cartridge_cmd::list_removable_drives,
             commands::cartridge_cmd::has_cartridge_structure,
             commands::cartridge_cmd::is_registered_library,
@@ -126,6 +132,43 @@ macro_rules! tracker_handler {
             commands::misc_cmd::state_path,
             commands::window_cmd::open_detail_window,
             commands::window_cmd::detail_target,
+            commands::android_cmd::android_game_folder,
+            commands::android_cmd::android_list_devices,
+            commands::android_cmd::android_set_adb_path,
+            commands::android_cmd::android_download_adb,
+            commands::android_cmd::android_send_game,
+            commands::android_cmd::android_cancel_send,
+            commands::android_cmd::gamenative_get_config,
+            commands::android_cmd::gamenative_save_config,
+            commands::pc_cmd::pc_detect,
+            commands::pc_cmd::pc_set_target_dir,
+            commands::pc_cmd::pc_pick_dll,
+            commands::pc_cmd::pc_patch_revert,
+            commands::pc_cmd::pc_patch_keep_current,
+            commands::pc_cmd::pc_launch_sync,
+            commands::pc_cmd::pc_set_proton_upgrade,
+            commands::pc_cmd::optiscaler_prepare,
+            commands::pc_cmd::pc_cancel_download,
+            commands::pc_cmd::optiscaler_custom_options,
+            commands::pc_cmd::optiscaler_install,
+            commands::pc_cmd::optiscaler_revert,
+            commands::pc_cmd::dlss_swap,
+            commands::pc_cmd::runtime_update,
+            commands::pc_cmd::optiscaler_settings,
+            commands::pc_cmd::optiscaler_save_settings,
+            commands::android_cmd::android_pair,
+            commands::android_cmd::android_connect,
+            commands::android_perf_cmd::open_perf_window,
+            commands::android_perf_cmd::perf_target,
+            commands::android_perf_cmd::perf_is_recording,
+            commands::android_perf_cmd::perf_start,
+            commands::android_perf_cmd::perf_stop,
+            commands::android_perf_cmd::perf_probe,
+            commands::android_perf_cmd::perf_list,
+            commands::android_perf_cmd::perf_load,
+            commands::android_perf_cmd::perf_insights,
+            commands::android_perf_cmd::perf_update,
+            commands::android_perf_cmd::perf_delete,
             $($extra),*
         ]
     };
@@ -140,7 +183,12 @@ pub fn run() {
         .manage(Mutex::new(app_state))
         .manage(commands::window_cmd::DetailTarget::default())
         .manage(commands::gog_cmd::GogDownloadCancel::default())
-        .manage(commands::egs_cmd::EgsDownloadCancel::default());
+        .manage(commands::egs_cmd::EgsDownloadCancel::default())
+        .manage(commands::android_cmd::AndroidSendCancel::default())
+        .manage(std::sync::Arc::new(commands::pc_cmd::Downloads::default()))
+        .manage(commands::pc_cmd::PcBusy::default())
+        .manage(commands::android_perf_cmd::PerfTarget::default())
+        .manage(commands::android_perf_cmd::PerfRecorder::default());
 
     #[cfg(unix)]
     let builder = {
@@ -204,6 +252,17 @@ pub fn run() {
     let builder = builder.invoke_handler(tracker_handler![]);
 
     builder
+        // Closing the performance window stops its recording: nothing else
+        // would ever stop that sampler thread (the session still gets saved).
+        .on_window_event(|window, event| {
+            if window.label() == commands::android_perf_cmd::PERF_LABEL
+                && matches!(event, tauri::WindowEvent::Destroyed)
+            {
+                window
+                    .state::<commands::android_perf_cmd::PerfRecorder>()
+                    .stop();
+            }
+        })
         .setup(|app| {
             // The window is declared with `"create": false` in tauri.conf.json so
             // it can be built here with a navigation guard attached. Without it a

@@ -19,7 +19,7 @@ use tauri::State;
 use super::{ActiveCheatEntry, ActiveCheats, FrameworkActor, purge_stale_cheats};
 use crate::state::AppState;
 use crate::steam::detect_game_exe;
-use crate::steam::exe::find_install_path;
+use crate::steam::find_install_path;
 
 /// A `{$lua}` framework cheat resolved from a manifest: where it lives and what
 /// to run.

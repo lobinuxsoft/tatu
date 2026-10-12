@@ -128,6 +128,30 @@ pub fn set_compat_tool(src: &str, app_id: &str, tool_name: &str) -> Result<Strin
     }
 }
 
+/// The Steam Play tool `app_id` runs with, from `config.vdf`'s
+/// `CompatToolMapping`: its own forced one, else the global default (`"0"`).
+/// `None` when neither names one — Steam's own default then.
+pub fn read_compat_tool(src: &str, app_id: &str) -> Result<Option<String>, VdfError> {
+    let toks = tokenize(src)?;
+    let mapping = match navigate(&toks, src, COMPAT_TOOL_MAPPING_PATH) {
+        Ok(mapping) => mapping,
+        Err(VdfError::PathNotFound(_)) => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    let mapping_inner = brace_token_range(&toks, &mapping);
+    for key in [app_id, "0"] {
+        if let Some(block) = find_block(&toks, src, mapping_inner.clone(), key) {
+            let inner = brace_token_range(&toks, &block);
+            if let Some(name) = find_value(&toks, src, inner, "name").map(|v| unescape(&src[v]))
+                && !name.is_empty()
+            {
+                return Ok(Some(name));
+            }
+        }
+    }
+    Ok(None)
+}
+
 /// Like [`find_block`], but also returns the byte offset where the matching
 /// key's OPENING quote starts — needed to replace a `"key" { ... }` pair
 /// wholesale rather than just the block's insides.

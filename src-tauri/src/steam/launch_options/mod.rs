@@ -9,6 +9,14 @@
 mod override_merge;
 mod vdf;
 
+pub use override_merge::{
+    AddOverride, add_override, get_env, override_mode, remove_override, set_env,
+};
+
+/// Every read-modify-write of `localconfig.vdf`: two edits at once (two games,
+/// or a game and the Mono collector) would otherwise lose one of them.
+static EDIT: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -54,11 +62,12 @@ pub struct LaunchOptOutcome {
 /// into whatever the user already had. No-op (with `changed: false`) if the
 /// override is already present. Fails if Steam is running.
 pub fn set_winhttp_override(app_id: &str) -> Result<LaunchOptOutcome, LaunchOptError> {
+    let _edit = EDIT.lock().unwrap_or_else(|e| e.into_inner());
     if is_steam_running() {
         return Err(LaunchOptError::SteamRunning);
     }
 
-    let path = localconfig_path()?;
+    let path = localconfig_path(current_account()?)?;
     let src = fs::read_to_string(&path).map_err(|source| LaunchOptError::Io {
         path: path.clone(),
         source,
@@ -85,6 +94,57 @@ pub fn set_winhttp_override(app_id: &str) -> Result<LaunchOptOutcome, LaunchOptE
         new_value,
         config_path: path_str,
     })
+}
+
+/// The account whose launch options Steam uses next — the one logged in
+/// most recently — as the 32-bit id that names its `userdata/` folder.
+pub fn current_account() -> Result<u64, LaunchOptError> {
+    detect_steam_id()
+        .and_then(|s| s.parse::<u64>().ok())
+        .and_then(|id64| id64.checked_sub(STEAMID64_BASE))
+        .ok_or(LaunchOptError::SteamIdNotFound)
+}
+
+/// `app_id`'s launch options on `account` as they are now (`""` when it has
+/// none).
+pub fn read_app_launch_options(account: u64, app_id: &str) -> Result<String, LaunchOptError> {
+    let path = localconfig_path(account)?;
+    let src = fs::read_to_string(&path).map_err(|source| LaunchOptError::Io { path, source })?;
+    Ok(vdf::read_launch_options(&src, app_id)?.unwrap_or_default())
+}
+
+/// Read `app_id`'s launch options on `account`, let `change` compute new
+/// ones (`None`: leave them), and write them — as one step no other edit can
+/// interleave with. Refuses while Steam runs: it would write its own copy
+/// back on exit. Returns `(before, after)` when something was written.
+pub fn update_app_launch_options(
+    account: u64,
+    app_id: &str,
+    change: impl FnOnce(&str) -> Option<String>,
+) -> Result<Option<(String, String)>, LaunchOptError> {
+    let _edit = EDIT.lock().unwrap_or_else(|e| e.into_inner());
+    let path = localconfig_path(account)?;
+    let src = fs::read_to_string(&path).map_err(|source| LaunchOptError::Io {
+        path: path.clone(),
+        source,
+    })?;
+    let before = vdf::read_launch_options(&src, app_id)?.unwrap_or_default();
+    let Some(after) = change(&before).filter(|after| *after != before) else {
+        return Ok(None);
+    };
+    if is_steam_running() {
+        return Err(LaunchOptError::SteamRunning);
+    }
+    let edited = vdf::set_launch_options(&src, app_id, &after)?;
+    write_atomic(&path, edited.as_bytes())?;
+    Ok(Some((before, after)))
+}
+
+/// The Steam Play tool `app_id` runs with (e.g. `GE-Proton10-4`), if
+/// `config.vdf` names one for it or as the global default.
+pub fn compat_tool(app_id: &str) -> Option<String> {
+    let src = fs::read_to_string(config_vdf_path().ok()?).ok()?;
+    vdf::read_compat_tool(&src, app_id).ok().flatten()
 }
 
 /// Steam's built-in experimental Proton branch — present on essentially
@@ -127,17 +187,12 @@ fn config_vdf_path() -> Result<PathBuf, LaunchOptError> {
     Ok(path)
 }
 
-/// Resolve `<steam>/userdata/<account_id>/config/localconfig.vdf` for the most
-/// recently used account.
-fn localconfig_path() -> Result<PathBuf, LaunchOptError> {
+/// Resolve `<steam>/userdata/<account>/config/localconfig.vdf`.
+fn localconfig_path(account: u64) -> Result<PathBuf, LaunchOptError> {
     let steam = steam_install_dir().ok_or(LaunchOptError::SteamIdNotFound)?;
-    let id64: u64 = detect_steam_id()
-        .and_then(|s| s.parse().ok())
-        .ok_or(LaunchOptError::SteamIdNotFound)?;
-    let account_id = id64 - STEAMID64_BASE;
     let path = steam
         .join("userdata")
-        .join(account_id.to_string())
+        .join(account.to_string())
         .join("config/localconfig.vdf");
     if !path.is_file() {
         return Err(LaunchOptError::ConfigNotFound(path));
@@ -172,7 +227,7 @@ pub fn stop_steam_for_config_edit() -> Result<(), LaunchOptError> {
 /// True if the Steam client appears to be running. Scans `/proc/*/comm` for a
 /// process named exactly `steam` (the main client reaper). Conservative: any
 /// read error is treated as "not running" so the check never wrongly blocks.
-fn is_steam_running() -> bool {
+pub fn is_steam_running() -> bool {
     let Ok(entries) = fs::read_dir("/proc") else {
         return false;
     };
