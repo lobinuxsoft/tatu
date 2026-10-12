@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.17.0](https://github.com/lobinuxsoft/tatu/compare/v0.16.0...v0.17.0) (2026-10-12)
+
+
+### Features
+
+* send games to Android (GameNative), PC upscaler tab and perf sessions ([23a81be](https://github.com/lobinuxsoft/tatu/commit/23a81be2bb566be3142e944fa692b9a938d88bb8))
+* **tracker:** send games to Android (GameNative), PC upscaler tab and perf sessions ([d794eb3](https://github.com/lobinuxsoft/tatu/commit/d794eb326c5dc58143472c96116036c37d22d97d))
+
+
+### Bug Fixes
+
+* **tracker:** open the detail window from an async command ([49780a0](https://github.com/lobinuxsoft/tatu/commit/49780a0988631f17350ec9188dcc96c4bd1500a0))
+* **tracker:** read shortcuts.vdf from the tracked Steam account ([eafad0e](https://github.com/lobinuxsoft/tatu/commit/eafad0e55577ac17b5e1c5d16fc19a8dcf5f002a))
+
 ## [0.15.0](https://github.com/lobinuxsoft/tatu/compare/v0.14.1...v0.15.0) (2026-09-18)
 
 
