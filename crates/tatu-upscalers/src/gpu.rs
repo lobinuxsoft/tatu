@@ -167,6 +167,7 @@ fn rdna_from_gc(major: u32, minor: u32) -> Option<u8> {
 
 /// `PCI\VEN_10DE&DEV_2786&SUBSYS_...` → (vendor, device). Anything that isn't
 /// a PCI device (a virtual display) is `None`.
+#[cfg_attr(not(windows), allow(dead_code))]
 fn pci_ids(hardware_id: &str) -> Option<(u16, u16)> {
     let id = hardware_id.to_ascii_uppercase();
     let rest = id.strip_prefix("PCI\\")?;
