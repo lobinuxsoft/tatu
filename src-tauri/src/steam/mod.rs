@@ -27,7 +27,7 @@ pub(crate) use install::{find_install_path, library_paths, steam_install_dir};
 #[cfg(unix)]
 pub(crate) use launch_options::{
     AddOverride, LaunchOptError, LaunchOptOutcome, add_override, compat_tool, current_account,
-    force_proton_compat, get_env, is_steam_running, override_mode, read_app_launch_options,
+    force_proton_compat, get_env, override_mode, read_app_launch_options,
     remove_override, set_env, set_winhttp_override, stop_steam_for_config_edit,
     update_app_launch_options,
 };
