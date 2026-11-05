@@ -1734,6 +1734,12 @@ func _auto_mount_rule_content(uuid: String) -> String:
 	OS.execute("id", ["-g"], gid_out)
 	var gid := String(gid_out[0] if gid_out.size() > 0 else "0").strip_edges()
 	var mount_path := _auto_mount_path(uuid)
+	# /media can be a symlink into /run, which doesn't exist yet at early boot.
+	var real_out := []
+	OS.execute("realpath", ["-m", mount_path], real_out)
+	var real_path := String(real_out[0] if real_out.size() > 0 else "").strip_edges()
+	if real_path.is_empty():
+		real_path = mount_path
 
 	# Raw `mount`, not `udisksctl mount` — confirmed live (2026-09-17) that
 	# udisksctl invoked from udev runs as root with no login session, which
@@ -1760,10 +1766,10 @@ func _auto_mount_rule_content(uuid: String) -> String:
 	# Built by plain concatenation, not the `%` format operator — udev's own
 	# `%E{DEVNAME}`/`%k` placeholder syntax would collide with it.
 	var run_cmd := (
-		"/bin/sh -c '/usr/bin/mkdir -p " + mount_path + "; /usr/bin/mountpoint -q " + mount_path
+		"/bin/sh -c '/usr/bin/mountpoint -q " + real_path
 		+ " || /usr/bin/systemd-run --property=Type=oneshot --property=RemainAfterExit=yes"
-		+ " -- /usr/bin/mount -t ntfs-3g -o uid=" + uid + ",gid=" + gid + ",nodev,nosuid /dev/%k "
-		+ mount_path + "'"
+		+ " -- /usr/bin/mount --mkdir -t ntfs-3g -o uid=" + uid + ",gid=" + gid + ",nodev,nosuid /dev/%k "
+		+ real_path + "'"
 	)
 	# Not scoped by ENV{ID_FS_UUID} like the two RUN+= above — confirmed live
 	# (2026-09-17) that a "remove" event doesn't carry that property at all
@@ -1772,10 +1778,13 @@ func _auto_mount_rule_content(uuid: String) -> String:
 	# every block removal on the system; the script itself is what narrows
 	# it down, only acting if THIS mount point's own source device is the
 	# one that just disappeared.
+	#
+	# `$$` is udev's literal `$`, and a `"` would end the RUN+= value. umount
+	# goes through systemd-run for the same PrivateMounts reason as the mount.
 	var remove_cmd := (
-		"/bin/sh -c 'SRC=$(/usr/bin/findmnt -no SOURCE " + mount_path + " 2>/dev/null);"
-		+ " [ -n \"$SRC\" ] && [ ! -e \"$SRC\" ] && { /usr/bin/umount -l " + mount_path
-		+ "; /usr/bin/rmdir " + mount_path + "; }; exit 0'"
+		"/bin/sh -c 'SRC=$$(/usr/bin/findmnt -no SOURCE " + real_path + " 2>/dev/null);"
+		+ " case $$SRC in /dev/*) [ -e $$SRC ] || /usr/bin/systemd-run --property=Type=oneshot"
+		+ " -- /usr/bin/umount -l " + real_path + ";; esac; exit 0'"
 	)
 	# "add" covers a plain USB drive's physical reconnect; "change" covers a
 	# fixed CFexpress/USB-C reader swapping the card without the USB link
