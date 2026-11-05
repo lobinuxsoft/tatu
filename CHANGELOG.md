@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.18.0](https://github.com/lobinuxsoft/tatu/compare/v0.17.0...v0.18.0) (2026-11-05)
+
+
+### Features
+
+* **launcher:** auto-mount any cartridge by label ([08406ba](https://github.com/lobinuxsoft/tatu/commit/08406ba7f216fb2c013a5bb0e9e5a8930d8a743b))
+
+
+### Bug Fixes
+
+* **launcher:** auto-mount any cartridge, at boot and on removal ([64af8c3](https://github.com/lobinuxsoft/tatu/commit/64af8c3fbf3ec0a722ad13d9c054f2dd32e8f916))
+* **launcher:** mount the cartridge at boot and repair the remove rule ([3eb2c82](https://github.com/lobinuxsoft/tatu/commit/3eb2c828b729a78e00b7943e7667e780993f3841))
+* **steam:** drop unused is_steam_running re-export ([447d55a](https://github.com/lobinuxsoft/tatu/commit/447d55a13c156a86b0ac2a56707d7d51960a05d0))
+* **upscalers:** allow dead pci_ids off Windows ([382b7f1](https://github.com/lobinuxsoft/tatu/commit/382b7f15e13aa36e96b30b5ace093e3098335c50))
+
 ## [0.17.0](https://github.com/lobinuxsoft/tatu/compare/v0.16.0...v0.17.0) (2026-10-12)
 
 
