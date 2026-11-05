@@ -24,6 +24,10 @@ extends Control
 ## duplicate that trust boundary for no benefit.
 
 const MARKER_FILENAME := ".tatu-cartridge.json"
+# Same value as the Rust side's CARTRIDGE_LABEL (marker.rs).
+const CARTRIDGE_LABEL := "64M3_C4R7R1D63"
+# Per-UUID rules from earlier versions; a glob, so it stays unquoted in sh.
+const AUTO_MOUNT_OLD_RULES := "/etc/udev/rules.d/99-tatu-cartridge-*.rules"
 const IMAGE_EXTENSIONS: Array[String] = ["png", "jpg", "jpeg", "webp"]
 # Opt-in trailer (#212), Ogg Theora — the only video format Godot 4 plays
 # natively. Absent for most games unless the user checked "Incluir
@@ -618,7 +622,7 @@ func _build_layout() -> void:
 	mount_box.alignment = BoxContainer.ALIGNMENT_CENTER
 	mount_box.add_theme_constant_override("separation", 12)
 	_mount_prompt_text = Label.new()
-	_mount_prompt_text.text = "Este cartucho no se monta solo en esta PC.\nTatu puede configurar una excepción para que se monte\nautomáticamente la próxima vez (pedirá tu contraseña de administrador).\n¿Configurar ahora?"
+	_mount_prompt_text.text = "Los cartuchos no se montan solos en esta PC.\nTatu puede configurar una excepción para que se monten\nautomáticamente la próxima vez (pedirá tu contraseña de administrador).\n¿Configurar ahora?"
 	_mount_prompt_text.add_theme_font_override("font", load(FONT_BODY))
 	_mount_prompt_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_mount_prompt_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -1667,10 +1671,10 @@ func _ensure_ntfs_symlinks() -> void:
 ## partition already gets a drive letter automatically, so there's no
 ## exception to grant there.
 ##
-## Per-cartridge, keyed by the filesystem's own UUID (assigned per-format,
-## never per-label) — two cartridges sharing the same volume LABEL still
-## get separate rules and separate consent. Per-machine too: the rule file
-## lives on this PC's disk, never written to the cartridge itself.
+## One rule per machine, matched by the cartridge label, so any cartridge in
+## any reader or USB drive mounts after a single consent. Each one still gets
+## its own path from the filesystem UUID, which Steam's registration relies on.
+## The rule file lives on this PC's disk, never on the cartridge itself.
 ##
 ## Toggled from its own button (RB/R1, card_toggle_automount), independent
 ## of "Agregar a Steam" — live-reported (2026-09-18): a cartridge that's
@@ -1685,8 +1689,8 @@ func _toggle_auto_mount_rule() -> void:
 	if uuid.is_empty():
 		return
 
-	var rule_path := _auto_mount_rule_path(uuid)
-	var rule_content := _auto_mount_rule_content(uuid)
+	var rule_path := _auto_mount_rule_path()
+	var rule_content := _auto_mount_rule_content()
 	var configured := (
 		FileAccess.file_exists(rule_path)
 		and FileAccess.get_file_as_string(rule_path) == rule_content
@@ -1706,8 +1710,8 @@ func _resolve_steam_mount_point(mount_point: String) -> String:
 	var uuid := _cartridge_fs_uuid(mount_point)
 	if uuid.is_empty():
 		return mount_point
-	var rule_path := _auto_mount_rule_path(uuid)
-	if FileAccess.file_exists(rule_path) and FileAccess.get_file_as_string(rule_path) == _auto_mount_rule_content(uuid):
+	var rule_path := _auto_mount_rule_path()
+	if FileAccess.file_exists(rule_path) and FileAccess.get_file_as_string(rule_path) == _auto_mount_rule_content():
 		return _auto_mount_path(uuid)
 	return mount_point
 
@@ -1716,8 +1720,8 @@ func _cartridge_fs_uuid(mount_point: String) -> String:
 	OS.execute("findmnt", ["-no", "UUID", mount_point], uuid_out)
 	return String(uuid_out[0] if uuid_out.size() > 0 else "").strip_edges()
 
-func _auto_mount_rule_path(uuid: String) -> String:
-	return "/etc/udev/rules.d/99-tatu-cartridge-" + uuid + ".rules"
+func _auto_mount_rule_path() -> String:
+	return "/etc/udev/rules.d/99-tatu-cartridge.rules"
 
 ## Fixed per-UUID path, not udisksd's own `/run/media/<user>/<label>`
 ## convention — every reconnect lands at this SAME path once granted, so
@@ -1726,20 +1730,21 @@ func _auto_mount_rule_path(uuid: String) -> String:
 func _auto_mount_path(uuid: String) -> String:
 	return "/media/tatu-cartridge-" + uuid
 
-func _auto_mount_rule_content(uuid: String) -> String:
+func _auto_mount_rule_content() -> String:
 	var uid_out := []
 	OS.execute("id", ["-u"], uid_out)
 	var uid := String(uid_out[0] if uid_out.size() > 0 else "0").strip_edges()
 	var gid_out := []
 	OS.execute("id", ["-g"], gid_out)
 	var gid := String(gid_out[0] if gid_out.size() > 0 else "0").strip_edges()
-	var mount_path := _auto_mount_path(uuid)
+	var mount_prefix := _auto_mount_path("")
 	# /media can be a symlink into /run, which doesn't exist yet at early boot.
 	var real_out := []
-	OS.execute("realpath", ["-m", mount_path], real_out)
-	var real_path := String(real_out[0] if real_out.size() > 0 else "").strip_edges()
-	if real_path.is_empty():
-		real_path = mount_path
+	OS.execute("realpath", ["-m", mount_prefix], real_out)
+	var real_prefix := String(real_out[0] if real_out.size() > 0 else "").strip_edges()
+	if real_prefix.is_empty():
+		real_prefix = mount_prefix
+	var real_path := real_prefix + "%E{ID_FS_UUID}"
 
 	# Raw `mount`, not `udisksctl mount` — confirmed live (2026-09-17) that
 	# udisksctl invoked from udev runs as root with no login session, which
@@ -1765,13 +1770,13 @@ func _auto_mount_rule_content(uuid: String) -> String:
 	#
 	# Built by plain concatenation, not the `%` format operator — udev's own
 	# `%E{DEVNAME}`/`%k` placeholder syntax would collide with it.
-	var run_cmd := (
+	var run_prefix := (
 		"/bin/sh -c '/usr/bin/mountpoint -q " + real_path
 		+ " || /usr/bin/systemd-run --property=Type=oneshot --property=RemainAfterExit=yes"
-		+ " -- /usr/bin/mount --mkdir -t ntfs-3g -o uid=" + uid + ",gid=" + gid + ",nodev,nosuid /dev/%k "
-		+ real_path + "'"
+		+ " -- /usr/bin/mount --mkdir -t "
 	)
-	# Not scoped by ENV{ID_FS_UUID} like the two RUN+= above — confirmed live
+	var run_suffix := " -o uid=" + uid + ",gid=" + gid + ",nodev,nosuid /dev/%k " + real_path + "'"
+	# Not scoped by ENV{ID_FS_UUID} like the rules above — confirmed live
 	# (2026-09-17) that a "remove" event doesn't carry that property at all
 	# (blkid only ever populates it on add/change), so a UUID-scoped remove
 	# rule silently never matches. Scoped by SUBSYSTEM instead, firing on
@@ -1782,9 +1787,9 @@ func _auto_mount_rule_content(uuid: String) -> String:
 	# `$$` is udev's literal `$`, and a `"` would end the RUN+= value. umount
 	# goes through systemd-run for the same PrivateMounts reason as the mount.
 	var remove_cmd := (
-		"/bin/sh -c 'SRC=$$(/usr/bin/findmnt -no SOURCE " + real_path + " 2>/dev/null);"
+		"/bin/sh -c 'for P in " + real_prefix + "*; do SRC=$$(/usr/bin/findmnt -no SOURCE $$P 2>/dev/null);"
 		+ " case $$SRC in /dev/*) [ -e $$SRC ] || /usr/bin/systemd-run --property=Type=oneshot"
-		+ " -- /usr/bin/umount -l " + real_path + ";; esac; exit 0'"
+		+ " -- /usr/bin/umount -l $$P;; esac; done; exit 0'"
 	)
 	# "add" covers a plain USB drive's physical reconnect; "change" covers a
 	# fixed CFexpress/USB-C reader swapping the card without the USB link
@@ -1792,14 +1797,15 @@ func _auto_mount_rule_content(uuid: String) -> String:
 	# at all for that case, only "change" once the kernel noticed new
 	# media); "remove" tears the mount point back down so a later re-add/
 	# change doesn't find it busy or stale.
+	var match_label := 'ACTION=="add|change", ENV{ID_FS_LABEL}=="' + CARTRIDGE_LABEL + '", '
 	return (
-		'ACTION=="add", ENV{ID_FS_UUID}=="' + uuid + '", RUN+="' + run_cmd + '"\n'
-		+ 'ACTION=="change", ENV{ID_FS_UUID}=="' + uuid + '", RUN+="' + run_cmd + '"\n'
+		match_label + 'ENV{ID_FS_TYPE}=="ntfs", RUN+="' + run_prefix + 'ntfs-3g' + run_suffix + '"\n'
+		+ match_label + 'ENV{ID_FS_TYPE}=="exfat", RUN+="' + run_prefix + 'exfat' + run_suffix + '"\n'
 		+ 'ACTION=="remove", SUBSYSTEM=="block", RUN+="' + remove_cmd + '"\n'
 	)
 
 func _offer_grant_auto_mount(rule_path: String, rule_content: String) -> void:
-	_mount_prompt_text.text = "Este cartucho no se monta solo en esta PC.\nTatu puede configurar una excepción para que se monte\nautomáticamente la próxima vez (pedirá tu contraseña de administrador).\n¿Configurar ahora?"
+	_mount_prompt_text.text = "Los cartuchos no se montan solos en esta PC.\nTatu puede configurar una excepción para que se monten\nautomáticamente la próxima vez (pedirá tu contraseña de administrador).\n¿Configurar ahora?"
 	_mount_prompt_options[0].text = "Sí, configurar"
 	_mount_prompt_options[1].text = "No, ahora no"
 	if not await _show_mount_prompt():
@@ -1819,14 +1825,14 @@ func _offer_grant_auto_mount(rule_path: String, rule_content: String) -> void:
 	# asking twice for what's conceptually one action. `--settle` blocks
 	# until the triggered rule's own RUN+= (this same mount) finishes, so
 	# the fixed path is already live once this returns.
-	var cmd := "install -m 0644 " + _sh_quote(tmp) + " " + _sh_quote(rule_path) + " && udevadm control --reload-rules && udevadm trigger --settle"
+	var cmd := "rm -f " + AUTO_MOUNT_OLD_RULES + " && install -m 0644 " + _sh_quote(tmp) + " " + _sh_quote(rule_path) + " && udevadm control --reload-rules && udevadm trigger --settle"
 	OS.execute("pkexec", ["/bin/sh", "-c", cmd])
 	DirAccess.remove_absolute(tmp)
 	_action_overlay.visible = false
 	await _show_status("Auto-montaje configurado", 2.0)
 
 func _offer_revert_auto_mount(rule_path: String) -> void:
-	_mount_prompt_text.text = "Este cartucho ya se monta solo en esta PC.\n¿Revertir el auto-montaje? La próxima vez\nvas a tener que montarlo a mano de nuevo."
+	_mount_prompt_text.text = "Los cartuchos ya se montan solos en esta PC.\n¿Revertir el auto-montaje? La próxima vez\nvas a tener que montarlos a mano de nuevo."
 	_mount_prompt_options[0].text = "Sí, revertir"
 	_mount_prompt_options[1].text = "No, dejarlo así"
 	if not await _show_mount_prompt():
@@ -1836,7 +1842,7 @@ func _offer_revert_auto_mount(rule_path: String) -> void:
 	_action_overlay.visible = true
 	await get_tree().process_frame
 
-	OS.execute("pkexec", ["/bin/sh", "-c", "rm -f " + _sh_quote(rule_path) + " && udevadm control --reload-rules"])
+	OS.execute("pkexec", ["/bin/sh", "-c", "rm -f " + AUTO_MOUNT_OLD_RULES + " " + _sh_quote(rule_path) + " && udevadm control --reload-rules"])
 	_action_overlay.visible = false
 	await _show_status("Auto-montaje revertido", 2.0)
 
