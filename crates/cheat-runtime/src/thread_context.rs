@@ -129,8 +129,8 @@ pub fn get_thread_context(tid: Pid, flags: ContextFlags) -> Result<ThreadContext
     }
 
     if flags.contains(ContextFlags::DEBUG_REGISTERS) {
-        for i in 0..8 {
-            ctx.dr[i] = read_debug_register(tid, i)?;
+        for (i, reg) in ctx.dr.iter_mut().enumerate().take(8) {
+            *reg = read_debug_register(tid, i)?;
         }
         ctx.populated.0 |= ContextFlags::DEBUG_REGISTERS.0;
     }

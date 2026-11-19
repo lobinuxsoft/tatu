@@ -106,6 +106,7 @@ macro_rules! tracker_handler {
             commands::cartridge_cmd::fetch_cartridge_trailer,
             commands::cartridge_cmd::bundle_linux_runtime,
             commands::cartridge_cmd::uninstall_from_cartridge,
+            commands::cartridge_cmd::remove_from_cartridge,
             commands::cartridge_cmd::install_non_steam_to_cartridge,
             commands::cartridge_cmd::fetch_non_steam_cartridge_art,
             commands::cartridge_cmd::fetch_non_steam_cartridge_description,
