@@ -11,6 +11,7 @@ mod launcher;
 mod marker;
 mod non_steam;
 mod prepare;
+mod remove;
 mod runtime;
 mod usage;
 
@@ -50,6 +51,7 @@ pub use marker::{
 };
 pub use non_steam::{add_non_steam_app, install_size};
 pub use prepare::{PrepareDrmResult, refresh_drm_and_inject};
+pub use remove::remove_from_cartridge;
 pub use runtime::bundle_linux_runtime;
 #[cfg(unix)]
 pub use symlinks::{SymlinksOutcome, ensure_symlinks};

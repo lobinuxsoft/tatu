@@ -451,6 +451,17 @@ pub fn uninstall_from_cartridge(app_id: u64, mount_point: String) -> Result<(), 
     cartridge::uninstall_from_cartridge(Path::new(&mount_point), app_id)
 }
 
+/// Removes one game's files and marker entry from the cartridge (#382).
+/// `spawn_blocking`d: deleting a game folder on a USB drive is slow I/O.
+#[tauri::command]
+pub async fn remove_from_cartridge(app_id: u64, mount_point: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        cartridge::remove_from_cartridge(Path::new(&mount_point), app_id)
+    })
+    .await
+    .map_err(|e| format!("Task error: {e}"))?
+}
+
 /// Copies a non-Steam game's whole install folder onto the cartridge
 /// (#236) — `non_steam_id` is the shortcut id from `state.non_steam`
 /// (#186's `sync_nonsteam`), not a Steam appid. `spawn_blocking`d: a real
