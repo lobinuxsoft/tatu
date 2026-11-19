@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.19.0](https://github.com/lobinuxsoft/tatu/compare/v0.18.0...v0.19.0) (2026-11-19)
+
+
+### Features
+
+* **cartridge:** remove games already on the cartridge from the Cartucho tab ([1cb8b6e](https://github.com/lobinuxsoft/tatu/commit/1cb8b6e2ef398d6e0572be6ef57119566cdbba2a))
+* **cartridge:** remove games already on the cartridge from the Cartucho tab ([9261f77](https://github.com/lobinuxsoft/tatu/commit/9261f77f1e74ef3f92aac908c7695a7b679c897b))
+
+
+### Bug Fixes
+
+* **cheat-runtime:** iterate debug registers instead of indexing ([f25c80d](https://github.com/lobinuxsoft/tatu/commit/f25c80d50c504ab46c91fa6ede84c40f3e5f15e4))
+* **engine:** sort ct_audit summary by key ([140ae4b](https://github.com/lobinuxsoft/tatu/commit/140ae4b7a288305e54093c7f5f9d183e16855fc7))
+
 ## [0.18.0](https://github.com/lobinuxsoft/tatu/compare/v0.17.0...v0.18.0) (2026-11-05)
 
 
