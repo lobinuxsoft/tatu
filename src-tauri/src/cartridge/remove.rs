@@ -19,7 +19,17 @@ pub fn remove_from_cartridge(mount_point: &Path, app_id: u64) -> Result<(), Stri
         AppSource::NonSteam => remove_folder(mount_point, "NON-STEAM", &app)?,
         AppSource::Egs => remove_folder(mount_point, "EGS", &app)?,
     }
+    remove_assets(mount_point, app_id)?;
     remove_apps(mount_point, &[app_id])
+}
+
+/// Art, description, screenshots and trailer live in `assets/<app_id>/`.
+fn remove_assets(mount_point: &Path, app_id: u64) -> Result<(), String> {
+    let dir = mount_point.join("assets").join(app_id.to_string());
+    if dir.is_dir() {
+        fs::remove_dir_all(&dir).map_err(|e| format!("Cannot remove {}: {e}", dir.display()))?;
+    }
+    Ok(())
 }
 
 /// A Steam install that never finished has no manifest yet; its entry still
