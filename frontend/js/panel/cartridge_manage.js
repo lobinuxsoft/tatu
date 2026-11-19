@@ -163,7 +163,7 @@ function renderAppRows(apps) {
       const standalone = app.standalone ? " · standalone" : "";
       return (
         `<div class="collection-row" data-app-id="${app.app_id}">` +
-        `<input type="checkbox" data-remove-pick title="Seleccionar para quitar">` +
+        `<input type="checkbox" class="cartridge-pick" data-remove-pick title="Seleccionar para quitar">` +
         `<span class="collection-name">${esc(app.name)}</span>` +
         `<span class="collection-count">${pres}${standalone}</span>` +
         `<span class="cartridge-reorder-btns">` +
