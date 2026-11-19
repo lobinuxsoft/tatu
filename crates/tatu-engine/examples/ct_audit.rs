@@ -123,7 +123,7 @@ fn main() {
     );
 
     println!("--- per-file ---");
-    per_file_summary.sort_by(|a, b| b.1.cmp(&a.1));
+    per_file_summary.sort_by_key(|f| std::cmp::Reverse(f.1));
     for (name, total, ok, err) in &per_file_summary {
         println!("  {name:<40}  scripts={total:>4}  ok={ok:>4}  err={err:>3}");
     }
