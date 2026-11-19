@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.19.1](https://github.com/lobinuxsoft/tatu/compare/v0.19.0...v0.19.1) (2026-11-19)
+
+
+### Bug Fixes
+
+* **cartridge:** make the remove checkbox visible ([a8741af](https://github.com/lobinuxsoft/tatu/commit/a8741afb59d28f0f971fb4f21ad212b811b1ed47))
+* **cartridge:** make the remove checkbox visible ([dccdee4](https://github.com/lobinuxsoft/tatu/commit/dccdee4aa14290843acde14e7c79c07218efdf4e))
+
 ## [0.19.0](https://github.com/lobinuxsoft/tatu/compare/v0.18.0...v0.19.0) (2026-11-19)
 
 
