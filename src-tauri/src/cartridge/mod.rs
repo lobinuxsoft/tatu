@@ -11,6 +11,7 @@ mod launcher;
 mod marker;
 mod non_steam;
 mod prepare;
+mod remove;
 mod runtime;
 mod usage;
 
@@ -45,6 +46,7 @@ pub use install::{
     sync_marker_with_installed_apps, uninstall_from_cartridge,
 };
 pub use launcher::install_launcher_binaries;
+pub use remove::remove_from_cartridge;
 pub use marker::{
     AppSource, CartridgeApp, add_app, has_cartridge_structure, list_apps, reorder_apps,
 };

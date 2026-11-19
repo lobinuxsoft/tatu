@@ -163,6 +163,7 @@ function renderAppRows(apps) {
       const standalone = app.standalone ? " · standalone" : "";
       return (
         `<div class="collection-row" data-app-id="${app.app_id}">` +
+        `<input type="checkbox" data-remove-pick title="Seleccionar para quitar">` +
         `<span class="collection-name">${esc(app.name)}</span>` +
         `<span class="collection-count">${pres}${standalone}</span>` +
         `<span class="cartridge-reorder-btns">` +
@@ -193,6 +194,7 @@ function renderCartridge(drive, apps, usage) {
     // only way to wipe and redo one before this was unplugging it and
     // re-triggering the per-game install flow from scratch.
     `<button class="cartridge-btn-secondary" id="cartReformatBtn">Reformatear</button>` +
+    `<button class="cartridge-btn-secondary" id="cartRemoveBtn" disabled>Quitar seleccionados</button>` +
     `<button class="cartridge-btn" id="cartPrepareBtn">Preparar launcher</button>` +
     `</div>` +
     `<div id="cartPrepareResult"></div>`;
@@ -203,6 +205,11 @@ function renderCartridge(drive, apps, usage) {
     prepareLauncher(drive, apps, document.getElementById("cartIncludeTrailers").checked);
 
   const rowsEl = document.getElementById("cartAppRows");
+  const removeBtn = document.getElementById("cartRemoveBtn");
+  const picked = () => [...rowsEl.querySelectorAll("[data-remove-pick]:checked")]
+    .map(c => Number(c.closest(".collection-row").dataset.appId));
+  rowsEl.onchange = () => { removeBtn.disabled = picked().length === 0; };
+  removeBtn.onclick = () => removeApps(drive, apps, picked());
   rowsEl.onclick = async e => {
     const btn = e.target.closest("[data-reorder]");
     if (!btn || btn.disabled) return;
@@ -230,6 +237,35 @@ function renderCartridge(drive, apps, usage) {
       );
     }
   };
+}
+
+// One failing game (files in use, drive hiccup) must not abort the rest, so
+// each id is its own call and the failures are listed afterwards (#382).
+async function removeApps(drive, apps, ids) {
+  const names = ids.map(id => apps.find(a => a.app_id === id)?.name ?? id);
+  const free = (await invoke("get_cartridge_usage", { mountPoint: drive.mount_point }).catch(() => null))
+    ?.apps.filter(a => ids.includes(a.app_id)).reduce((n, a) => n + a.bytes, 0);
+  const size = free ? ` Se liberan ~${formatBytes(free)}.` : "";
+  if (!confirm(`¿Quitar del cartucho ${names.join(", ")}?${size} Se borran los archivos del juego y no se puede deshacer.`)) return;
+
+  const btn = document.getElementById("cartRemoveBtn");
+  btn.disabled = true;
+  btn.textContent = "Quitando...";
+  const failed = [];
+  for (const id of ids) {
+    try {
+      await invoke("remove_from_cartridge", { appId: id, mountPoint: drive.mount_point });
+    } catch (err) {
+      failed.push(`${apps.find(a => a.app_id === id)?.name ?? id}: ${err}`);
+    }
+  }
+  await showCartridge(drive);
+  if (failed.length) {
+    document.getElementById("cartAppRows")?.insertAdjacentHTML(
+      "afterend",
+      `<div class="cartridge-warn">No se pudo quitar: ${failed.map(esc).join(" · ")}</div>`
+    );
+  }
 }
 
 // Everything that's shared by the WHOLE cartridge rather than tied to one
