@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.19.2](https://github.com/lobinuxsoft/tatu/compare/v0.19.1...v0.19.2) (2026-11-19)
+
+
+### Bug Fixes
+
+* **cartridge:** remove the game's art and trailer with it ([923fa76](https://github.com/lobinuxsoft/tatu/commit/923fa76f4f55f0fc35b4a3b51660461b5b91bb63))
+* **cartridge:** remove the game's art and trailer with it ([d37f95f](https://github.com/lobinuxsoft/tatu/commit/d37f95f2f6f3429fde8e1c7d7dc164b8d5e9e8da))
+
 ## [0.19.1](https://github.com/lobinuxsoft/tatu/compare/v0.19.0...v0.19.1) (2026-11-19)
 
 
